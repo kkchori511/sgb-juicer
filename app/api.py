@@ -17,6 +17,7 @@ import webview
 from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, export, ocr, openrouter, prompts, roster, scan, updater, weights
 from .records import Records, items_of
 from .inbox import Inbox
+from .standards import Standards, check_level, read_hwpx_text, read_pdf_text, standards_rule
 from .paths import data_dir
 from .textutil import count_bytes
 
@@ -436,9 +437,13 @@ class Api:
         final = None
         if f:
             final = {**f, "closed": bool(f["closed"]), "stale": bool(f["stale"]), "bytes": count_bytes(f["text"])}
+        std = None
+        if g["kind"] == "subject":
+            st = Standards(d).get(gid)
+            std = {"text": st["text"], "level_scale": g["level_scale"] or 5}
         return {"student": m, "target": target, "records": rec.records(gid, item, sno),
                 "results": rec.slot_results(gid, item, sno), "final": final, "tags": rec.tags(),
-                "weight_sum_check": config.load()["weight_sum_check"]}
+                "weight_sum_check": config.load()["weight_sum_check"], "standards": std}
 
     @safe
     def add_record(self, gid, item, sno, data):
@@ -591,11 +596,13 @@ class Api:
         return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
 
     @safe
-    def ai_synth(self, gid, item, sno, record_ids, weights_map=None, model_index=None, sum_check=None):
-        """선택한 기록들을 비중대로 종합 → 학생×항목 후보. 학번·이름 없이 내용과 비율만 보낸다."""
+    def ai_synth(self, gid, item, sno, record_ids, weights_map=None, model_index=None, sum_check=None, std=None):
+        """선택한 기록들을 비중대로 종합 → 학생×항목 후보. 학번·이름 없이 내용과 비율만 보낸다.
+        std(세특만): {"text": 이번에 쓸 성취기준, "level": 성취수준} — 있으면 성취기준 관점·수준 반영."""
         self._editable()
         rec = self._rec()
         g, target = rec.slot(gid, item)
+        std_rule, std_meta = self._std_rule(g, item, std, only=False)
         rec.require_open(gid, item, sno)
         rec.check_room(gid, item, sno)
         ids = [int(x) for x in record_ids or []]
@@ -612,7 +619,7 @@ class Api:
         check = cfg["weight_sum_check"] if sum_check is None else bool(sum_check)
         ratios = weights.compute([{"bytes": r["bytes"], "weight": r["weight"]} for r in chosen], check)
         pr = prompts.merged(cfg["prompts"])[item]["synth"]
-        system = prompts.build_system(pr["prompt"], pr["example"], target)
+        system = prompts.build_system(pr["prompt"] + std_rule, pr["example"], target)
         user = prompts.build_synth_user([{"text": r["content"], "ratio": q} for r, q in zip(chosen, ratios)], target)
         key = ("slot", int(gid), item, str(sno))
         self._guard(key)
@@ -621,9 +628,70 @@ class Api:
         finally:
             self._release(key)
         meta = {"model": model, "op": "synth", "prompt": pr["prompt"], "example": pr["example"], "target": target,
-                "record_ids": [r["id"] for r in chosen], "ratios": [round(q * 100, 1) for q in ratios], "sum_check": check}
+                "record_ids": [r["id"] for r in chosen], "ratios": [round(q * 100, 1) for q in ratios], "sum_check": check, **std_meta}
         nid, dropped = rec.add_result(gid, item, sno, "synth", text, meta, cost)
         return self._ai_out({"id": nid, "dropped": dropped, "cost": cost, "ratios": meta["ratios"]})
+
+    def _std_rule(self, g, item, std, only):
+        if not std or not (std.get("text") or "").strip():
+            if only:
+                raise db.DbError("성취기준이 비어 있습니다. 메뉴의 [성취기준]에서 먼저 넣어 주세요.")
+            return "", {}
+        if item != "subject":
+            raise db.DbError("성취기준은 과목 세특에서만 쓸 수 있습니다.")
+        level = check_level(std.get("level"), g["level_scale"] or 5)
+        if only and not level:
+            raise db.DbError("성취기준만으로 만들 때는 성취수준을 골라 주세요.")
+        return (standards_rule(std["text"], level, g["level_scale"] or 5, only),
+                {"standards": True, "level": level, "basis": "standards_only" if only else "records+standards"})
+
+    @safe
+    def ai_standards_only(self, gid, item, sno, std, model_index=None):
+        """기록이 없는 학생: 성취기준(과 성취수준)만으로 세특 후보를 만든다. 학번·이름은 보내지 않는다."""
+        self._editable()
+        rec = self._rec()
+        g, target = rec.slot(gid, item)
+        rec.require_open(gid, item, sno)
+        rec.check_room(gid, item, sno)
+        rule, meta = self._std_rule(g, item, std, only=True)
+        cfg, model = self._model(model_index)
+        pr = prompts.merged(cfg["prompts"])[item]["synth"]
+        key = ("slot", int(gid), item, str(sno))
+        self._guard(key)
+        try:
+            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"] + rule, pr["example"], target),
+                                       "(누가기록 없음 — 성취기준과 성취수준으로만 작성)", cfg["privacy_block"])
+        finally:
+            self._release(key)
+        meta.update({"model": model, "op": "synth", "prompt": pr["prompt"], "example": pr["example"], "target": target})
+        nid, dropped = rec.add_result(gid, item, sno, "synth", text, meta, cost)
+        return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
+
+    # ---------- 성취기준 ----------
+    @safe
+    def standards_overview(self):
+        return {"subjects": Standards(self._db()).overview()}
+
+    @safe
+    def standards_get(self, gid):
+        return Standards(self._db()).get(gid)
+
+    @safe
+    def standards_save(self, gid, text, source=None):
+        self._editable()
+        Standards(self._db()).save(gid, text, source)
+        return {}
+
+    @safe
+    def standards_read_file(self, kind):
+        """PDF(글자 있는 문서) 또는 hwpx에서 글자를 읽어 돌려준다. 저장은 화면에서 확인 뒤."""
+        types = ("PDF 파일 (*.pdf)",) if kind == "pdf" else ("한글 문서 (*.hwpx)",)
+        res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=types)
+        if not res:
+            return {"ok": False, "cancelled": True}
+        path = res[0] if isinstance(res, (list, tuple)) else res
+        text = read_pdf_text(path) if kind == "pdf" else read_hwpx_text(path)
+        return {"text": text, "file": os.path.basename(path)}
 
     @safe
     def ai_polish_final(self, gid, item, sno, model_index=None):

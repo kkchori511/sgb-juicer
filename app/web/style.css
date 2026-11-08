@@ -425,3 +425,7 @@ tr.row-pending td { background: var(--warn-bg); }
 .prog-overlay .modal-box { width: min(440px, 92vw); text-align: center; }
 .return-bar { display: flex; align-items: center; gap: 10px; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-sm); padding: 8px 12px; margin-bottom: 12px; font-weight: 700; }
 .toolbar select { width: auto; height: 34px; padding: 3px 8px; }
+.panel[data-panel-content="standards"].active { display: block; height: calc(100vh - var(--topbar-h) - 58px); }
+#stdText { min-height: 320px; height: calc(100vh - 390px); font-size: 14px; }
+.badge.std { background: #e6f2ff; border-color: #9cc3f5; color: #1d4fd0; }
+.badge.stdonly { background: #fff1d6; border-color: #f0cf5a; color: #8a5a00; }

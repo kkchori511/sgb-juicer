@@ -4,6 +4,7 @@ v1: 역할·담당(학급/과목/동아리)·학생·소속(명렬)·일정.
 v2: 태그·누가기록·AI 결과 후보·최종안(마감). 기록 다루는 함수는 records.py.
 v3: 자료 인박스(묶음·행·정제 후보). 다루는 함수는 inbox.py.
 v4: 인박스 행에 원본 페이지 번호(pages) — 스캔 PDF 원본 보기용.
+v5: 과목별 성취기준(standards).
 """
 import re
 import sqlite3
@@ -12,7 +13,7 @@ from contextlib import contextmanager
 
 from .paths import data_dir
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 KINDS = ("homeroom", "subject", "club")
 ROLES = ("homeroom", "subject")  # 담임 / 비담임
 
@@ -142,6 +143,12 @@ CREATE TABLE IF NOT EXISTS inbox_cands (
     meta TEXT DEFAULT '{}',
     cost REAL DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS standards (
+    group_id INTEGER PRIMARY KEY REFERENCES groups(id) ON DELETE CASCADE,
+    text TEXT NOT NULL DEFAULT '',   -- 성취기준·성취수준 설명(선생님이 고친 최종본)
+    source TEXT DEFAULT '',          -- 마지막으로 가져온 곳(붙여넣기/파일 이름)
+    updated_at TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS schedules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -330,6 +337,7 @@ class YearDb:
             c.execute("DELETE FROM results WHERE group_id=?", (int(gid),))
             c.execute("DELETE FROM finals WHERE group_id=?", (int(gid),))
             c.execute("DELETE FROM records WHERE group_id=?", (int(gid),))
+            c.execute("DELETE FROM standards WHERE group_id=?", (int(gid),))
             c.execute("DELETE FROM groups WHERE id=?", (int(gid),))
             c.execute("DELETE FROM students WHERE student_no NOT IN (SELECT student_no FROM memberships)")
 

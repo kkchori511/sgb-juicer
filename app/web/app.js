@@ -131,6 +131,7 @@
     if (name === 'export') renderExport();
     if (name === 'tags') renderTags();
     if (name === 'inbox') renderInbox();
+    if (name === 'standards') renderStandards();
   }
   function setCollapsed(v) {
     $('app').classList.toggle('collapsed', v);
@@ -171,6 +172,7 @@
     if (panel === 'export') renderExport();
     if (panel === 'tags') renderTags();
     if (panel === 'inbox') { IB.bid = null; renderInbox(); }
+    if (panel === 'standards') { SD.gid = null; renderStandards(); }
     refreshInboxBadge();
   }
   function visibleGroups() {
@@ -1246,6 +1248,7 @@
       el('button', { type: 'button', class: 'primary', disabled: locked, text: '+ 누가기록', onclick: () => recordForm(null, 'record') }),
       el('button', { type: 'button', disabled: locked, text: '이미 쓴 생기부 넣기', onclick: () => recordForm(null, 'existing') }),
       el('button', { type: 'button', disabled: !!ys.archived, title: '여러 학생의 이미 쓴 생기부를 엑셀에서 한 번에', text: '여러 학생 일괄 넣기', onclick: openExistingBulk }),
+      R.slot.item === 'subject' ? el('button', { type: 'button', disabled: locked, title: '누가기록이 없는 학생을 성취기준과 성취수준으로', text: '성취기준만으로 생성', onclick: standardsOnlyDialog }) : null,
     ]);
     box.appendChild(head);
     if (locked && !ys.archived) box.appendChild(el('div', { class: 'stale', text: '● 마감된 항목입니다. 고치려면 오른쪽 [마감 해제]를 누르세요.' }));
@@ -1258,7 +1261,7 @@
       el('button', { type: 'button', disabled: locked || !sel.length, text: '태그 일괄 지정', onclick: bulkTag }),
     ]));
     if (!v.records.length) {
-      box.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '아직 기록이 없습니다.' }), el('p', { class: 'hint', text: '[+ 누가기록]으로 활동을 하나씩 쌓거나, 이미 쓴 생기부를 넣어 다듬을 수 있습니다. 여러 학생의 엑셀 자료는 자료 인박스에서 학생별로 나눠 한 번에 보낼 수 있습니다.' })]));
+      box.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '아직 기록이 없습니다.' }), R.slot.item === 'subject' ? el('button', { type: 'button', class: 'primary', disabled: locked, text: '기록 없이 성취기준만으로 생성', onclick: standardsOnlyDialog }) : null, el('p', { class: 'hint', text: '[+ 누가기록]으로 활동을 하나씩 쌓거나, 이미 쓴 생기부를 넣어 다듬을 수 있습니다. 여러 학생의 엑셀 자료는 자료 인박스에서 학생별로 나눠 한 번에 보낼 수 있습니다.' })]));
       return;
     }
     v.records.forEach((r) => box.appendChild(recordCard(r, locked)));
@@ -1299,7 +1302,7 @@
   }
   function candEl(cd, locked, extra) {
     return el('div', { class: 'cand' + (cd.locked ? ' locked' : '') }, [
-      el('div', { class: 'cand-head' }, [el('b', { text: OP_LABEL[cd.op] || cd.op }), cd.created_at.slice(5, 16), cd.meta.model ? `· ${cd.meta.model}` : '',
+      el('div', { class: 'cand-head' }, [el('b', { text: OP_LABEL[cd.op] || cd.op }), stdBadge(cd.meta), cd.created_at.slice(5, 16), cd.meta.model ? `· ${cd.meta.model}` : '',
         cd.meta.ratios ? `· 비율 ${cd.meta.ratios.join('/')}%` : '', el('span', { class: 'spacer' }), bytesEl(cd.bytes, R.target)]),
       el('div', { class: 'cand-body', text: cd.text }),
       el('div', { class: 'rcard-foot' }, [...(extra || []), el('span', { class: 'spacer' }),
@@ -1430,13 +1433,20 @@
       const model = el('select', {});
       fillModelSelect(model);
       model.value = $('recModel').value;
+      const hasStd = R.slot.item === 'subject' && R.view.standards;
+      const stdChk = hasStd ? el('input', { type: 'checkbox', disabled: !R.view.standards.text.trim() }) : null;
+      const stdLvl = hasStd ? levelSelect(R.view.standards.level_scale, R.view.student.level) : null;
+      const stdTa = hasStd ? el('textarea', { class: 'fill', rows: 7, value: R.view.standards.text }) : null;
+      const stdBox = hasStd ? el('div', { hidden: true }, [el('div', { class: 'col-label', text: '이번에 쓸 성취기준 (필요한 부분만 남겨도 됩니다)' }), stdTa]) : null;
+      if (stdChk) stdChk.addEventListener('change', () => { stdBox.hidden = !stdChk.checked; });
       const pp = el('textarea', { class: 'fill', rows: 9, value: p.prompt });
       const pe = el('textarea', { class: 'fill', rows: 9, value: p.example, placeholder: '원하는 결과 모양의 문장(비우면 지침만 보냄)' });
       runBtn.addEventListener('click', async () => {
         if (pp.value !== p.prompt || pe.value !== p.example) await call('prompts_save', R.slot.item, 'synth', pp.value, pe.value);
         const wm = {};
         recs.forEach((r) => { wm[r.id] = inputs[r.id].value; });
-        const res = await busyRun(runBtn, `synth${R.sno}`, () => call('ai_synth', R.slot.group_id, R.slot.item, R.sno, recs.map((r) => r.id), wm, model.value, sumCheck));
+        const std = stdChk && stdChk.checked ? { text: stdTa.value, level: stdLvl.value } : null;
+        const res = await busyRun(runBtn, `synth${R.sno}`, () => call('ai_synth', R.slot.group_id, R.slot.item, R.sno, recs.map((r) => r.id), wm, model.value, sumCheck, std));
         if (!res) return;
         setCredits(res);
         closeSheet();
@@ -1449,7 +1459,9 @@
           el('p', { class: 'hint', text: '비중은 결과 문장에서 차지할 분량 비율입니다. 비워 두면 기록 길이에 비례해 자동으로 나눕니다. 입력한 비중은 기록에 저장됩니다. 비율은 목표이며 결과가 정확히 맞지는 않을 수 있습니다.' }),
           t, sumLine,
           el('div', { class: 'map-row' }, [el('label', {}, [chk, '비중 합계 100% 검사']), el('label', {}, ['모델', model]),
-            R.slot.item === 'subject' ? el('label', { title: 'v0.5에서 제공' }, [el('input', { type: 'checkbox', disabled: true }), '성취기준 사용 (v0.5)']) : null]),
+            stdChk ? el('label', { title: R.view.standards.text.trim() ? '' : '성취기준 메뉴에서 먼저 넣으세요' }, [stdChk, '성취기준 사용']) : null,
+            stdChk ? el('label', {}, ['성취수준', stdLvl]) : null]),
+          stdBox,
           el('div', { class: 'two-col', style: 'margin-top:8px' }, [el('div', {}, [el('div', { class: 'col-label', text: '종합 지침' }), pp]), el('div', {}, [el('div', { class: 'col-label', text: '예시 (있으면 반드시 따름)' }), pe])]),
           el('p', { class: 'hint', text: '여기서 고친 지침·예시는 이 항목의 종합 프롬프트로 저장됩니다. AI에는 학번·이름 없이 기록 내용과 비율만 보냅니다.' }),
         ]),
@@ -1466,7 +1478,9 @@
     const f = v.final;
     const closed = !!(f && f.closed);
     const ro = closed || !!ys.archived;
-    box.appendChild(el('div', { class: 'sec-title' }, ['최종안', el('span', { class: 'muted', text: `목표 ${R.target}B` })]));
+    let fmeta = {};
+    try { fmeta = f ? JSON.parse(f.meta || '{}') : {}; } catch (e) { fmeta = {}; }
+    box.appendChild(el('div', { class: 'sec-title' }, ['최종안', el('span', { class: 'muted', text: `목표 ${R.target}B` }), stdBadge(fmeta)]));
     const fb = el('div', { class: 'final-box' + (f ? ' has' : '') + (closed ? ' closed' : '') });
     if (f && f.stale && !closed) fb.appendChild(el('div', { class: 'stale', text: '! 최종안을 채택한 뒤 기록이 바뀌었습니다. 다시 종합하거나 내용을 확인하세요.' }));
     const ta = el('textarea', { value: f ? f.text : '', placeholder: '아직 최종안이 없습니다. 아래 종합 후보에서 [최종안으로 채택]을 누르거나 여기에 직접 쓰세요.', disabled: ro });
@@ -2204,6 +2218,111 @@
           el('div', {}, [el('div', { class: 'col-label', text: 'OCR 글자(학번·이름 포함, AI로 보내지 않음)' }), el('div', { class: 'rcard-body', style: 'max-height:none;background:var(--input);border:1px solid var(--border);border-radius:8px;padding:8px', text: txt || '(글자 없음)' })])]));
         api.inbox_page_image(bid, p).then((r) => { if (r && r.ok) img.src = r.src; else img.alt = (r && r.error) || '그림을 불러오지 못했습니다'; });
       }
+    });
+  }
+
+  // =====================================================================
+  // v0.5: 성취기준(붙여넣기·PDF·hwpx) · 세특 종합에 반영 · 성취기준만으로 생성
+  // =====================================================================
+  const SD = { gid: null, data: null };
+  async function renderStandards() {
+    const r = await call('standards_overview');
+    if (!r) return;
+    const list = $('stdList');
+    list.innerHTML = '';
+    list.appendChild(el('div', { class: 'sec-title', text: '과목' }));
+    if (!r.subjects.length) {
+      list.appendChild(el('p', { class: 'hint', text: '등록한 과목이 없습니다. 명렬·담당 관리에서 과목을 추가하세요.' }));
+      $('stdMain').innerHTML = '';
+      $('stdMain').appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '성취기준은 과목 세특에서 씁니다.' }), el('button', { type: 'button', class: 'primary', text: '명렬·담당 관리', onclick: () => showPanel('roster') })]));
+      return;
+    }
+    if (!r.subjects.find((x) => x.id === SD.gid)) SD.gid = r.subjects[0].id;
+    r.subjects.forEach((x) => list.appendChild(el('button', { type: 'button', class: 'ib-item' + (x.id === SD.gid ? ' active' : ''), onclick: () => { SD.gid = x.id; renderStandards(); } }, [
+      el('span', { class: 't', text: x.label }), el('span', { class: 's', text: x.has ? `✔ 입력됨 · ${x.updated_at.slice(0, 16)}` : '아직 없음' })])));
+    list.appendChild(el('p', { class: 'hint', text: '모든 과목을 미리 넣을 필요는 없습니다. 세특에 성취기준을 쓸 과목만 넣으세요. 학년도마다 따로 저장됩니다.' }));
+    const d = await call('standards_get', SD.gid);
+    if (!d) return;
+    SD.data = d;
+    const g = (ys.groups || []).find((x) => x.id === SD.gid);
+    const m = $('stdMain');
+    m.innerHTML = '';
+    const ta = el('textarea', { id: 'stdText', value: d.text, disabled: !!ys.archived, placeholder: '예)\n[10공수1-01-01] 다항식의 사칙연산을 할 수 있다.\n[10공수1-01-02] 항등식의 성질과 나머지정리를 이해한다.\n\n성취수준 A: …  B: …  C: …\n\n성취기준 코드와 문장, 필요하면 성취수준별 설명까지 넣으세요.' });
+    const state = el('span', { class: 'muted', text: d.source ? `가져온 곳: ${d.source}` : '' });
+    const save = debounce(async (source) => { if (await mutate('standards_save', SD.gid, ta.value, source || null)) { state.textContent = '저장됨'; } }, 600);
+    ta.addEventListener('input', () => save());
+    const put = async (text, source) => {
+      let mode = 'replace';
+      if (ta.value.trim()) {
+        mode = await new Promise((resolve) => openSheet((box) => {
+          box.style.height = 'auto'; box.style.width = 'min(480px, 92vw)';
+          box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: '이미 내용이 있습니다' })]), el('p', { text: `읽어 온 글(${text.length}자)을 어떻게 넣을까요?` }),
+            el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: () => { closeSheet(); resolve(null); } }),
+              el('button', { type: 'button', text: '뒤에 붙이기', onclick: () => { closeSheet(); resolve('append'); } }),
+              el('button', { type: 'button', class: 'primary', text: '바꾸기', onclick: () => { closeSheet(); resolve('replace'); } })]));
+        }));
+        if (!mode) return;
+      }
+      ta.value = mode === 'append' ? `${ta.value.trim()}\n\n${text}` : text;
+      await mutate('standards_save', SD.gid, ta.value, source);
+      toast(`${source}에서 읽어 넣었습니다. 필요 없는 부분은 지우세요.`);
+      renderStandards();
+    };
+    const lv = Object.entries(d.levels).map(([k, n]) => `${k} ${n}명`).join(' · ');
+    m.append(
+      el('div', { class: 'card-head' }, [el('h2', { text: `성취기준 · ${g ? g.label : ''}` }), el('span', { class: 'tag', text: `성취수준 ${d.level_scale}단계` }),
+        el('span', { class: 'muted', text: lv ? `명렬 수준: ${lv}` : '명렬에 성취수준 없음' }), el('span', { class: 'spacer' }),
+        el('button', { type: 'button', class: 'link', text: '단계·학생 수준 바꾸기', onclick: () => { rosterSel = SD.gid; showPanel('roster'); } })]),
+      el('div', { class: 'toolbar edit-only' }, [
+        el('button', { type: 'button', text: '📋 붙여넣기(클립보드)', onclick: async () => { const c = await api.read_clipboard(); const t = c && c.ok ? (c.text || '').trim() : ''; if (!t) { toast('클립보드가 비어 있습니다. 칸에 직접 붙여넣어도 됩니다.'); return; } put(t, '붙여넣기'); } }),
+        el('button', { type: 'button', text: '📄 PDF 불러오기', title: '글자가 있는 교육과정 PDF', onclick: async () => { const r2 = await call('standards_read_file', 'pdf'); if (r2) put(r2.text, r2.file); } }),
+        el('button', { type: 'button', text: '📝 한글(hwpx) 불러오기', onclick: async () => { const r2 = await call('standards_read_file', 'hwpx'); if (r2) put(r2.text, r2.file); } }),
+        el('span', { class: 'spacer' }), state,
+      ]),
+      ta,
+      el('p', { class: 'hint', text: '읽어 온 글은 편집할 수 있습니다. 필요한 단원만 남기면 AI가 더 정확하게 씁니다. 세특 종합 창에서 [성취기준 사용]을 켜면 이 내용과 학생의 성취수준을 함께 보냅니다(학번·이름은 보내지 않음).' }),
+    );
+  }
+  function stdBadge(meta) {
+    if (!meta || !meta.basis) return null;
+    if (meta.basis === 'standards_only') return el('span', { class: 'badge stdonly', text: `기록 없음, 성취기준으로 생성${meta.level ? ` · 수준 ${meta.level}` : ''}` });
+    return el('span', { class: 'badge std', text: `성취기준 반영${meta.level ? ` · 수준 ${meta.level}` : ''}` });
+  }
+  function levelSelect(scale, current) {
+    const letters = scale === 3 ? 'ABC' : 'ABCDE';
+    return el('select', {}, [el('option', { value: '', text: '(수준 없음)' }), ...letters.split('').map((x) => el('option', { value: x, text: x, selected: x === current }))]);
+  }
+  function standardsOnlyDialog() {
+    const v = R.view;
+    if (!v.standards || !v.standards.text.trim()) {
+      modal('이 과목의 성취기준이 아직 없습니다. 메뉴의 <b>[성취기준]</b>에서 먼저 넣어 주세요.', true, true, '성취기준으로 가기').then((go) => { if (go) { SD.gid = R.slot.group_id; showPanel('standards'); } });
+      return;
+    }
+    openSheet((box) => {
+      const lvl = levelSelect(v.standards.level_scale, v.student.level);
+      const ta = el('textarea', { class: 'fill', rows: 12, value: v.standards.text });
+      const model = el('select', {});
+      fillModelSelect(model);
+      model.value = $('recModel').value;
+      const run = el('button', { type: 'button', class: 'primary', text: '성취기준만으로 생성' });
+      run.addEventListener('click', async () => {
+        if (!lvl.value) { toast('성취수준을 골라 주세요.'); lvl.focus(); return; }
+        const res = await busyRun(run, `synth${R.sno}`, () => call('ai_standards_only', R.slot.group_id, R.slot.item, R.sno, { text: ta.value, level: lvl.value }, model.value));
+        if (!res) return;
+        setCredits(res);
+        closeSheet();
+        toast('후보를 만들었습니다. "기록 없음, 성취기준으로 생성" 표시가 붙습니다. 실제 수업 모습과 맞는지 꼭 확인하세요.');
+        loadStudent(true);
+      });
+      box.append(
+        el('div', { class: 'sheet-head' }, [el('h2', { text: `성취기준만으로 생성 · ${v.student.name}` }), el('span', { class: 'muted', text: `${R.slot.label} · 목표 ${R.target}B` })]),
+        el('div', { class: 'sheet-body' }, [
+          el('div', { class: 'warn', text: '이 학생은 누가기록이 없어 성취기준만으로 문장을 만듭니다. 결과에는 "기록 없음, 성취기준으로 생성" 표시가 남습니다. 활동명·사건은 지어내지 않도록 지시합니다.' }),
+          el('div', { class: 'map-row' }, [el('label', {}, [`성취수준(${v.standards.level_scale}단계)`, lvl]), el('span', { class: 'muted', text: v.student.level ? `명렬 값: ${v.student.level}` : '명렬에 수준이 없습니다' }), el('label', {}, ['모델', model])]),
+          el('div', { class: 'col-label', text: '이번에 쓸 성취기준 (필요한 부분만 남겨도 됩니다)' }), ta,
+        ]),
+        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }), run]),
+      );
     });
   }
 

@@ -32,6 +32,7 @@ jobs:
           python tests/test_records.py
           python tests/test_inbox.py
           python tests/test_scan.py
+          python tests/test_standards.py
 
       - name: Version info
         shell: pwsh
