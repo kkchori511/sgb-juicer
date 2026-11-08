@@ -27,6 +27,10 @@ DEFAULTS = {
     "menu_collapsed": False,
     "window": {},  # {x, y, width, height}
     "last_backup": "",
+    # 항목×작업별 개인 프롬프트 {item: {op: {prompt, example}}} — 비어 있으면 기본값
+    "prompts": {},
+    # 종합 비중 합계 100% 검사(기본 꺼짐)
+    "weight_sum_check": False,
 }
 
 _lock = threading.Lock()
@@ -51,7 +55,9 @@ def _normalize(cfg: dict) -> dict:
         cfg["default_model"] = 0
     if not isinstance(cfg.get("window"), dict):
         cfg["window"] = {}
-    for k in ("privacy_block", "setup_done", "menu_collapsed"):
+    if not isinstance(cfg.get("prompts"), dict):
+        cfg["prompts"] = {}
+    for k in ("privacy_block", "setup_done", "menu_collapsed", "weight_sum_check"):
         cfg[k] = bool(cfg.get(k))
     try:
         cfg["current_year"] = int(cfg.get("current_year") or 0)

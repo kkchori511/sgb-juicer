@@ -1,7 +1,7 @@
 """학년도별 학생 자료(SQLite). 파일: 데이터 폴더/2026학년도.sqlite
 
-0.1 범위: 역할·담당(학급/과목/동아리)·학생·소속(명렬)·일정.
-기록·결과 테이블은 0.2에서 SCHEMA_VERSION을 올려 추가한다.
+v1: 역할·담당(학급/과목/동아리)·학생·소속(명렬)·일정.
+v2: 태그·누가기록·AI 결과 후보·최종안(마감). 기록 다루는 함수는 records.py.
 """
 import re
 import sqlite3
@@ -10,7 +10,7 @@ from contextlib import contextmanager
 
 from .paths import data_dir
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 KINDS = ("homeroom", "subject", "club")
 ROLES = ("homeroom", "subject")  # 담임 / 비담임
 
@@ -43,6 +43,60 @@ CREATE TABLE IF NOT EXISTS memberships (
     active INTEGER NOT NULL DEFAULT 1,
     level TEXT DEFAULT '',
     PRIMARY KEY (group_id, student_no)
+);
+CREATE TABLE IF NOT EXISTS tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    sort_order INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    item TEXT NOT NULL,              -- autonomy/career/behavior/subject/club
+    student_no TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'record', -- record(누가기록) / existing(이미 쓴 생기부)
+    seq INTEGER,                     -- 회차
+    date TEXT DEFAULT '',
+    title TEXT DEFAULT '',           -- 활동명
+    content TEXT NOT NULL DEFAULT '',
+    original TEXT,                   -- AI 결과로 바꾸기 전 원문
+    source TEXT DEFAULT 'manual',
+    weight REAL,                     -- 종합 비중(%) 직접 지정값
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    updated_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS ix_records_slot ON records(group_id, item, student_no);
+CREATE TABLE IF NOT EXISTS record_tags (
+    record_id INTEGER NOT NULL REFERENCES records(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (record_id, tag_id)
+);
+CREATE TABLE IF NOT EXISTS results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL,
+    item TEXT NOT NULL,
+    student_no TEXT NOT NULL,
+    record_id INTEGER REFERENCES records(id) ON DELETE CASCADE, -- 있으면 기록 한 건의 후보, 없으면 학생×항목 후보
+    op TEXT NOT NULL,                -- refine / polish / synth
+    text TEXT NOT NULL,
+    locked INTEGER NOT NULL DEFAULT 0,
+    meta TEXT DEFAULT '{}',          -- 모델·지침·근거 기록·비율
+    cost REAL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS ix_results_slot ON results(group_id, item, student_no);
+CREATE TABLE IF NOT EXISTS finals (
+    group_id INTEGER NOT NULL,
+    item TEXT NOT NULL,
+    student_no TEXT NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    source TEXT DEFAULT '',          -- 어디서 채택했는지
+    meta TEXT DEFAULT '{}',
+    stale INTEGER NOT NULL DEFAULT 0, -- 채택 후 기록이 바뀜
+    closed INTEGER NOT NULL DEFAULT 0,
+    closed_at TEXT,
+    updated_at TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (group_id, item, student_no)
 );
 CREATE TABLE IF NOT EXISTS schedules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,7 +136,7 @@ class YearDb:
         self._conn.execute("PRAGMA journal_mode = WAL")
         self._conn.execute("PRAGMA synchronous = FULL")
         self._conn.executescript(SCHEMA)
-        if self.get_meta("schema_version") is None:
+        if (_int(self.get_meta("schema_version")) or 0) < SCHEMA_VERSION:
             self.set_meta("schema_version", str(SCHEMA_VERSION))
 
     def close(self):
@@ -221,6 +275,9 @@ class YearDb:
     def delete_group(self, gid):
         with self.tx() as c:
             c.execute("DELETE FROM memberships WHERE group_id=?", (int(gid),))
+            c.execute("DELETE FROM results WHERE group_id=?", (int(gid),))
+            c.execute("DELETE FROM finals WHERE group_id=?", (int(gid),))
+            c.execute("DELETE FROM records WHERE group_id=?", (int(gid),))
             c.execute("DELETE FROM groups WHERE id=?", (int(gid),))
             c.execute("DELETE FROM students WHERE student_no NOT IN (SELECT student_no FROM memberships)")
 
@@ -241,7 +298,7 @@ class YearDb:
 
     def apply_roster(self, gid, rows):
         """rows: [{student_no, name, grade, class_no, number, level}] — 검사를 통과한 행.
-        새 명렬에 없는 기존 학생은 소속에서 뺀다(0.1에는 기록이 없으므로 삭제해도 잃는 자료가 없다)."""
+        새 명렬에 없는 기존 학생은 기록이 있으면 비활성화하고, 없으면 소속에서 뺀다."""
         g = self.group(gid)
         nos = [r["student_no"] for r in rows]
         if len(set(nos)) != len(nos):
@@ -259,16 +316,21 @@ class YearDb:
                        ON CONFLICT(group_id,student_no) DO UPDATE SET level=excluded.level""",
                     (g["id"], r["student_no"], (r.get("level") or "").strip().upper()),
                 )
-            removed = 0
-            if nos:
-                marks = ",".join("?" * len(nos))
-                removed = c.execute(
-                    f"DELETE FROM memberships WHERE group_id=? AND student_no NOT IN ({marks})", (g["id"], *nos)
-                ).rowcount
-            else:
-                removed = c.execute("DELETE FROM memberships WHERE group_id=?", (g["id"],)).rowcount
+            # 새 명렬에 없는 학생: 기록이 있으면 비활성화(자료 보존), 없으면 소속에서 뺀다.
+            existing = [r["student_no"] for r in c.execute("SELECT student_no FROM memberships WHERE group_id=?", (g["id"],))]
+            missing = [n for n in existing if n not in set(nos)]
+            removed = deactivated = 0
+            for n in missing:
+                has = c.execute(
+                    "SELECT 1 FROM records WHERE group_id=? AND student_no=? UNION SELECT 1 FROM finals WHERE group_id=? AND student_no=? LIMIT 1",
+                    (g["id"], n, g["id"], n),
+                ).fetchone()
+                if has:
+                    deactivated += c.execute("UPDATE memberships SET active=0 WHERE group_id=? AND student_no=?", (g["id"], n)).rowcount
+                else:
+                    removed += c.execute("DELETE FROM memberships WHERE group_id=? AND student_no=?", (g["id"], n)).rowcount
             c.execute("DELETE FROM students WHERE student_no NOT IN (SELECT student_no FROM memberships)")
-        return {"count": len(rows), "removed": removed}
+        return {"count": len(rows), "removed": removed, "deactivated": deactivated}
 
     def set_active(self, gid, student_nos, active, all_groups=False):
         """소속별 비활성화. all_groups=True면 그 학생의 모든 소속(전출)."""

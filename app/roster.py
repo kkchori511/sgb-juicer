@@ -18,11 +18,14 @@ HEADER_HINTS = {
 ROLES = ("student_no", "name", "grade", "class_no", "number", "level")
 
 
-def parse_text(text: str) -> list[list[str]]:
-    """엑셀에서 복사한 글(탭 구분). 셀 안 줄바꿈은 따옴표로 감싸져 온다."""
+def parse_text(text: str, delim: str | None = None) -> list[list[str]]:
+    """엑셀에서 복사한 글(탭 구분). 셀 안 줄바꿈은 따옴표로 감싸져 온다.
+    delim을 주면 그 구분자만 쓴다(긴 글 붙여넣기는 탭 고정)."""
     text = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip("\n")
     if not text.strip():
         return []
+    if delim:
+        return _clean(list(csv.reader(io.StringIO(text), delimiter=delim)))
     delim = "\t" if "\t" in text else ","
     if delim == "," and not re.search(r",", text):
         # 한 열짜리(또는 공백 구분) 붙여넣기

@@ -73,10 +73,50 @@
 
       <!-- ===== 준비 중 화면 ===== -->
       <section class="panel" data-panel-content="inbox"><div class="card soon" data-soon="자료 인박스|v0.3에서 붙여넣기·xlsx·회차 기록과 학생 매칭, v0.4에서 스캔 PDF(OCR)를 제공합니다."></div></section>
-      <section class="panel" data-panel-content="records"><div class="card soon" data-soon="항목별 기록|v0.2에서 학생별 누가기록, 정제·종합, 최종안 채택, 마감을 제공합니다."></div></section>
+      <section class="panel" data-panel-content="records">
+        <div class="rec-head">
+          <label class="inline">항목 <select id="recSlot"></select></label>
+          <span class="rec-student" id="recStudentHead"></span>
+          <span class="spacer"></span>
+          <button type="button" id="recPrev">◀ 이전 학생</button>
+          <button type="button" id="recNext">다음 학생 ▶</button>
+          <label class="inline">모델 <select id="recModel"></select></label>
+        </div>
+        <div class="rec-body" id="recBody">
+          <aside class="rec-list" id="recList"></aside>
+          <section class="rec-records" id="recRecords"></section>
+          <section class="rec-final" id="recFinal"></section>
+        </div>
+      </section>
       <section class="panel" data-panel-content="batch"><div class="card soon" data-soon="일괄 종합|v0.6에서 여러 학생을 한 번에 종합하는 기능을 제공합니다."></div></section>
-      <section class="panel" data-panel-content="export"><div class="card soon" data-soon="검토·내보내기|v0.2에서 항목별 조회와 xlsx·클립보드 내보내기를 제공합니다."></div></section>
-      <section class="panel" data-panel-content="tags"><div class="card soon" data-soon="태그|v0.2에서 태그 목록 만들기와 기록에 붙이기를 제공합니다."></div></section>
+      <section class="panel" data-panel-content="export">
+        <div class="card">
+          <div class="map-row">
+            <label>항목 <select id="expSlot"></select></label>
+            <label>대상 <select id="expScopeRows"><option value="all">모두</option><option value="closed">마감만</option></select></label>
+            <label>정렬 <select id="expOrder"><option value="no">학번순</option><option value="name">이름순</option></select></label>
+            <span class="spacer"></span>
+            <span id="expSummary" class="muted"></span>
+          </div>
+          <div class="tbl-wrap" id="expTable"></div>
+          <div class="sheet-foot">
+            <label class="inline" style="margin:0">복사 범위 <select id="expCols"><option value="full">학번·이름·상태·최종안</option><option value="text">최종안만</option></select></label>
+            <label class="inline" style="margin:0"><input type="checkbox" id="expHeader" checked> 머리글 포함</label>
+            <span class="hint" style="margin:0">미마감은 노란색으로 표시하고, xlsx·복사에 '상태' 열로 알립니다. 최종안 문장에는 표시를 넣지 않습니다.</span>
+            <span class="spacer"></span>
+            <button type="button" id="expCopyBtn">클립보드 복사</button>
+            <button type="button" class="primary" id="expXlsxBtn">xlsx 저장</button>
+          </div>
+        </div>
+      </section>
+      <section class="panel" data-panel-content="tags">
+        <div class="card" style="max-width:760px">
+          <h2>태그</h2>
+          <p class="hint">기록에 붙일 태그를 여기서 만듭니다. 표현을 통일하기 위해 기록에는 이 목록에서만 고를 수 있습니다.</p>
+          <div class="inline edit-only"><input type="text" id="tagNew" class="grow" placeholder="예: 독서, 탐구, 발표, 협업"><button type="button" class="primary" id="tagAddBtn">추가</button></div>
+          <table class="tbl" id="tagTable" style="margin-top:12px"></table>
+        </div>
+      </section>
       <section class="panel" data-panel-content="standards"><div class="card soon" data-soon="성취기준|v0.5에서 과목별 성취기준(붙여넣기·PDF·hwpx)과 성취수준별 세특 생성을 제공합니다."></div></section>
 
       <!-- ===== 명렬·담당 관리 ===== -->
@@ -208,7 +248,23 @@
         </div>
 
         <div class="stab" data-stab-content="prompt" hidden>
-          <div class="card soon" data-soon="프롬프트|v0.2부터 항목별 정제·다듬기·종합 지침과 예시를 고칠 수 있습니다. 기본 프롬프트는 선생님 예시안을 받아 v0.7에서 확정합니다."></div>
+          <div class="card">
+            <div class="card-head"><h2>프롬프트</h2><span class="tag warn-tag">기본값은 임시 — v0.7에서 확정</span></div>
+            <p class="hint">항목과 작업을 고르고 지침과 예시를 고치세요. 예시를 적어 두면 AI에 항상 함께 보내고 반드시 따르게 합니다. 분량·출력 형식 규칙과 '학번·이름은 보내지 않음'은 앱이 자동으로 지킵니다.</p>
+            <div class="map-row">
+              <label>항목 <select id="prItem"></select></label>
+              <div class="segmented" id="prOps"></div>
+              <span class="spacer"></span>
+              <span class="muted" id="prState"></span>
+              <button type="button" id="prResetBtn">기본값으로 되돌리기</button>
+            </div>
+            <div class="two-col prompt-cols">
+              <div><div class="col-label">지침(프롬프트)</div><textarea id="prPrompt" class="tall"></textarea></div>
+              <div><div class="col-label">예시 <span class="muted">(비우면 지침만 보냄)</span></div><textarea id="prExample" class="tall" placeholder="원하는 결과 모양의 생기부 문장을 넣으세요. AI가 문체·형식을 반드시 따릅니다."></textarea></div>
+            </div>
+            <label class="check-line"><input type="checkbox" id="weightCheck" data-cfg="weight_sum_check"> 종합할 때 비중 합계 100% 검사</label>
+            <div class="hint">끄면 입력한 비중을 비율대로 맞춰 씁니다. 비중을 비워 둔 기록은 기록 길이에 비례해 나눕니다.</div>
+          </div>
         </div>
 
         <div class="stab" data-stab-content="data" hidden>

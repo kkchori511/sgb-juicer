@@ -27,7 +27,9 @@ jobs:
         run: python -m pip install -r requirements.txt pyinstaller
 
       - name: Backend tests
-        run: python tests/test_backend.py
+        run: |
+          python tests/test_backend.py
+          python tests/test_records.py
 
       - name: Version info
         shell: pwsh
