@@ -367,7 +367,7 @@ textarea.tall { min-height: 300px; height: calc(100vh - 470px); resize: vertical
 
 /* 세로로 긴 화면·좁은 창: 결과 칸을 아래로 */
 @media (max-aspect-ratio: 1/1), (max-width: 1180px) {
-  .rec-body { grid-template-columns: 210px minmax(0, 1fr); grid-template-rows: minmax(0, 1.1fr) minmax(0, 1fr); }
+  .rec-body, .app.collapsed .rec-body { grid-template-columns: 210px minmax(0, 1fr); grid-template-rows: minmax(0, 1.1fr) minmax(0, 1fr); }
   .rec-list { grid-row: 1 / span 2; }
   .rec-final { grid-column: 2; }
 }
@@ -462,3 +462,12 @@ tr.row-pending td { background: var(--warn-bg); }
 .faq dt { font-weight: 800; margin-top: 10px; }
 .faq dd { margin: 2px 0 0 0; color: var(--text-2); }
 .guide-body .flash { background: var(--warn-bg); transition: background 1.2s; }
+
+/* 학생 목록 접기 */
+.rec-body.list-hidden, .app.collapsed .rec-body.list-hidden { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+.rec-body.list-hidden .rec-list { display: none; }
+@media (max-aspect-ratio: 1/1), (max-width: 1180px) {
+  .rec-body.list-hidden, .app.collapsed .rec-body.list-hidden { grid-template-columns: minmax(0, 1fr); }
+  .rec-body.list-hidden .rec-final { grid-column: 1; }
+}
+.badge.src { color: var(--muted); }

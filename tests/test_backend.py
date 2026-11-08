@@ -45,7 +45,9 @@ def test_all():
     assert api.roster_apply(sub, b["rows"])["ok"]
     # 같은 학번 이름 다르면 알림
     b2 = api.roster_build(club, *[api.roster_from_text("20301\t김철순\n30102\t한별")[k] for k in ("raw", "header", "columns")])
-    assert "기존 이름 김철수 → 김철순" in b2["rows"][0]["notes"]
+    assert any("기존 이름 김철수 → 김철순" in i for i in b2["rows"][0]["issues"])  # 이름 바뀜은 확인해야 반영
+    rows2 = b2["rows"]; rows2[0]["rename_ok"] = True
+    assert not api.roster_validate(club, rows2)["rows"][0]["issues"]
     assert "3학년: 1학기 마감 대상" in b2["rows"][1]["notes"]
 
     # 비활성화: 소속별 / 전출

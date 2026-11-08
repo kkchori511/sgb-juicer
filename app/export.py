@@ -32,7 +32,14 @@ def write_xlsx(path: str, rows: list[dict], scope: str, sheet_title: str):
         c.font = Font(bold=True)
         c.fill = HEAD
     for r in rows:
-        ws.append([_value(r, k) for k, _ in cols])
+        vals = [_value(r, k) for k, _ in cols]
+        for v in vals:
+            if isinstance(v, str) and len(v) > 32767:
+                raise ValueError(f"{r['student_no']} 학생의 글이 엑셀 한 칸에 넣을 수 있는 길이(32,767자)를 넘습니다.")
+        ws.append(vals)
+        for c in ws[ws.max_row]:
+            if isinstance(c.value, str):
+                c.data_type = "s"  # '='로 시작해도 수식이 아니라 글자로
         if not r["closed"]:
             for c in ws[ws.max_row]:
                 c.fill = YELLOW

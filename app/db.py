@@ -331,8 +331,22 @@ class YearDb:
         with self.tx() as c:
             c.execute(f"UPDATE groups SET {sets} WHERE id=?", (*allowed.values(), g["id"]))
 
+    def group_impact(self, gid):
+        g = self.group(gid)
+        one = lambda sql: self.q(sql, (int(gid),))[0]["n"]
+        return {
+            "label": g["label"], "members": g["total"],
+            "records": one("SELECT COUNT(*) n FROM records WHERE group_id=?"),
+            "finals": one("SELECT COUNT(*) n FROM finals WHERE group_id=? AND text<>''"),
+            "closed": one("SELECT COUNT(*) n FROM finals WHERE group_id=? AND closed=1"),
+            "results": one("SELECT COUNT(*) n FROM results WHERE group_id=?"),
+            "batches": one("SELECT COUNT(*) n FROM inbox_batches WHERE group_id=?"),
+            "standards": one("SELECT COUNT(*) n FROM standards WHERE group_id=? AND text<>''"),
+        }
+
     def delete_group(self, gid):
         with self.tx() as c:
+            c.execute("DELETE FROM inbox_batches WHERE group_id=?", (int(gid),))
             c.execute("DELETE FROM memberships WHERE group_id=?", (int(gid),))
             c.execute("DELETE FROM results WHERE group_id=?", (int(gid),))
             c.execute("DELETE FROM finals WHERE group_id=?", (int(gid),))
@@ -382,8 +396,12 @@ class YearDb:
             removed = deactivated = 0
             for n in missing:
                 has = c.execute(
-                    "SELECT 1 FROM records WHERE group_id=? AND student_no=? UNION SELECT 1 FROM finals WHERE group_id=? AND student_no=? LIMIT 1",
-                    (g["id"], n, g["id"], n),
+                    """SELECT 1 FROM records WHERE group_id=? AND student_no=?
+                       UNION SELECT 1 FROM finals WHERE group_id=? AND student_no=?
+                       UNION SELECT 1 FROM results WHERE group_id=? AND student_no=?
+                       UNION SELECT 1 FROM inbox_rows r JOIN inbox_batches b ON b.id=r.batch_id
+                             WHERE b.group_id=? AND r.student_no=? AND b.stage<>'sent' LIMIT 1""",
+                    (g["id"], n, g["id"], n, g["id"], n, g["id"], n),
                 ).fetchone()
                 if has:
                     deactivated += c.execute("UPDATE memberships SET active=0 WHERE group_id=? AND student_no=?", (g["id"], n)).rowcount

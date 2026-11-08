@@ -43,7 +43,7 @@ def test():
     ok(api.roster_apply(hr, api.roster_build(hr, p["raw"], p["header"], p["columns"])["rows"]))
     bid = ok(api.inbox_create("진로 학습지", hr, "career"))["id"]
     assert not ok(api.clova_ready())["ready"]
-    sc = ok(api.inbox_scan_pick(bid))["scan"]; assert sc["pages"] == 6 and scan.pdf_path(bid).exists()
+    sc = ok(api.inbox_scan_pick(bid))["scan"]; assert sc["pages"] == 6 and scan.pdf_path(2026, bid).exists()
     assert not api.inbox_scan_ocr(bid, 2)["ok"]  # CLOVA 키 없음
     config.save({"clova_url": "https://x", "clova_secret": "s"})
     ok(api.inbox_scan_ocr(bid, 2)); wait_idle(api)
@@ -72,8 +72,8 @@ def test():
     rec = ok(api.student_view(hr, "career", "20301"))["records"][0]
     assert rec["title"] == "진로 학습지" and rec["content"].startswith("정제:")
     # 묶음 삭제하면 스캔 파일도 지움
-    b2 = ok(api.inbox_create("x", hr, "career"))["id"]; ok(api.inbox_scan_pick(b2)); assert scan.pdf_path(b2).exists()
-    ok(api.inbox_delete(b2)); assert not scan.pdf_path(b2).exists()
+    b2 = ok(api.inbox_create("x", hr, "career"))["id"]; ok(api.inbox_scan_pick(b2)); assert scan.pdf_path(2026, b2).exists()
+    ok(api.inbox_delete(b2)); assert not scan.pdf_path(2026, b2).exists()
     print("SCAN OK")
 
 if __name__ == "__main__":

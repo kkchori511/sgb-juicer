@@ -63,6 +63,11 @@ def main():
             with open(sys.argv[3], "w", encoding="utf-8") as f:
                 f.write(f"swap failed: {e}")
             sys.exit(1)
+    from . import single
+
+    if not single.acquire():
+        single.notify_running()
+        return
     api = Api()
     geo = config.load().get("window") or {}
     kwargs = {}

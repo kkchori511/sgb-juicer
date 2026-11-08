@@ -97,10 +97,17 @@ class Records:
 
     # ---------- 태그 ----------
     def tags(self):
-        return self.d.q(
-            """SELECT t.id, t.name, (SELECT COUNT(*) FROM record_tags rt WHERE rt.tag_id=t.id) AS used
+        rows = self.d.q(
+            """SELECT t.id, t.name, (SELECT COUNT(*) FROM record_tags rt WHERE rt.tag_id=t.id) AS used,
+                      (SELECT COUNT(*) FROM record_tags rt JOIN records r ON r.id=rt.record_id
+                         JOIN finals f ON f.group_id=r.group_id AND f.item=r.item AND f.student_no=r.student_no AND f.closed=1
+                       WHERE rt.tag_id=t.id) AS used_closed
                FROM tags t ORDER BY t.sort_order, t.name"""
         )
+        inbox = self.d.q("SELECT tag_ids FROM inbox_batches WHERE stage<>'sent'")
+        for t in rows:
+            t["used_inbox"] = sum(1 for b in inbox if t["id"] in json.loads(b["tag_ids"] or "[]"))
+        return rows
 
     def add_tag(self, name):
         name = (name or "").strip()
@@ -121,8 +128,13 @@ class Records:
             c.execute("UPDATE tags SET name=? WHERE id=?", (name, int(tid)))
 
     def delete_tag(self, tid):
+        """태그 사전 정리는 마감과 관계없이 전체에 반영한다(결정 27). 인박스의 태그 지정도 함께 뺀다."""
         with self.d.tx() as c:
             c.execute("DELETE FROM record_tags WHERE tag_id=?", (int(tid),))
+            for b in c.execute("SELECT id, tag_ids FROM inbox_batches").fetchall():
+                ids = json.loads(b[1] or "[]")
+                if int(tid) in ids:
+                    c.execute("UPDATE inbox_batches SET tag_ids=? WHERE id=?", (json.dumps([x for x in ids if x != int(tid)]), b[0]))
             c.execute("DELETE FROM tags WHERE id=?", (int(tid),))
 
     def tag_records(self, record_ids, tag_ids, mode="add"):
@@ -227,6 +239,8 @@ class Records:
                     fields["weight"] = float(w)
                 except (TypeError, ValueError):
                     raise DbError("비중은 숫자로 입력해 주세요.")
+                if fields["weight"] != fields["weight"] or fields["weight"] in (float("inf"), float("-inf")):
+                    raise DbError("비중은 숫자로 입력해 주세요.")
                 if fields["weight"] < 0:
                     raise DbError("비중은 0 이상이어야 합니다.")
         with self.d.tx() as c:
@@ -328,8 +342,10 @@ class Records:
                 for tid in tagmap[r["id"]]:
                     c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (nid, tid))
                 undo["created"].append(nid)
+                cands = [dict(x) for x in c.execute("SELECT * FROM results WHERE record_id=?", (r["id"],))]
                 undo["sources"].append({"row": {k: r[k] for k in ("id", "group_id", "item", "student_no", "kind", "seq", "date", "title", "content", "original", "source", "weight", "created_at")},
-                                        "tags": tagmap[r["id"]], "deleted": not rest})
+                                        "tags": tagmap[r["id"]], "deleted": not rest, "after": "\n\n".join(rest), "cands": cands})
+                undo.setdefault("moved_text", {})[str(nid)] = moved
                 if rest:
                     c.execute("UPDATE records SET content=?, updated_at=datetime('now','localtime') WHERE id=?", ("\n\n".join(rest), r["id"]))
                 else:
@@ -337,9 +353,29 @@ class Records:
                     c.execute("DELETE FROM records WHERE id=?", (r["id"],))
                 self._stale(c, r["group_id"], r["item"], sno)
             self._stale(c, dest_gid, dest_item, sno)
+        undo.update(year=self.d.year, dest=[dest_gid, dest_item], sno=sno)
         return undo
 
     def undo_move(self, undo):
+        """이동 직후 상태 그대로일 때만 되돌린다(그 뒤 고쳤거나 마감했으면 막음)."""
+        if undo.get("year") != self.d.year:
+            raise DbError("학년도가 바뀌어 이 이동은 되돌릴 수 없습니다.")
+        sno = undo["sno"]
+        slots = {(undo["dest"][0], undo["dest"][1])} | {(x["row"]["group_id"], x["row"]["item"]) for x in undo["sources"]}
+        for gid, item in slots:
+            if self.is_closed(gid, item, sno):
+                raise DbError("이동한 뒤 마감된 항목이 있어 되돌릴 수 없습니다. 마감을 해제한 뒤 직접 옮겨 주세요.")
+        for nid in undo["created"]:
+            rows = self.d.q("SELECT content FROM records WHERE id=?", (int(nid),))
+            if not rows or rows[0]["content"] != undo["moved_text"][str(nid)]:
+                raise DbError("옮긴 기록을 그 뒤에 고치거나 지워서 되돌릴 수 없습니다.")
+        for src in undo["sources"]:
+            rows = self.d.q("SELECT content FROM records WHERE id=?", (src["row"]["id"],))
+            if src["deleted"]:
+                if rows:
+                    raise DbError("원래 기록 자리가 이미 쓰여 되돌릴 수 없습니다.")
+            elif not rows or rows[0]["content"] != src["after"]:
+                raise DbError("원래 기록을 그 뒤에 고쳐서 되돌릴 수 없습니다.")
         with self.d.tx() as c:
             for nid in undo["created"]:
                 c.execute("DELETE FROM results WHERE record_id=?", (int(nid),))
@@ -350,9 +386,14 @@ class Records:
                     c.execute("""INSERT INTO records(id,group_id,item,student_no,kind,seq,date,title,content,original,source,weight,created_at)
                                  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", tuple(r[k] for k in ("id", "group_id", "item", "student_no", "kind", "seq", "date", "title", "content", "original", "source", "weight", "created_at")))
                     for tid in src["tags"]:
-                        c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (r["id"], tid))
+                        c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) SELECT ?, id FROM tags WHERE id=?", (r["id"], tid))
+                    for cd in src.get("cands", []):
+                        cols = list(cd.keys())
+                        c.execute(f"INSERT INTO results({','.join(cols)}) VALUES({','.join('?' * len(cols))})", tuple(cd[k] for k in cols))
                 else:
-                    c.execute("UPDATE records SET content=? WHERE id=?", (r["content"], r["id"]))
+                    c.execute("UPDATE records SET content=?, updated_at=datetime('now','localtime') WHERE id=?", (r["content"], r["id"]))
+            for gid, item in slots:
+                self._stale(c, gid, item, sno)
 
     # ---------- 일괄 종합 준비 ----------
     def batch_info(self, gid, item):
@@ -402,6 +443,8 @@ class Records:
         """새 결과를 넣고, 3개를 넘으면 잠기지 않은 가장 오래된 후보를 지운다. 반환: (새 id, 지운 id 또는 None)"""
         self.check_room(gid, item, sno, record_id)
         with self.d.tx() as c:
+            if self.is_closed(gid, item, sno):  # AI를 기다리는 동안 마감됐을 수 있다
+                raise DbError("AI 작업 중에 마감되어 결과를 저장하지 않았습니다.")
             rows = [dict(r) for r in c.execute(
                 ("SELECT id, locked FROM results WHERE record_id=? ORDER BY id" if record_id else
                  "SELECT id, locked FROM results WHERE group_id=? AND item=? AND student_no=? AND record_id IS NULL ORDER BY id"),

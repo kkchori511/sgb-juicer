@@ -159,8 +159,10 @@ def match_one(ext_no, ext_name, members):
         m = by_no[ext_no]
         if not m["active"]:
             return None, "none", f"{m['name']}: 비활성 학생(명렬에서 다시 활성화하거나 제외)"
-        if not ext_name or ext_name == m["name"]:
+        if ext_name == m["name"]:
             return m["student_no"], "confirmed", ""
+        if not ext_name:
+            return m["student_no"], "suggested", f"이름 없음 — 학번으로 추천({m['name']})"
         return m["student_no"], "suggested", f"이름 다름(원본 {ext_name} / 명렬 {m['name']})"
     if ext_name:
         same = [m for m in active if m["name"] == ext_name]
@@ -240,7 +242,7 @@ class Inbox:
     def delete(self, bid):
         with self.d.tx() as c:
             c.execute("DELETE FROM inbox_batches WHERE id=?", (int(bid),))
-        p = scan.pdf_path(bid)
+        p = scan.pdf_path(self.d.year, bid)
         if p.exists():
             p.unlink()
 
@@ -297,7 +299,7 @@ class Inbox:
         import shutil
 
         b = self._editable_batch(bid)
-        dest = scan.pdf_path(bid)
+        dest = scan.pdf_path(self.d.year, bid)
         shutil.copyfile(src_path, dest)
         try:
             n = scan.page_count(dest)
@@ -314,7 +316,7 @@ class Inbox:
         return meta["scan"]
 
     def scan_save_ocr(self, bid, texts, per):
-        b = self.batch(bid)
+        b = self._editable_batch(bid)
         meta = b["meta"]
         sc = meta.get("scan") or {}
         sc["ocr"] = texts
@@ -342,10 +344,12 @@ class Inbox:
         for i, g in enumerate(scan.groups_from_starts(len(texts), starts, skipped)):
             raw = "\n\n".join(texts[p] for p in g).strip()
             no, name = scan.extract_ids(texts[g[0]], members)
-            out.append({"index": i, "pages": g, "ext_no": no, "ext_name": name, "content": scan.strip_ids(raw, no, name), "empty": not raw.strip()})
+            out.append({"index": i, "pages": g, "ext_no": no, "ext_name": name,
+                        "content": scan.strip_pages([texts[p] for p in g], no, name, members), "empty": not raw.strip()})
         return {"groups": out, "page_texts": [t[:300] for t in texts], "starts": starts, "skipped": skipped}
 
     def scan_confirm(self, bid, starts, skipped):
+        self._editable_batch(bid)
         b, sc = self._scan(bid)
         res = self.scan_groups(bid, starts, skipped)
         groups = [g for g in res["groups"] if not g["empty"]]
@@ -356,6 +360,8 @@ class Inbox:
         sc["starts"], sc["skipped"] = starts, skipped
         meta["scan"] = sc
         with self.d.tx() as c:
+            if self.batch(bid)["stage"] == "sent":
+                raise DbError("이미 보낸 묶음입니다.")
             c.execute("DELETE FROM inbox_rows WHERE batch_id=?", (int(bid),))
             for k, g in enumerate(groups):
                 pg = g["pages"]
@@ -541,25 +547,28 @@ class Inbox:
                 "send_rows": len(rows), "excluded": v["counts"]["excluded"]}
 
     def send(self, bid, closed_action="block"):
-        """closed_action: block(마감 학생 있으면 막음) / reopen(마감 해제하고 보냄) / exclude(마감 학생 행 제외)"""
-        b = self.batch(bid)
-        if b["stage"] == "sent":
-            raise DbError(f"이미 보낸 묶음입니다({b['sent_at']}). 같은 자료를 다시 보내면 기록이 중복됩니다.")
-        pend = [r for r in self._rows(bid) if r["state"] in ("none", "suggested")]
-        if pend:
-            raise DbError(f"확인이 필요한 행 {len(pend)}개가 남아 있습니다.")
-        self.rec.slot(b["group_id"], b["item"])
-        members = {m["student_no"]: m for m in self.d.members(b["group_id"])}
-        rows = [r for r in self._rows(bid) if r["state"] == "confirmed"]
-        for r in rows:
-            m = members.get(r["student_no"])
-            if not m or not m["active"]:
-                raise DbError(f"{r['student_no']} 학생이 명렬에 없거나 비활성입니다. 매칭을 다시 확인해 주세요.")
-        closed = sorted({r["student_no"] for r in rows if self.rec.is_closed(b["group_id"], b["item"], r["student_no"])})
-        if closed and closed_action == "block":
-            raise DbError(f"마감된 학생 {len(closed)}명이 있습니다: " + ", ".join(f"{n} {members[n]['name']}" for n in closed))
-        tag_ids = b["tag_ids"]
+        """closed_action: block(마감 학생 있으면 막음) / reopen(마감 해제하고 보냄) / exclude(마감 학생 행 제외)
+        모든 검사를 쓰기 트랜잭션 안에서 다시 해 두 번 눌러도 한 번만 들어간다."""
         with self.d.tx() as c:
+            b = self.batch(bid)
+            if b["stage"] == "sent":
+                raise DbError(f"이미 보낸 묶음입니다({b['sent_at']}). 같은 자료를 다시 보내면 기록이 중복됩니다.")
+            all_rows = self._rows(bid)
+            pend = [r for r in all_rows if r["state"] in ("none", "suggested")]
+            if pend:
+                raise DbError(f"확인이 필요한 행 {len(pend)}개가 남아 있습니다.")
+            self.rec.slot(b["group_id"], b["item"])
+            members = {m["student_no"]: m for m in self.d.members(b["group_id"])}
+            rows = [r for r in all_rows if r["state"] == "confirmed"]
+            for r in rows:
+                m = members.get(r["student_no"])
+                if not m or not m["active"]:
+                    raise DbError(f"{r['student_no']} 학생이 명렬에 없거나 비활성입니다. 매칭을 다시 확인해 주세요.")
+            closed = sorted({r["student_no"] for r in rows if self.rec.is_closed(b["group_id"], b["item"], r["student_no"])})
+            if closed and closed_action == "block":
+                raise DbError(f"마감된 학생 {len(closed)}명이 있습니다: " + ", ".join(f"{n} {members[n]['name']}" for n in closed))
+            valid_tags = {t[0] for t in c.execute("SELECT id FROM tags")}
+            tag_ids = [t for t in b["tag_ids"] if t in valid_tags]  # 지워진 태그는 빼고
             if closed and closed_action == "exclude":
                 for r in rows:
                     if r["student_no"] in closed:

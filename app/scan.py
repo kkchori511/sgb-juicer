@@ -13,14 +13,45 @@ RE_NO = re.compile(r"(?<!\d)(\d{5})(?!\d)")
 LABEL_WORDS = re.compile(r"(학\s*번|이\s*름|성\s*명|학년|반|번호|번)\s*[:：.]?")
 
 
-def scan_dir():
+def scan_root():
     d = data_dir() / "스캔"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def pdf_path(batch_id):
-    return scan_dir() / f"batch_{int(batch_id)}.pdf"
+def scan_dir(year):
+    """학년도별 스캔 원본 폴더(묶음 번호는 학년도마다 1부터라 섞이지 않게)."""
+    d = scan_root() / str(int(year))
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def pdf_path(year, batch_id):
+    return scan_dir(year) / f"batch_{int(batch_id)}.pdf"
+
+
+def migrate_flat(owner_of):
+    """v0.4~0.7은 스캔/batch_N.pdf(학년도 구분 없음)에 두었다. 주인이 하나뿐이면 그 학년도로 옮기고,
+    애매하면 스캔/_확인필요로 옮긴다. owner_of(n) -> 그 번호의 스캔 묶음을 가진 학년도 목록."""
+    import shutil
+
+    moved = []
+    for f in list(scan_root().glob("batch_*.pdf")):
+        m = re.match(r"batch_(\d+)\.pdf$", f.name)
+        if not m:
+            continue
+        years = owner_of(int(m.group(1)))
+        if len(years) == 1:
+            dest = pdf_path(years[0], int(m.group(1)))
+            if not dest.exists():
+                shutil.move(str(f), str(dest))
+                moved.append(f"{f.name} → {years[0]}")
+                continue
+        q = scan_root() / "_확인필요"
+        q.mkdir(exist_ok=True)
+        shutil.move(str(f), str(q / f.name))
+        moved.append(f"{f.name} → _확인필요")
+    return moved
 
 
 def default_groups(n_pages: int, per: int):
@@ -130,11 +161,24 @@ def _png(width, height, channels, stride, buf: bytes) -> bytes:
             + chunk(b"IDAT", zlib.compress(bytes(raw), 6)) + chunk(b"IEND", b""))
 
 
-def render_page(batch_id, page: int, width: int = 900) -> str:
+def strip_pages(texts: list[str], no: str, name: str, members: list[dict]) -> str:
+    """학생 한 명의 여러 페이지: 페이지마다 머리글의 학번·이름을 지운 뒤 합친다.
+    (양면 학습지는 두 번째 페이지에도 학번·이름 칸이 있다.) 첫 페이지 값과 그 페이지에서 읽은 값을 모두 지운다."""
+    out = []
+    for t in texts:
+        p_no, p_name = extract_ids(t, members)
+        c = strip_ids(t, no, name)
+        if (p_no and p_no != no) or (p_name and p_name != name):
+            c = strip_ids(c, p_no, p_name)
+        out.append(c)
+    return "\n\n".join(x for x in out if x.strip()).strip()
+
+
+def render_page(year, batch_id, page: int, width: int = 900) -> str:
     """원본 보기: 페이지를 PNG(data URL)로. 이 PC 안에서만 쓴다."""
     import pypdfium2 as pdfium
 
-    path = pdf_path(batch_id)
+    path = pdf_path(year, batch_id)
     if not path.exists():
         raise FileNotFoundError("원본 PDF가 없습니다.")
     pdf = pdfium.PdfDocument(str(path))

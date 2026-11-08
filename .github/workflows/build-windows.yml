@@ -34,6 +34,7 @@ jobs:
           python tests/test_scan.py
           python tests/test_standards.py
           python tests/test_move_batch.py
+          python tests/test_review_fixes.py
 
       - name: Version info
         shell: pwsh

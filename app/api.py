@@ -79,6 +79,8 @@ class Api:
         self._ai_keys = set()
         self._ai_lock = threading.Lock()
         self._ocr_stop = threading.Event()
+        self._jobs = 0  # 화면에서 진행 중인 일괄 작업(일괄 종합·인박스 정제 등)
+        self._last_undo = None
 
     def attach(self, window):
         self._window = window
@@ -86,6 +88,19 @@ class Api:
     def _emit(self, payload: dict):
         if self._window:
             self._window.evaluate_js(f"window.onAppEvent({json.dumps(payload, ensure_ascii=False)})")
+
+    def _require_idle(self, what):
+        """AI·OCR·일괄 작업 중에는 학년도 전환·복원·삭제·업데이트를 막는다."""
+        if self._ai_keys or self._jobs > 0 or self._busy.locked():
+            raise db.DbError(f"AI·OCR 작업이 진행 중이라 {what}할 수 없습니다. 작업이 끝난 뒤 다시 해 주세요.")
+
+    def job_begin(self, name=""):
+        self._jobs += 1
+        return {"ok": True}
+
+    def job_end(self, name=""):
+        self._jobs = max(0, self._jobs - 1)
+        return {"ok": True}
 
     def _db(self) -> db.YearDb:
         year = config.load()["current_year"]
@@ -116,6 +131,15 @@ class Api:
                 pass
         threading.Thread(target=self._check_update, daemon=True).start()
         threading.Thread(target=updater.cleanup_leftovers, daemon=True).start()
+        try:
+            def owner_of(n):
+                return [y for y in db.list_years()
+                        if db.open_year(y).q("SELECT 1 FROM inbox_batches WHERE id=? AND source='scan'", (n,))]
+            moved = scan.migrate_flat(owner_of)
+            if moved:
+                updater.log("스캔 원본 정리: " + ", ".join(moved))
+        except Exception:
+            pass
         return {}
 
     def _check_update(self):
@@ -193,6 +217,12 @@ class Api:
         year = int(year)
         if not 2000 <= year <= 2100:
             raise db.DbError("학년도를 확인해 주세요.")
+        years = db.list_years()
+        if year in years and year < max(years):
+            raise db.DbError("보관 학년도는 바꿀 수 없습니다.")
+        if year not in years:
+            self._require_idle("새 학년도를 만들")
+            self._last_undo = None
         d = db.open_year(year)
         d.set_role(role)
         config.save({"current_year": year})
@@ -200,6 +230,8 @@ class Api:
 
     @safe
     def switch_year(self, year):
+        self._require_idle("학년도를 바꿀")
+        self._last_undo = None
         year = int(year)
         if year not in db.list_years():
             raise db.DbError("그 학년도 자료가 없습니다.")
@@ -221,6 +253,7 @@ class Api:
 
     @safe
     def set_role(self, role):
+        self._editable()
         self._db().set_role(role)
         return {}
 
@@ -232,6 +265,7 @@ class Api:
     # ---------- 담당 ----------
     @safe
     def add_group(self, data):
+        self._editable()
         d = self._db()
         gid = d.add_group(
             data.get("kind"), data.get("name"), data.get("semester"), data.get("grade"), data.get("class_no"), data.get("level_scale", 5)
@@ -240,15 +274,29 @@ class Api:
 
     @safe
     def update_group(self, gid, data):
+        self._editable()
         d = self._db()
         d.update_group(gid, **(data or {}))
         return {"groups": d.groups()}
 
     @safe
+    def group_impact(self, gid):
+        return self._db().group_impact(gid)
+
+    @safe
     def delete_group(self, gid):
+        self._editable()
+        self._require_idle("담당을 지울")
         d = self._db()
+        bids = [r["id"] for r in d.q("SELECT id FROM inbox_batches WHERE group_id=?", (int(gid),))]
+        name = backup.make("담당삭제전")
         d.delete_group(gid)
-        return {"groups": d.groups()}
+        for b in bids:
+            p = scan.pdf_path(d.year, b)
+            if p.exists():
+                p.unlink()
+        self._last_undo = None
+        return {"groups": d.groups(), "backup": name}
 
     # ---------- 명렬 ----------
     @safe
@@ -295,6 +343,7 @@ class Api:
 
     @safe
     def roster_apply(self, gid, rows):
+        self._editable()
         d = self._db()
         checked = self.roster_validate(gid, rows)
         if not checked.get("ok"):
@@ -311,36 +360,42 @@ class Api:
 
     @safe
     def set_active(self, gid, student_nos, active, all_groups=False):
+        self._editable()
         d = self._db()
         n = d.set_active(gid, student_nos, bool(active), bool(all_groups))
         return {"changed": n, "groups": d.groups()}
 
     @safe
     def set_level(self, gid, student_no, level):
+        self._editable()
         self._db().set_level(gid, student_no, level)
         return {}
 
     # ---------- 일정·분량 ----------
     @safe
     def add_schedule(self, date, title):
+        self._editable()
         d = self._db()
         d.add_schedule(date, title)
         return {"schedules": d.schedules()}
 
     @safe
     def update_schedule(self, sid, date, title):
+        self._editable()
         d = self._db()
         d.update_schedule(sid, date, title)
         return {"schedules": d.schedules()}
 
     @safe
     def delete_schedule(self, sid):
+        self._editable()
         d = self._db()
         d.delete_schedule(sid)
         return {"schedules": d.schedules()}
 
     @safe
     def set_target(self, item, value):
+        self._editable()
         d = self._db()
         d.set_target(item, value)
         return {"targets": d.targets()}
@@ -355,6 +410,7 @@ class Api:
         member_groups = d.student_groups()
         out = []
         todo_final = todo_close = todo_stale = 0
+        first = {}  # 할 일 종류 → 처음 만난 (담당, 항목)
         for g in groups:
             members = d.members(g["id"])
             items = list(items_of(g))
@@ -380,6 +436,14 @@ class Api:
                     todo_final += sum(1 for v in st.values() if v == "progress")
                     todo_close += sum(1 for v in st.values() if v == "final")
                     todo_stale += 1 if stale else 0
+                    for it in items:
+                        o = smaps[it].get(m["student_no"], {})
+                        if o.get("status") == "progress":
+                            first.setdefault("final", (g["id"], it))
+                        if o.get("status") == "final":
+                            first.setdefault("close", (g["id"], it))
+                        if o.get("stale"):
+                            first.setdefault("stale", (g["id"], it))
             active = [r for r in rows if r["active"]]
             out.append({
                 **g,
@@ -387,23 +451,23 @@ class Api:
                 "rows": rows,
                 "summary": {"students": len(active), "item_total": len(active) * len(items), **counts},
             })
+        # 순서: 명렬 → 인박스 매칭 → 인박스 보내기 → 채택 후 변경 → 최종안 만들기 → 마감 검토
         todo = []
         empty = [g for g in out if g["total"] == 0]
         if empty:
             todo.append({"kind": "roster", "label": f"명렬 등록 {len(empty)}곳", "group_id": empty[0]["id"]})
-        if todo_stale:
-            todo.append({"kind": "stale", "label": f"채택 후 기록 변경 {todo_stale}건"})
-        if todo_final:
-            todo.append({"kind": "final", "label": f"최종안 만들기 {todo_final}건"})
-        if todo_close:
-            todo.append({"kind": "close", "label": f"마감 검토 {todo_close}건"})
         ib = Inbox(d).batches()
         need = [b for b in ib if b["stage"] in ("import", "match") and (b["pending"] or b["stage"] == "import")]
-        ready = [b for b in ib if b["stage"] in ("refine", "review")]
+        ready = [b for b in ib if b["stage"] in ("refine", "review") or (b["stage"] == "match" and not b["pending"] and b["n"])]
         if need:
-            todo.insert(1 if empty else 0, {"kind": "inbox", "label": f"인박스 확인 필요 {len(need)}묶음", "batch_id": need[0]["id"]})
+            todo.append({"kind": "inbox", "label": f"인박스 확인 필요 {len(need)}묶음", "batch_id": need[0]["id"]})
         if ready:
-            todo.insert(1 if empty else 0, {"kind": "inbox", "label": f"인박스 보내기 대기 {len(ready)}묶음", "batch_id": ready[0]["id"]})
+            todo.append({"kind": "inbox", "label": f"인박스 보내기 대기 {len(ready)}묶음", "batch_id": ready[0]["id"]})
+        for kind, n, label, flt in (("stale", todo_stale, "채택 후 기록 변경", "stale"), ("final", todo_final, "최종안 만들기", "progress"),
+                                    ("close", todo_close, "마감 검토", "final")):
+            if n:
+                gid, it = first[kind]
+                todo.append({"kind": kind, "label": f"{label} {n}건", "group_id": gid, "item": it, "filter": flt})
         return {"role": role, "groups": out, "todo": todo, "schedules": d.schedules()}
 
     # ---------- 항목별 기록 ----------
@@ -529,8 +593,10 @@ class Api:
         u = getattr(self, "_last_undo", None)
         if not u:
             raise db.DbError("되돌릴 이동이 없습니다.")
-        self._rec().undo_move(u)
-        self._last_undo = None
+        try:
+            self._rec().undo_move(u)
+        finally:
+            self._last_undo = None
         return {}
 
     @safe
@@ -676,7 +742,7 @@ class Api:
         if only and not level:
             raise db.DbError("성취기준만으로 만들 때는 성취수준을 골라 주세요.")
         return (standards_rule(std["text"], level, g["level_scale"] or 5, only),
-                {"standards": True, "level": level, "basis": "standards_only" if only else "records+standards"})
+                {"standards": True, "level": level, "basis": "standards_only" if only else "records+standards", "standards_text": std["text"][:20000]})
 
     @safe
     def ai_standards_only(self, gid, item, sno, std, model_index=None):
@@ -922,7 +988,7 @@ class Api:
         if not (cfg["clova_url"].strip() and cfg["clova_secret"].strip()):
             raise db.DbError("CLOVA OCR 키가 없습니다. 설정 > 연결·모델에서 Secret Key와 Invoke URL을 넣어 주세요.")
         ib = self._ib()
-        b = ib.batch(bid)
+        b = ib._editable_batch(bid)
         if not (b["meta"].get("scan") or {}).get("pages"):
             raise db.DbError("먼저 스캔 PDF를 고르세요.")
         if not self._busy.acquire(blocking=False):
@@ -935,7 +1001,7 @@ class Api:
                 def prog(n, total_chunks, total_pages):
                     self._emit({"type": "ocr_progress", "bid": int(bid), "done": n, "total": total_chunks, "pages": total_pages})
 
-                texts = ocr.ocr_pdf(str(scan.pdf_path(bid)), cfg["clova_url"].strip(), cfg["clova_secret"].strip(), cfg["ocr_lang"], prog, self._ocr_stop.is_set)
+                texts = ocr.ocr_pdf(str(scan.pdf_path(year, bid)), cfg["clova_url"].strip(), cfg["clova_secret"].strip(), cfg["ocr_lang"], prog, self._ocr_stop.is_set)
                 Inbox(db.open_year(year)).scan_save_ocr(bid, texts, per)
                 self._emit({"type": "ocr_done", "bid": int(bid), "pages": len(texts)})
             except ocr.Stopped:
@@ -964,7 +1030,7 @@ class Api:
     @safe
     def inbox_page_image(self, bid, page):
         try:
-            return {"src": scan.render_page(bid, page)}
+            return {"src": scan.render_page(self._db().year, bid, page)}
         except FileNotFoundError:
             raise db.DbError("원본 PDF가 없습니다(묶음을 지웠거나 자료 폴더를 옮겼을 수 있습니다).")
 
@@ -1082,6 +1148,8 @@ class Api:
             export.write_xlsx(path, rows, scope, default_name.rsplit(".", 1)[0] if default_name else "생기부")
         except PermissionError:
             raise db.DbError("저장하지 못했습니다. 같은 파일이 Excel에서 열려 있으면 닫고 다시 시도해 주세요.")
+        except ValueError as e:
+            raise db.DbError(str(e))
         return {"path": path, "count": len(rows)}
 
     # ---------- 백업·자료 ----------
@@ -1098,6 +1166,8 @@ class Api:
 
     @safe
     def restore_backup(self, name):
+        self._require_idle("복원")
+        self._last_undo = None
         if not self._busy.acquire(blocking=False):
             raise db.DbError("다른 작업이 진행 중입니다.")
         try:
@@ -1107,6 +1177,8 @@ class Api:
 
     @safe
     def delete_year(self, year, typed):
+        self._require_idle("학년도 자료를 지울")
+        self._last_undo = None
         year = int(year)
         if (typed or "").strip() != f"{year}학년도":
             raise db.DbError(f"확인 칸에 '{year}학년도'를 정확히 입력해 주세요.")
@@ -1114,10 +1186,7 @@ class Api:
             raise db.DbError("그 학년도 자료가 없습니다.")
         backup.make("삭제전")
         db.close_all()
-        p = db.year_path(year)
-        for f in (p, p.with_name(p.name + "-wal"), p.with_name(p.name + "-shm")):
-            if f.exists():
-                f.unlink()
+        backup.delete_year_files(year)
         cfg = config.load()
         if cfg["current_year"] == year:
             rest = db.list_years()
@@ -1148,6 +1217,9 @@ class Api:
             raise updater.UpdateError("새 버전 정보가 없습니다. 다시 확인해 주세요.")
         if not updater.can_apply():
             raise updater.UpdateError("Windows exe에서만 자동 업데이트할 수 있습니다.")
+        if not info.get("sha256"):
+            raise updater.UpdateError("이 릴리스에는 검증값(SHA-256)이 없어 자동 업데이트하지 않습니다. 릴리스 페이지에서 직접 내려받아 주세요.")
+        self._require_idle("업데이트")
         if not self._busy.acquire(blocking=False):
             raise updater.UpdateError("다른 작업이 진행 중입니다. 끝난 뒤 업데이트해 주세요.")
 

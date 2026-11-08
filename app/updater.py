@@ -22,6 +22,7 @@ from pathlib import Path
 from .paths import app_dir, data_dir
 
 API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+ASSET_NAME = "SGB-Juicer.exe"
 
 
 class UpdateError(Exception):
@@ -55,10 +56,14 @@ def check() -> dict:
         return {"ok": False, "error": f"업데이트를 확인하지 못했습니다(HTTP {res.status_code})."}
     data = res.json()
     tag = data.get("tag_name", "")
-    asset = next((a for a in data.get("assets", []) if a.get("name", "").lower().endswith(".exe")), None)
+    assets = [a for a in data.get("assets", []) if a.get("name", "").lower().endswith(".exe")]
+    asset = next((a for a in assets if a.get("name") == ASSET_NAME), assets[0] if assets else None)
     if not is_newer(tag) or not asset:
         return {"ok": True, "available": False, "latest": tag}
     digest = asset.get("digest") or ""
+    sha = digest.split(":", 1)[1] if digest.startswith("sha256:") else ""
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", sha):
+        sha = ""
     return {
         "ok": True,
         "available": True,
@@ -66,8 +71,8 @@ def check() -> dict:
         "notes": (data.get("body") or "").strip()[:2000],
         "url": asset.get("browser_download_url"),
         "size": asset.get("size"),
-        "sha256": digest.split(":", 1)[1] if digest.startswith("sha256:") else "",
-        "can_apply": can_apply(),
+        "sha256": sha,
+        "can_apply": can_apply() and bool(sha),
     }
 
 
@@ -75,6 +80,8 @@ def download(info: dict, progress=None) -> str:
     url = info.get("url") or ""
     if not url.startswith(f"https://github.com/{GITHUB_REPO}/releases/download/"):
         raise UpdateError("업데이트 주소가 올바르지 않습니다.")
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", info.get("sha256") or ""):
+        raise UpdateError("검증값(SHA-256)이 없어 자동 업데이트하지 않습니다. 릴리스 페이지에서 직접 내려받아 주세요.")
     dest = current_exe().with_name(current_exe().name + ".new")
     h = hashlib.sha256()
     done = 0
@@ -93,7 +100,7 @@ def download(info: dict, progress=None) -> str:
         if dest.exists():
             dest.unlink()
         raise UpdateError(f"새 버전을 내려받지 못했습니다: {e.__class__.__name__}") from e
-    if info.get("sha256") and h.hexdigest() != info["sha256"].lower():
+    if h.hexdigest() != info["sha256"].lower():
         dest.unlink()
         raise UpdateError("내려받은 파일 검증(SHA-256)에 실패했습니다. 다시 시도해 주세요.")
     return str(dest)

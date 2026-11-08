@@ -188,7 +188,11 @@ def validate(rows: list[dict], group: dict, known: dict) -> list[dict]:
         if not r["grade"] or not r["class_no"]:
             issues.append("학년·반 입력 필요")
         if no and name and known.get(no) and known[no] != name:
-            notes.append(f"기존 이름 {known[no]} → {name}")
+            if r.get("rename_ok"):
+                notes.append(f"이름 바꿈 확인: {known[no]} → {name}(모든 소속에 반영)")
+            else:
+                issues.append(f"기존 이름 {known[no]} → {name}: 학번 오입력인지 확인 후 [이름 바꾸기 확인]")
+            r["rename"] = True
         if group["kind"] == "homeroom" and r["grade"] and r["class_no"]:
             if (int(r["grade"]), int(r["class_no"])) != (group["grade"], group["class_no"]):
                 issues.append(f"다른 반({r['grade']}-{r['class_no']})")

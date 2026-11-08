@@ -19,6 +19,8 @@ def _num(v):
         x = float(v)
     except (TypeError, ValueError):
         raise WeightError("비중은 숫자로 입력해 주세요.")
+    if x != x or x in (float("inf"), float("-inf")):
+        raise WeightError("비중은 숫자로 입력해 주세요.")
     if x < 0:
         raise WeightError("비중은 0 이상이어야 합니다.")
     return x
