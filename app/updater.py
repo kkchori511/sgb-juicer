@@ -1,10 +1,13 @@
 """GitHub Release 자동 업데이트.
 
 - 실행할 때 최신 Release를 확인하고 화면에 알린다(작업 중 교체하지 않음).
-- [지금 업데이트]: 백업 → 새 exe 내려받기(SHA-256 확인) → 앱 종료 후 교체 → 다시 실행.
+- [지금 업데이트]: 백업 → 새 exe 내려받기(SHA-256 확인) → 이름 바꿔 교체 → 새 exe 실행 → 이 앱 종료.
+  · 실행 중인 exe도 '이름 바꾸기'는 된다: 지금 exe → .old, 내려받은 .new → exe.
+  · PowerShell·배치 같은 외부 스크립트를 쓰지 않는다(학교 PC 보안 프로그램이 막는 경우가 있음).
+  · 새 앱이 켜지면 남은 .old/.new를 지운다.
 - Windows exe(frozen)에서만 교체한다. 개발 실행에서는 확인만 한다.
 """
-import base64
+import datetime as dt
 import hashlib
 import os
 import re
@@ -14,7 +17,9 @@ import sys
 import requests
 
 from . import EXE_NAME, GITHUB_REPO, VERSION
-from .paths import app_dir
+from pathlib import Path
+
+from .paths import app_dir, data_dir
 
 API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -70,7 +75,7 @@ def download(info: dict, progress=None) -> str:
     url = info.get("url") or ""
     if not url.startswith(f"https://github.com/{GITHUB_REPO}/releases/download/"):
         raise UpdateError("업데이트 주소가 올바르지 않습니다.")
-    dest = app_dir() / (EXE_NAME + ".new")
+    dest = current_exe().with_name(current_exe().name + ".new")
     h = hashlib.sha256()
     done = 0
     try:
@@ -94,30 +99,88 @@ def download(info: dict, progress=None) -> str:
     return str(dest)
 
 
-def launch_swap(new_path: str):
-    """앱이 끝나기를 기다렸다가 exe를 바꾸고 다시 실행하는 PowerShell을 띄운다.
-    onefile exe는 부트로더·본체 두 프로세스가 같은 exe를 쓰므로, 그 exe 경로를 쓰는
-    프로세스가 하나도 남지 않을 때까지(최대 2분) 기다린 뒤 교체한다.
-    한글 경로가 깨지지 않도록 -EncodedCommand(UTF-16LE)로 넘긴다."""
+def current_exe() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve()
+    return app_dir() / EXE_NAME
+
+
+def log(msg: str):
+    """업데이트 기록(문제 확인용): 자료 폴더/업데이트_기록.txt"""
+    try:
+        with open(data_dir() / "업데이트_기록.txt", "a", encoding="utf-8") as f:
+            f.write(f"{dt.datetime.now():%Y-%m-%d %H:%M:%S} {msg}\n")
+    except OSError:
+        pass
+
+
+def _clean_env():
+    """PyInstaller onefile 앱이 다른 onefile 앱을 띄울 때 압축 해제 폴더를 공유하지 않게 한다."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("_PYI") and k != "_MEIPASS2"}
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
+
+
+def swap_and_launch(new_path: str, args=()):
+    """exe 교체 후 새 exe를 띄운다. 실패하면 원래대로 되돌리고 UpdateError."""
     if not can_apply():
         raise UpdateError("Windows exe에서만 업데이트할 수 있습니다.")
-    exe = sys.executable
+    exe = current_exe()
+    new = Path(new_path)
+    old = exe.with_name(exe.name + ".old")
+    if old.exists():
+        try:
+            old.unlink()
+        except OSError:
+            old = exe.with_name(f"{exe.name}.{dt.datetime.now():%H%M%S}.old")
+    log(f"교체 시작: {exe.name} ← {new.name}")
+    try:
+        os.rename(exe, old)
+    except OSError as e:
+        log(f"실패(지금 exe 이름 바꾸기): {e}")
+        raise UpdateError(f"실행 중인 프로그램 이름을 바꾸지 못했습니다({e.__class__.__name__}). 프로그램 폴더에 쓰기 권한이 있는지 확인해 주세요.") from e
+    try:
+        os.rename(new, exe)
+    except OSError as e:
+        log(f"실패(새 exe 놓기): {e} — 되돌림")
+        try:
+            os.rename(old, exe)
+        except OSError as e2:
+            log(f"되돌리기 실패: {e2}")
+        raise UpdateError(f"새 버전으로 바꾸지 못했습니다({e.__class__.__name__}). 다시 시도하거나 릴리스 페이지에서 직접 내려받아 주세요.") from e
+    flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    try:
+        subprocess.Popen([str(exe), *args], cwd=str(exe.parent), env=_clean_env(), creationflags=flags, close_fds=True)
+    except OSError as e:
+        log(f"새 exe 실행 실패: {e}")
+        raise UpdateError(f"새 버전으로 바꿨지만 실행하지 못했습니다. {exe.name}을(를) 직접 실행해 주세요.") from e
+    log("교체 완료, 새 버전 실행")
 
-    def ps_quote(s):
-        return "'" + str(s).replace("'", "''") + "'"
 
-    script = (
-        f"$exe = {ps_quote(exe)}; $new = {ps_quote(new_path)}; "
-        "$until = (Get-Date).AddMinutes(2); "
-        "while ((Get-Process | Where-Object { $_.Path -eq $exe }) -and (Get-Date) -lt $until) { Start-Sleep -Milliseconds 300 }; "
-        "Start-Sleep -Milliseconds 500; "
-        "$ok = $false; for ($i = 0; $i -lt 40 -and -not $ok; $i++) { try { Move-Item -Force -LiteralPath $new -Destination $exe -ErrorAction Stop; $ok = $true } catch { Start-Sleep -Milliseconds 500 } }; "
-        "Start-Process -FilePath $exe"
-    )
-    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
-    flags = 0x08000000 | 0x00000008  # CREATE_NO_WINDOW | DETACHED_PROCESS
-    subprocess.Popen(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
-        creationflags=flags,
-        close_fds=True,
-    )
+def cleanup_leftovers(wait_seconds: float = 30.0) -> list[str]:
+    """새 버전이 켜질 때: 이전 exe(.old)와 남은 .new를 지운다. 이전 앱이 막 끝나는 중일 수 있어 잠시 다시 시도한다."""
+    import time
+
+    if not getattr(sys, "frozen", False):
+        return []
+    exe = current_exe()
+    targets = list(exe.parent.glob(exe.name + "*.old")) + [exe.with_name(exe.name + ".new"), app_dir() / (EXE_NAME + ".new")]
+    removed = []
+    deadline = time.time() + wait_seconds
+    pending = [p for p in dict.fromkeys(targets) if p.exists()]
+    while pending and time.time() < deadline:
+        left = []
+        for p in pending:
+            try:
+                p.unlink()
+                removed.append(p.name)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                left.append(p)
+        pending = left
+        if pending:
+            time.sleep(0.5)
+    if removed:
+        log("남은 파일 정리: " + ", ".join(removed))
+    return removed

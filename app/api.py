@@ -115,6 +115,7 @@ class Api:
             except Exception:
                 pass
         threading.Thread(target=self._check_update, daemon=True).start()
+        threading.Thread(target=updater.cleanup_leftovers, daemon=True).start()
         return {}
 
     def _check_update(self):
@@ -1125,10 +1126,11 @@ class Api:
                 path = updater.download(info, lambda d, t: self._emit({"type": "update_progress", "stage": "download", "done": d, "total": t}))
                 self._emit({"type": "update_progress", "stage": "restart"})
                 db.close_all()
-                updater.launch_swap(path)
+                updater.swap_and_launch(path)
                 if self._window:
                     self._window.destroy()
             except Exception as e:
+                updater.log(f"업데이트 실패: {e}")
                 self._emit({"type": "update_error", "message": str(e)})
             finally:
                 self._busy.release()

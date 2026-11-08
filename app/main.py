@@ -33,6 +33,11 @@ def selftest(out_path):
 
         lines.append("web OK" if web_ok() else "web MISSING")
         lines.append(f"version {VERSION}")
+        if "--after-swap" in sys.argv:
+            from . import updater
+
+            removed = updater.cleanup_leftovers(60)
+            lines.append("leftovers cleaned: " + ",".join(removed))
         code = 0 if "web OK" in lines else 1
     except Exception:
         lines.append(traceback.format_exc())
@@ -47,6 +52,17 @@ def main():
 
     if len(sys.argv) >= 3 and sys.argv[1] == "--selftest":
         selftest(sys.argv[2])
+    if len(sys.argv) >= 4 and sys.argv[1] == "--selftest-swap":
+        # CI: 실행 중인 exe를 실제로 교체하고 새 exe가 자체 시험을 하게 한다
+        from . import updater
+
+        try:
+            updater.swap_and_launch(sys.argv[2], ["--selftest", sys.argv[3], "--after-swap"])
+            sys.exit(0)
+        except Exception as e:
+            with open(sys.argv[3], "w", encoding="utf-8") as f:
+                f.write(f"swap failed: {e}")
+            sys.exit(1)
     api = Api()
     geo = config.load().get("window") or {}
     kwargs = {}

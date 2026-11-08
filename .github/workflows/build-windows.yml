@@ -52,6 +52,29 @@ jobs:
           Get-Content selftest.txt
           if ($p.ExitCode -ne 0) { Write-Error "exe 자체 시험 실패"; exit 1 }
 
+      - name: Update swap test (rename running exe, relaunch, cleanup)
+        shell: pwsh
+        run: |
+          $w = Join-Path $pwd "swaptest"
+          New-Item -ItemType Directory -Force $w | Out-Null
+          $exe = Join-Path $w "생기부착즙기.exe"
+          $new = "$exe.new"
+          $out = Join-Path $w "swap.txt"
+          Copy-Item "dist/생기부착즙기.exe" $exe
+          Copy-Item "dist/생기부착즙기.exe" $new
+          "stale" | Set-Content (Join-Path $w "생기부착즙기.exe.old")
+          $p = Start-Process -FilePath $exe -ArgumentList "--selftest-swap", "`"$new`"", "`"$out`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content $out -ErrorAction SilentlyContinue; Write-Error "교체 실패"; exit 1 }
+          for ($i = 0; $i -lt 120 -and -not (Test-Path $out); $i++) { Start-Sleep -Milliseconds 500 }
+          Start-Sleep -Seconds 2
+          Get-Content $out
+          Get-ChildItem $w | Format-Table Name, Length
+          $txt = Get-Content $out -Raw
+          if ($txt -notmatch "pdfium OK" -or $txt -notmatch "leftovers cleaned: .*\.old") { Write-Error "새 exe 실행 또는 정리 실패"; exit 1 }
+          if (Test-Path $new) { Write-Error ".new가 남음"; exit 1 }
+          if (Get-ChildItem $w -Filter "*.old") { Write-Error ".old가 남음"; exit 1 }
+          if (-not (Test-Path $exe)) { Write-Error "exe가 없음"; exit 1 }
+
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:

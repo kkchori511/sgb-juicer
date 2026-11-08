@@ -2344,7 +2344,7 @@
         ocrEvent(ev);
         break;
       case 'update_error':
-        $('updateText').textContent = '업데이트 실패: ' + ev.message;
+        $('updateText').textContent = `업데이트 실패: ${ev.message} (자세한 기록: 자료 폴더의 업데이트_기록.txt)`;
         $('updateNowBtn').disabled = false;
         break;
     }
