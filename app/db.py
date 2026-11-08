@@ -2,6 +2,7 @@
 
 v1: 역할·담당(학급/과목/동아리)·학생·소속(명렬)·일정.
 v2: 태그·누가기록·AI 결과 후보·최종안(마감). 기록 다루는 함수는 records.py.
+v3: 자료 인박스(묶음·행·정제 후보). 다루는 함수는 inbox.py.
 """
 import re
 import sqlite3
@@ -10,7 +11,7 @@ from contextlib import contextmanager
 
 from .paths import data_dir
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 KINDS = ("homeroom", "subject", "club")
 ROLES = ("homeroom", "subject")  # 담임 / 비담임
 
@@ -97,6 +98,48 @@ CREATE TABLE IF NOT EXISTS finals (
     closed_at TEXT,
     updated_at TEXT DEFAULT (datetime('now','localtime')),
     PRIMARY KEY (group_id, item, student_no)
+);
+CREATE TABLE IF NOT EXISTS inbox_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL DEFAULT '',
+    group_id INTEGER,                -- 대상 명렬(담당)
+    item TEXT,                       -- 보낼 항목
+    source TEXT DEFAULT 'paste',     -- paste / xlsx / scan
+    structure TEXT DEFAULT 'multi',  -- multi(여러 학생) / single(한 학생 여러 회차)
+    stage TEXT NOT NULL DEFAULT 'import', -- import / match / refine / review / sent
+    meta TEXT DEFAULT '{}',          -- 원본 표, 해석 설정
+    date TEXT DEFAULT '',
+    tag_ids TEXT DEFAULT '[]',
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    updated_at TEXT DEFAULT (datetime('now','localtime')),
+    sent_at TEXT,
+    sent_summary TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS inbox_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id INTEGER NOT NULL REFERENCES inbox_batches(id) ON DELETE CASCADE,
+    ord INTEGER NOT NULL,
+    source_ref TEXT DEFAULT '',      -- 원본 위치(예: 3행, C4셀, 1~2쪽)
+    ext_no TEXT DEFAULT '',          -- 원본에서 읽은 학번
+    ext_name TEXT DEFAULT '',        -- 원본에서 읽은 이름
+    student_no TEXT,                 -- 연결한 학생
+    state TEXT NOT NULL DEFAULT 'none', -- confirmed / suggested / none / excluded
+    exclude_reason TEXT DEFAULT '',
+    note TEXT DEFAULT '',            -- 매칭 안내(이름 다름, 동명이인 등)
+    line INTEGER DEFAULT 0,          -- 원본에서 몇 번째 학생 줄인지
+    label TEXT DEFAULT '',           -- 회차·활동 제목
+    date TEXT DEFAULT '',
+    content TEXT NOT NULL DEFAULT '',  -- 원문(인적사항 뺀 내용)
+    used_text TEXT                    -- 보낼 내용(정제 후보를 고르면 바뀜, 없으면 원문)
+);
+CREATE INDEX IF NOT EXISTS ix_inbox_rows ON inbox_rows(batch_id, ord);
+CREATE TABLE IF NOT EXISTS inbox_cands (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    row_id INTEGER NOT NULL REFERENCES inbox_rows(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    meta TEXT DEFAULT '{}',
+    cost REAL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS schedules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

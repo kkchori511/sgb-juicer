@@ -1,0 +1,510 @@
+"""자료 인박스: 묶음(batch) 단위로 가져오기 → 학생 매칭 → (선택) AI 정제 → 보내기.
+
+- 학번·이름은 이 PC 안에서만 매칭에 쓰고, 행의 content에는 내용만 둔다.
+- 매칭은 규칙으로만 한다(AI 쓰지 않음). 학번+이름 일치는 자동 확정, 그 밖은 '추천'으로 두고 선생님이 확정.
+- 보내기는 모든 행이 확정 또는 제외일 때만, 한 번에(전부 성공 또는 전부 취소).
+"""
+import datetime as dt
+import json
+import re
+
+from .db import DbError, YearDb
+from .records import Records
+from .roster import split_student_no
+from .textutil import count_bytes
+
+STAGES = ("import", "match", "refine", "review", "sent")
+MAX_CANDS = 3
+NO_RE = re.compile(r"^\d{4,6}$")
+NAME_RE = re.compile(r"^[가-힣]{2,5}$")
+
+
+def col_name(i: int) -> str:
+    s, i = "", i + 1
+    while i > 0:
+        i, m = divmod(i - 1, 26)
+        s = chr(65 + m) + s
+    return s
+
+
+def lev(a: str, b: str) -> int:
+    if a == b:
+        return 0
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def label_date(label: str, school_year: int) -> str:
+    """'3/15', '3.15', '3월 15일', '2026-03-15' → YYYY-MM-DD (1·2월은 다음 해)."""
+    t = (label or "").strip()
+    m = re.search(r"(20\d{2})[-./](\d{1,2})[-./](\d{1,2})", t)
+    if m:
+        y, mo, d = (int(x) for x in m.groups())
+    else:
+        m = re.search(r"(\d{1,2})\s*(?:/|\.|월)\s*(\d{1,2})\s*일?", t)
+        if not m:
+            return ""
+        mo, d = int(m.group(1)), int(m.group(2))
+        y = school_year + 1 if mo <= 2 else school_year
+    try:
+        return dt.date(y, mo, d).isoformat()
+    except ValueError:
+        return ""
+
+
+def _transpose(g):
+    w = max(len(r) for r in g)
+    return [[(g[i][j] if j < len(g[i]) else "") for i in range(len(g))] for j in range(w)]
+
+
+def _ratio(vals, rx):
+    vals = [v for v in vals if v]
+    return (sum(1 for v in vals if rx.match(v.replace(" ", ""))) / len(vals)) if vals else 0
+
+
+def detect(raw: list[list[str]]) -> dict:
+    """표 모양 추정: 학생이 행인지 열인지, 학번·이름 줄, 첫 줄 제목 여부."""
+    best = None
+    for orient in ("rows", "cols"):
+        g = raw if orient == "rows" else _transpose(raw)
+        width = max(len(r) for r in g)
+        for header in (True, False):
+            body = g[1:] if header else g
+            if not body:
+                continue
+            nos = [j for j in range(width) if _ratio([r[j] if j < len(r) else "" for r in body], NO_RE) >= 0.6]
+            names = [j for j in range(width) if j not in nos and _ratio([r[j] if j < len(r) else "" for r in body], NAME_RE) >= 0.6]
+            score = (2 if nos else 0) + (1 if names else 0) + (0.5 if header and _header_like(g[0]) else 0) + (0.1 if orient == "rows" else 0)
+            if best is None or score > best[0]:
+                best = (score, {"orient": orient, "header": header, "no_idx": nos[0] if nos else None, "name_idx": names[0] if names else None})
+    out = best[1]
+    out["found"] = best[0] >= 1
+    return out
+
+
+def _header_like(line):
+    joined = " ".join(line)
+    return any(k in joined for k in ("학번", "이름", "성명", "번호")) or any(label_date(c, 2000) for c in line)
+
+
+def interpret(raw, opts, school_year):
+    """원본 표 → 만들어질 기록 목록. opts:
+    structure: multi / single, orient: rows / cols, header: bool, no_idx/name_idx: 학번·이름 줄,
+    order(single): row / col"""
+    structure = opts.get("structure", "multi")
+    header = bool(opts.get("header"))
+    if not raw:
+        return []
+    out = []
+    if structure == "single":
+        width = max(len(r) for r in raw)
+        labels = raw[0] if header else [""] * width
+        body_rows = list(range(1, len(raw))) if header else list(range(len(raw)))
+        cells = []
+        if opts.get("order") == "col":
+            for j in range(width):
+                for i in body_rows:
+                    cells.append((i, j))
+        else:
+            for i in body_rows:
+                for j in range(width):
+                    cells.append((i, j))
+        n = 0
+        for i, j in cells:
+            v = raw[i][j].strip() if j < len(raw[i]) else ""
+            if not v:
+                continue
+            n += 1
+            lab = (labels[j] if j < len(labels) else "").strip()
+            out.append({"line": 0, "source_ref": f"{col_name(j)}{i + 1}", "ext_no": "", "ext_name": "",
+                        "label": lab or f"{n}회", "date": label_date(lab, school_year), "content": v})
+        return out
+    orient = opts.get("orient", "rows")
+    g = raw if orient == "rows" else _transpose(raw)
+    width = max(len(r) for r in g)
+    no_idx = opts.get("no_idx")
+    name_idx = opts.get("name_idx")
+    no_idx = int(no_idx) if no_idx not in (None, "") else None
+    name_idx = int(name_idx) if name_idx not in (None, "") else None
+    labels = g[0] if header else [""] * width
+    start = 1 if header else 0
+    content_cols = [j for j in range(width) if j not in (no_idx, name_idx)]
+    for li, i in enumerate(range(start, len(g))):
+        line = g[i]
+        get = lambda j: (line[j].strip() if j is not None and j < len(line) else "")
+        ext_no = re.sub(r"\s", "", get(no_idx))
+        ext_name = re.sub(r"\s", "", get(name_idx))
+        for k, j in enumerate(content_cols, 1):
+            v = get(j)
+            if not v:
+                continue
+            lab = (labels[j] if j < len(labels) else "").strip()
+            ref = f"{col_name(j)}{i + 1}" if orient == "rows" else f"{col_name(i)}{j + 1}"
+            out.append({"line": li + 1, "source_ref": ref, "ext_no": ext_no, "ext_name": ext_name,
+                        "label": lab or f"{k}회", "date": label_date(lab, school_year), "content": v})
+    return out
+
+
+def match_one(ext_no, ext_name, members):
+    """(student_no, state, note). members: [{student_no, name, active}]"""
+    active = [m for m in members if m["active"]]
+    by_no = {m["student_no"]: m for m in members}
+    if ext_no and ext_no in by_no:
+        m = by_no[ext_no]
+        if not m["active"]:
+            return None, "none", f"{m['name']}: 비활성 학생(명렬에서 다시 활성화하거나 제외)"
+        if not ext_name or ext_name == m["name"]:
+            return m["student_no"], "confirmed", ""
+        return m["student_no"], "suggested", f"이름 다름(원본 {ext_name} / 명렬 {m['name']})"
+    if ext_name:
+        same = [m for m in active if m["name"] == ext_name]
+        if len(same) == 1:
+            return same[0]["student_no"], "suggested", "학번 없음·다름 — 이름으로 추천" if ext_no else "학번 없음 — 이름으로 추천"
+        if len(same) > 1:
+            return None, "none", f"동명이인 {len(same)}명 — 학번으로 골라 주세요"
+        near = [m for m in active if len(ext_name) >= 2 and lev(ext_name, m["name"]) == 1]
+        if len(near) == 1:
+            return near[0]["student_no"], "suggested", f"비슷한 이름({near[0]['name']}) 추천"
+    if ext_no and not ext_name:
+        parts = split_student_no(ext_no)
+        return None, "none", "명렬에 없는 학번" if parts else "학번 형식이 다름"
+    return None, "none", "명렬에서 찾지 못함"
+
+
+class Inbox:
+    def __init__(self, d: YearDb):
+        self.d = d
+        self.rec = Records(d)
+
+    # ---------- 묶음 ----------
+    def batches(self):
+        rows = self.d.q(
+            """SELECT b.*, (SELECT COUNT(*) FROM inbox_rows r WHERE r.batch_id=b.id) AS n,
+                      (SELECT COUNT(*) FROM inbox_rows r WHERE r.batch_id=b.id AND r.state IN ('none','suggested')) AS pending
+               FROM inbox_batches b ORDER BY (b.stage='sent'), b.updated_at DESC, b.id DESC"""
+        )
+        for b in rows:
+            b.pop("meta", None)
+        return rows
+
+    def batch(self, bid):
+        rows = self.d.q("SELECT * FROM inbox_batches WHERE id=?", (int(bid),))
+        if not rows:
+            raise DbError("자료 묶음을 찾지 못했습니다.")
+        b = rows[0]
+        b["meta"] = json.loads(b["meta"] or "{}")
+        b["tag_ids"] = json.loads(b["tag_ids"] or "[]")
+        return b
+
+    def _touch(self, c, bid, **fields):
+        fields["updated_at"] = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        sets = ", ".join(f"{k}=?" for k in fields)
+        c.execute(f"UPDATE inbox_batches SET {sets} WHERE id=?", (*fields.values(), int(bid)))
+
+    def create(self, title, group_id, item):
+        self.rec.slot(group_id, item)
+        title = (title or "").strip() or f"자료 {dt.date.today().strftime('%m-%d')}"
+        with self.d.tx() as c:
+            return c.execute("INSERT INTO inbox_batches(title, group_id, item, date) VALUES(?,?,?,?)",
+                             (title, int(group_id), item, dt.date.today().isoformat())).lastrowid
+
+    def update(self, bid, data):
+        b = self.batch(bid)
+        if b["stage"] == "sent":
+            raise DbError("이미 보낸 묶음은 고칠 수 없습니다.")
+        fields = {}
+        if "title" in data:
+            fields["title"] = (data["title"] or "").strip() or b["title"]
+        if "date" in data:
+            fields["date"] = (data["date"] or "").strip()
+        if "tag_ids" in data:
+            fields["tag_ids"] = json.dumps([int(x) for x in data["tag_ids"] or []])
+        regroup = False
+        if "group_id" in data or "item" in data:
+            gid = int(data.get("group_id", b["group_id"]))
+            item = data.get("item", b["item"])
+            self.rec.slot(gid, item)
+            regroup = gid != b["group_id"]
+            fields.update(group_id=gid, item=item)
+        with self.d.tx() as c:
+            self._touch(c, bid, **fields)
+        if regroup and self._rows(bid):
+            self.rematch(bid, keep_manual=False)
+
+    def delete(self, bid):
+        with self.d.tx() as c:
+            c.execute("DELETE FROM inbox_batches WHERE id=?", (int(bid),))
+
+    # ---------- ① 가져오기 ----------
+    def set_source(self, bid, raw, source, filename=""):
+        b = self.batch(bid)
+        if b["stage"] == "sent":
+            raise DbError("이미 보낸 묶음입니다.")
+        meta = b["meta"]
+        meta.update(raw=raw, filename=filename)
+        meta["opts"] = {"structure": b["structure"], **detect(raw)}
+        with self.d.tx() as c:
+            self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False), source=source)
+        return meta["opts"]
+
+    def preview(self, bid, opts):
+        b = self.batch(bid)
+        raw = b["meta"].get("raw") or []
+        return interpret(raw, opts, self.d.year)
+
+    def confirm_import(self, bid, opts):
+        b = self.batch(bid)
+        if b["stage"] == "sent":
+            raise DbError("이미 보낸 묶음입니다.")
+        raw = b["meta"].get("raw") or []
+        recs = interpret(raw, opts, self.d.year)
+        if not recs:
+            raise DbError("만들어질 기록이 없습니다. 표 해석 설정을 확인해 주세요.")
+        structure = opts.get("structure", "multi")
+        if structure == "single" and not opts.get("student_no"):
+            raise DbError("기록을 넣을 학생을 골라 주세요.")
+        if structure == "multi" and opts.get("no_idx") in (None, "") and opts.get("name_idx") in (None, ""):
+            raise DbError("학번 줄이나 이름 줄을 골라 주세요. 학생을 알 수 없으면 '한 학생에게 여러 건'을 고르세요.")
+        meta = b["meta"]
+        meta["opts"] = opts
+        members = self.d.members(b["group_id"])
+        with self.d.tx() as c:
+            c.execute("DELETE FROM inbox_rows WHERE batch_id=?", (int(bid),))
+            for k, r in enumerate(recs):
+                if structure == "single":
+                    sno, state, note = str(opts["student_no"]), "confirmed", "고른 학생"
+                else:
+                    sno, state, note = match_one(r["ext_no"], r["ext_name"], members)
+                c.execute(
+                    """INSERT INTO inbox_rows(batch_id, ord, source_ref, ext_no, ext_name, student_no, state, note, line, label, date, content)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (int(bid), k, r["source_ref"], r["ext_no"], r["ext_name"], sno, state, note, r["line"], r["label"], r["date"], r["content"]),
+                )
+            self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False), structure=structure, stage="match")
+        return len(recs)
+
+    # ---------- ② 매칭 ----------
+    def _rows(self, bid):
+        return self.d.q("SELECT * FROM inbox_rows WHERE batch_id=? ORDER BY ord", (int(bid),))
+
+    def view(self, bid):
+        b = self.batch(bid)
+        rows = self._rows(bid)
+        members = self.d.members(b["group_id"]) if b["group_id"] else []
+        names = {m["student_no"]: m for m in members}
+        cands = {}
+        if rows:
+            marks = ",".join("?" * len(rows))
+            for cd in self.d.q(f"SELECT * FROM inbox_cands WHERE row_id IN ({marks}) ORDER BY id", tuple(r["id"] for r in rows)):
+                cd["meta"] = json.loads(cd["meta"] or "{}")
+                cd["bytes"] = count_bytes(cd["text"])
+                cands.setdefault(cd["row_id"], []).append(cd)
+        # 같은 학생이 원본의 서로 다른 줄에서 나오면 중복 의심
+        lines = {}
+        for r in rows:
+            if r["student_no"] and r["state"] in ("confirmed", "suggested") and b["structure"] == "multi":
+                lines.setdefault(r["student_no"], set()).add(r["line"])
+        for r in rows:
+            m = names.get(r["student_no"]) if r["student_no"] else None
+            r["matched_name"] = m["name"] if m else ""
+            r["dup"] = bool(r["student_no"] and len(lines.get(r["student_no"], ())) > 1)
+            r["cands"] = cands.get(r["id"], [])
+            r["text"] = r["used_text"] if r["used_text"] is not None else r["content"]
+            r["bytes"] = count_bytes(r["text"])
+        counts = {s: sum(1 for r in rows if r["state"] == s) for s in ("confirmed", "suggested", "none", "excluded")}
+        return {"batch": b, "rows": rows, "members": [m for m in members if m["active"]], "counts": counts}
+
+    def set_student(self, row_id, sno):
+        r = self._row(row_id)
+        b = self._editable_batch(r["batch_id"])
+        if sno:
+            m = next((x for x in self.d.members(b["group_id"]) if x["student_no"] == str(sno)), None)
+            if not m:
+                raise DbError("이 담당 명렬의 학생이 아닙니다.")
+            if not m["active"]:
+                raise DbError("비활성 학생입니다. 명렬에서 다시 활성화하거나 이 행을 제외하세요.")
+        with self.d.tx() as c:
+            c.execute("UPDATE inbox_rows SET student_no=?, state=?, exclude_reason='' WHERE id=?",
+                      (str(sno) if sno else None, "confirmed" if sno else "none", r["id"]))
+            self._touch(c, r["batch_id"])
+
+    def confirm_suggested(self, bid, row_ids=None):
+        self._editable_batch(bid)
+        with self.d.tx() as c:
+            if row_ids:
+                marks = ",".join("?" * len(row_ids))
+                n = c.execute(f"UPDATE inbox_rows SET state='confirmed' WHERE batch_id=? AND state='suggested' AND id IN ({marks})",
+                              (int(bid), *[int(x) for x in row_ids])).rowcount
+            else:
+                n = c.execute("UPDATE inbox_rows SET state='confirmed' WHERE batch_id=? AND state='suggested'", (int(bid),)).rowcount
+            self._touch(c, bid)
+        return n
+
+    def exclude(self, row_ids, reason, on=True):
+        ids = [int(x) for x in row_ids or []]
+        if not ids:
+            raise DbError("행을 고르세요.")
+        first = self._row(ids[0])
+        self._editable_batch(first["batch_id"])
+        reason = (reason or "").strip() or "기타"
+        with self.d.tx() as c:
+            for rid in ids:
+                r = self._row(rid)
+                if on:
+                    c.execute("UPDATE inbox_rows SET state='excluded', exclude_reason=? WHERE id=?", (reason, rid))
+                else:
+                    c.execute("UPDATE inbox_rows SET state=CASE WHEN student_no IS NULL THEN 'none' ELSE 'suggested' END, exclude_reason='' WHERE id=?", (rid,))
+            self._touch(c, first["batch_id"])
+
+    def edit_row(self, row_id, data):
+        r = self._row(row_id)
+        self._editable_batch(r["batch_id"])
+        fields = {}
+        for k in ("content", "label", "date"):
+            if k in data:
+                fields[k] = (data[k] or "").strip()
+        if "content" in fields and not fields["content"]:
+            raise DbError("내용을 비울 수 없습니다. 보내지 않으려면 [제외]를 누르세요.")
+        if not fields:
+            return
+        with self.d.tx() as c:
+            sets = ", ".join(f"{k}=?" for k in fields)
+            c.execute(f"UPDATE inbox_rows SET {sets} WHERE id=?", (*fields.values(), r["id"]))
+            if "content" in fields:
+                c.execute("UPDATE inbox_rows SET used_text=NULL WHERE id=?", (r["id"],))
+
+    def rematch(self, bid, keep_manual=True):
+        b = self._editable_batch(bid)
+        if b["structure"] == "single":
+            return
+        members = self.d.members(b["group_id"])
+        with self.d.tx() as c:
+            for r in self._rows(bid):
+                if keep_manual and r["state"] in ("confirmed", "excluded"):
+                    continue
+                sno, state, note = match_one(r["ext_no"], r["ext_name"], members)
+                c.execute("UPDATE inbox_rows SET student_no=?, state=?, note=?, exclude_reason='' WHERE id=?", (sno, state, note, r["id"]))
+            self._touch(c, bid)
+
+    def to_stage(self, bid, stage):
+        b = self._editable_batch(bid)
+        if stage not in STAGES or stage == "sent":
+            raise DbError("단계가 올바르지 않습니다.")
+        if stage in ("refine", "review"):
+            pend = [r for r in self._rows(bid) if r["state"] in ("none", "suggested")]
+            if pend:
+                raise DbError(f"확인이 필요한 행 {len(pend)}개가 남아 있습니다. 학생을 확정하거나 제외해 주세요.")
+            if not any(r["state"] == "confirmed" for r in self._rows(bid)):
+                raise DbError("보낼 행이 없습니다. 모두 제외되어 있습니다.")
+        with self.d.tx() as c:
+            self._touch(c, bid, stage=stage)
+        return b
+
+    # ---------- ③ 정제 후보 ----------
+    def _row(self, row_id):
+        rows = self.d.q("SELECT * FROM inbox_rows WHERE id=?", (int(row_id),))
+        if not rows:
+            raise DbError("행을 찾지 못했습니다.")
+        return rows[0]
+
+    def _editable_batch(self, bid):
+        b = self.batch(bid)
+        if b["stage"] == "sent":
+            raise DbError("이미 보낸 묶음은 고칠 수 없습니다. 보낸 기록은 항목별 기록에서 고치세요.")
+        return b
+
+    def add_cand(self, row_id, text, meta, cost):
+        r = self._row(row_id)
+        self._editable_batch(r["batch_id"])
+        with self.d.tx() as c:
+            ids = [x[0] for x in c.execute("SELECT id FROM inbox_cands WHERE row_id=? ORDER BY id", (r["id"],))]
+            for old in ids[: max(0, len(ids) - MAX_CANDS + 1)]:
+                c.execute("DELETE FROM inbox_cands WHERE id=?", (old,))
+            return c.execute("INSERT INTO inbox_cands(row_id, text, meta, cost) VALUES(?,?,?,?)",
+                             (r["id"], text, json.dumps(meta or {}, ensure_ascii=False), float(cost or 0))).lastrowid
+
+    def use_cand(self, row_id, cand_id):
+        r = self._row(row_id)
+        self._editable_batch(r["batch_id"])
+        with self.d.tx() as c:
+            if cand_id:
+                cd = c.execute("SELECT text FROM inbox_cands WHERE id=? AND row_id=?", (int(cand_id), r["id"])).fetchone()
+                if not cd:
+                    raise DbError("후보를 찾지 못했습니다.")
+                c.execute("UPDATE inbox_rows SET used_text=? WHERE id=?", (cd[0], r["id"]))
+            else:
+                c.execute("UPDATE inbox_rows SET used_text=NULL WHERE id=?", (r["id"],))
+
+    # ---------- ④ 보내기 ----------
+    def review(self, bid):
+        v = self.view(bid)
+        b = v["batch"]
+        rows = [r for r in v["rows"] if r["state"] == "confirmed"]
+        per = {}
+        for r in rows:
+            per.setdefault(r["student_no"], {"student_no": r["student_no"], "name": r["matched_name"], "count": 0})["count"] += 1
+        closed = [p for p in per.values() if self.rec.is_closed(b["group_id"], b["item"], p["student_no"])]
+        return {**v, "students": sorted(per.values(), key=lambda p: p["student_no"]), "closed": closed,
+                "send_rows": len(rows), "excluded": v["counts"]["excluded"]}
+
+    def send(self, bid, closed_action="block"):
+        """closed_action: block(마감 학생 있으면 막음) / reopen(마감 해제하고 보냄) / exclude(마감 학생 행 제외)"""
+        b = self.batch(bid)
+        if b["stage"] == "sent":
+            raise DbError(f"이미 보낸 묶음입니다({b['sent_at']}). 같은 자료를 다시 보내면 기록이 중복됩니다.")
+        pend = [r for r in self._rows(bid) if r["state"] in ("none", "suggested")]
+        if pend:
+            raise DbError(f"확인이 필요한 행 {len(pend)}개가 남아 있습니다.")
+        self.rec.slot(b["group_id"], b["item"])
+        members = {m["student_no"]: m for m in self.d.members(b["group_id"])}
+        rows = [r for r in self._rows(bid) if r["state"] == "confirmed"]
+        for r in rows:
+            m = members.get(r["student_no"])
+            if not m or not m["active"]:
+                raise DbError(f"{r['student_no']} 학생이 명렬에 없거나 비활성입니다. 매칭을 다시 확인해 주세요.")
+        closed = sorted({r["student_no"] for r in rows if self.rec.is_closed(b["group_id"], b["item"], r["student_no"])})
+        if closed and closed_action == "block":
+            raise DbError(f"마감된 학생 {len(closed)}명이 있습니다: " + ", ".join(f"{n} {members[n]['name']}" for n in closed))
+        tag_ids = b["tag_ids"]
+        with self.d.tx() as c:
+            if closed and closed_action == "exclude":
+                for r in rows:
+                    if r["student_no"] in closed:
+                        c.execute("UPDATE inbox_rows SET state='excluded', exclude_reason='마감된 학생' WHERE id=?", (r["id"],))
+                rows = [r for r in rows if r["student_no"] not in closed]
+            if closed and closed_action == "reopen":
+                for n in closed:
+                    c.execute("UPDATE finals SET closed=0, closed_at=NULL WHERE group_id=? AND item=? AND student_no=?", (b["group_id"], b["item"], n))
+            if not rows:
+                raise DbError("보낼 행이 없습니다.")
+            seqs = {}
+            for r in rows:
+                sno = r["student_no"]
+                if sno not in seqs:
+                    seqs[sno] = c.execute("SELECT COALESCE(MAX(seq),0) FROM records WHERE group_id=? AND item=? AND student_no=? AND kind='record'",
+                                          (b["group_id"], b["item"], sno)).fetchone()[0] or 0
+                seqs[sno] += 1
+                text = r["used_text"] if r["used_text"] is not None else r["content"]
+                # 제목: 날짜·회차뿐인 머리글이면 묶음 이름, 활동명 머리글이면 그 이름
+                lab = r["label"] or ""
+                if not lab or r["date"] or re.fullmatch(r"\d+회", lab):
+                    title = b["title"]
+                else:
+                    title = lab
+                rid = c.execute(
+                    "INSERT INTO records(group_id,item,student_no,kind,seq,date,title,content,source) VALUES(?,?,?,'record',?,?,?,?,?)",
+                    (b["group_id"], b["item"], sno, seqs[sno], r["date"] or b["date"], title, text, f"inbox:{b['id']}"),
+                ).lastrowid
+                for tid in tag_ids:
+                    c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (rid, int(tid)))
+                c.execute("UPDATE finals SET stale=1 WHERE group_id=? AND item=? AND student_no=? AND text<>''", (b["group_id"], b["item"], sno))
+            n_students = len({r["student_no"] for r in rows})
+            summary = f"{n_students}명 · {len(rows)}건"
+            self._touch(c, bid, stage="sent", sent_at=dt.datetime.now().strftime("%Y-%m-%d %H:%M"), sent_summary=summary)
+        return {"students": n_students, "records": len(rows), "reopened": closed if closed_action == "reopen" else [],
+                "excluded_closed": closed if closed_action == "exclude" else []}

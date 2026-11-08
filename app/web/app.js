@@ -129,6 +129,7 @@
     if (name === 'records') renderRecordsPanel();
     if (name === 'export') renderExport();
     if (name === 'tags') renderTags();
+    if (name === 'inbox') renderInbox();
   }
   function setCollapsed(v) {
     $('app').classList.toggle('collapsed', v);
@@ -168,6 +169,8 @@
     if (panel === 'records') renderRecordsPanel();
     if (panel === 'export') renderExport();
     if (panel === 'tags') renderTags();
+    if (panel === 'inbox') { IB.bid = null; renderInbox(); }
+    refreshInboxBadge();
   }
   function visibleGroups() {
     return (ys.groups || []).filter((g) => ys.role === 'homeroom' || g.kind !== 'homeroom');
@@ -366,6 +369,17 @@
     }
     const g = groups.find((x) => x.id === rosterSel);
     $('crumb').textContent = `${ys.year}학년도 › 명렬·담당 관리 › ${g.label}`;
+    if (returnTo) {
+      body.appendChild(el('div', { class: 'return-bar' }, ['📥 자료 인박스에서 학생 매칭 중이었습니다. 명렬을 반영한 뒤 돌아가세요.', el('span', { class: 'spacer' }),
+        el('button', { type: 'button', class: 'primary', text: '매칭으로 돌아가기', onclick: async () => {
+          const back = returnTo;
+          returnTo = null;
+          await call('inbox_rematch', back.bid);
+          IB.bid = back.bid;
+          showPanel('inbox');
+        } }),
+        el('button', { type: 'button', class: 'link', text: '닫기', onclick: () => { returnTo = null; renderRoster(); } })]));
+    }
     body.appendChild(groupEditor(g));
     loadMembers(g, body);
   }
@@ -1243,7 +1257,7 @@
       el('button', { type: 'button', disabled: locked || !sel.length, text: '태그 일괄 지정', onclick: bulkTag }),
     ]));
     if (!v.records.length) {
-      box.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '아직 기록이 없습니다.' }), el('p', { class: 'hint', text: '[+ 누가기록]으로 활동을 하나씩 쌓거나, 이미 쓴 생기부를 넣어 다듬을 수 있습니다. 자료 인박스(스캔·엑셀)는 v0.3에서 제공합니다.' })]));
+      box.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '아직 기록이 없습니다.' }), el('p', { class: 'hint', text: '[+ 누가기록]으로 활동을 하나씩 쌓거나, 이미 쓴 생기부를 넣어 다듬을 수 있습니다. 여러 학생의 엑셀 자료는 자료 인박스에서 학생별로 나눠 한 번에 보낼 수 있습니다.' })]));
       return;
     }
     v.records.forEach((r) => box.appendChild(recordCard(r, locked)));
@@ -1641,6 +1655,424 @@
     if (await mutate('prompts_save', P.item, P.op, $('prPrompt').value, $('prExample').value)) $('prState').textContent = '개인 프롬프트 · 저장됨';
   }, 600);
 
+  // =====================================================================
+  // v0.3: 자료 인박스 — ① 가져오기 → ② 학생 매칭 → ③ AI 정제(선택) → ④ 보내기 검토
+  // =====================================================================
+  const IB = { list: [], bid: null, view: null, raw: null, opts: null, preview: [], onlyPending: false, sel: new Set(), stop: false };
+  const STAGE_NAME = { import: '① 가져오기', match: '② 매칭 대기', refine: '③ 정제', review: '④ 보내기 대기', sent: '보내기 완료' };
+  const ST_CHIP = { confirmed: '✔ 확정', suggested: '추천', none: '! 확인 필요', excluded: '제외' };
+  let returnTo = null; // 명렬 등록하러 갔다가 돌아올 곳
+
+  async function refreshInboxBadge() {
+    if (!ys.year) return;
+    const r = await api.inbox_list();
+    if (!r || !r.ok) return;
+    IB.list = r.batches;
+    const n = r.batches.filter((b) => b.stage !== 'sent').length;
+    $('ibBadge').hidden = !n;
+    $('ibBadge').textContent = n;
+  }
+  async function renderInbox() {
+    if (!(await loadSlots())) return;
+    await refreshInboxBadge();
+    renderInboxList();
+    if (IB.bid && IB.list.find((b) => b.id === IB.bid)) await loadBatch();
+    else { IB.bid = null; renderInboxEmpty(); }
+  }
+  function slotLabel(gid, item) {
+    const s = R.slots.find((x) => x.group_id === gid && x.item === item);
+    return s ? s.label : '(담당 없음)';
+  }
+  function renderInboxList() {
+    const box = $('ibList');
+    box.innerHTML = '';
+    box.appendChild(el('button', { type: 'button', class: 'primary edit-only', style: 'width:100%;margin-bottom:10px', text: '+ 새 자료 묶음', onclick: newBatch }));
+    const open = IB.list.filter((b) => b.stage !== 'sent');
+    const sent = IB.list.filter((b) => b.stage === 'sent');
+    const item = (b) => el('button', { type: 'button', class: 'ib-item' + (b.id === IB.bid ? ' active' : ''), onclick: () => { IB.bid = b.id; IB.raw = null; IB.sel.clear(); renderInboxList(); loadBatch(); } }, [
+      el('span', { class: 't', text: b.title }),
+      el('span', { class: 's', text: slotLabel(b.group_id, b.item) }),
+      el('span', { class: 's' }, [el('span', { class: 'stage-chip' + (b.stage === 'sent' ? ' sent' : ''), text: STAGE_NAME[b.stage] }),
+        b.stage === 'sent' ? ` ${b.sent_summary} · ${b.sent_at}` : (b.n ? ` ${b.n}건${b.pending ? ` · 확인 필요 ${b.pending}` : ''}` : '')]),
+    ]);
+    if (!open.length) box.appendChild(el('p', { class: 'hint', text: '진행 중인 묶음이 없습니다. 학습지·엑셀 자료를 [+ 새 자료 묶음]으로 가져오세요.' }));
+    open.forEach((b) => box.appendChild(item(b)));
+    if (sent.length) {
+      const d = el('details', { style: 'margin-top:10px' }, [el('summary', { text: `보내기 완료 이력 ${sent.length}` })]);
+      sent.forEach((b) => d.appendChild(item(b)));
+      box.appendChild(d);
+    }
+  }
+  function renderInboxEmpty() {
+    const m = $('ibMain');
+    m.innerHTML = '';
+    m.appendChild(el('div', { class: 'empty-state' }, [
+      el('h2', { text: '자료 인박스' }),
+      el('p', { text: '어떤 활동 자료든 여기로 가져와 학생별로 나눈 뒤 항목에 보냅니다.' }),
+      el('p', { class: 'hint', text: '① 가져오기(엑셀 붙여넣기·xlsx) → ② 학생 매칭 → ③ AI 정제(선택) → ④ 보내기 검토. 스캔 PDF는 v0.4에서 제공합니다. 한 학생씩 직접 쓰는 기록은 항목별 기록의 [+ 누가기록]을 쓰세요.' }),
+      el('div', { class: 'steps-btns' }, [el('button', { type: 'button', class: 'primary edit-only', text: '+ 새 자료 묶음', onclick: newBatch })]),
+    ]));
+  }
+  function slotSelect(current, onlyGroup) {
+    const s = el('select', {});
+    R.slots.filter((x) => !onlyGroup || x.group_id === onlyGroup).forEach((x) => s.appendChild(el('option', { value: slotKey(x), text: x.label + (x.total ? '' : ' (명렬 없음)'), selected: current === slotKey(x) })));
+    return s;
+  }
+  function newBatch() {
+    if (!R.slots.length) { alertBox('담당이 없습니다. 명렬·담당 관리에서 먼저 추가하세요.'); return; }
+    openSheet((box) => {
+      box.style.height = 'auto';
+      box.style.width = 'min(560px, 92vw)';
+      const title = el('input', { type: 'text', placeholder: '예: 1학기 진로 학습지, 독서 기록' });
+      const slot = slotSelect(R.slot ? slotKey(R.slot) : null);
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: '새 자료 묶음' })]),
+        el('label', { text: '묶음 이름' }), title,
+        el('label', { text: '대상 명렬 · 보낼 항목' }), slot,
+        el('p', { class: 'hint', text: '먼저 정해 두면 매칭 후보가 그 명렬로 좁혀지고, 정제 지침도 그 항목의 지침을 씁니다. 보내기 전에 바꿀 수 있습니다.' }),
+        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }),
+          el('button', { type: 'button', class: 'primary', text: '만들기', onclick: async () => {
+            const [gid, item] = slot.value.split(':');
+            const r = await mutate('inbox_create', title.value, +gid, item);
+            if (!r) return;
+            closeSheet();
+            IB.bid = r.id;
+            IB.raw = null;
+            await renderInbox();
+          } })]));
+      setTimeout(() => title.focus(), 50);
+    });
+  }
+  async function loadBatch() {
+    const r = await call('inbox_view', IB.bid);
+    if (!r) return;
+    IB.view = r;
+    refreshInboxBadge().then(renderInboxList);
+    const b = r.batch;
+    if (b.meta && b.meta.raw && !IB.raw) { IB.raw = b.meta.raw; IB.opts = Object.assign({ structure: b.structure }, b.meta.opts || {}); }
+    renderBatch();
+  }
+  function stepsBar(stage) {
+    const order = ['import', 'match', 'refine', 'review'];
+    const idx = stage === 'sent' ? 4 : order.indexOf(stage);
+    return el('div', { class: 'steps-bar' }, ['1 가져오기', '2 학생 매칭', '3 AI 정제(선택)', '4 보내기 검토'].map((t, i) => el('span', { class: i === idx ? 'active' : i < idx ? 'done' : '', text: t })));
+  }
+  function renderBatch() {
+    const m = $('ibMain');
+    m.innerHTML = '';
+    const b = IB.view.batch;
+    const sent = b.stage === 'sent';
+    const title = el('input', { type: 'text', value: b.title, disabled: sent });
+    title.addEventListener('change', async () => { if (await mutate('inbox_update', b.id, { title: title.value })) { refreshInboxBadge().then(renderInboxList); } });
+    const slot = slotSelect(`${b.group_id}:${b.item}`);
+    slot.disabled = sent;
+    slot.addEventListener('change', async () => {
+      const [gid, item] = slot.value.split(':');
+      if (+gid !== b.group_id && IB.view.rows.length && !(await confirmBox('대상 명렬을 바꾸면 학생 매칭을 처음부터 다시 합니다. 계속할까요?', '바꾸기'))) { slot.value = `${b.group_id}:${b.item}`; return; }
+      if (await mutate('inbox_update', b.id, { group_id: +gid, item })) { await refreshInboxBadge(); renderInboxList(); loadBatch(); }
+    });
+    m.appendChild(el('div', { class: 'ib-head' }, [title, el('span', { class: 'muted', text: '→' }), slot, el('span', { class: 'spacer' }),
+      sent ? el('span', { class: 'stage-chip sent', text: `보내기 완료 ${b.sent_at} · ${b.sent_summary}` }) : el('button', { type: 'button', class: 'link danger-text', text: '묶음 삭제', onclick: async () => {
+        if (!(await confirmBox(`'${b.title}' 묶음을 지웁니다. 아직 보내지 않은 자료는 사라집니다.`, '삭제'))) return;
+        if (await mutate('inbox_delete', b.id)) { IB.bid = null; renderInbox(); }
+      } })]));
+    m.appendChild(stepsBar(b.stage));
+    const body = el('div', {});
+    m.appendChild(body);
+    if (b.stage === 'import') renderImport(body);
+    else if (b.stage === 'match') renderMatch(body);
+    else if (b.stage === 'refine') renderRefine(body);
+    else if (b.stage === 'review') renderReview(body);
+    else renderSent(body);
+  }
+
+  // ① 가져오기
+  function renderImport(body) {
+    const b = IB.view.batch;
+    if (!IB.raw) {
+      const ta = el('textarea', { rows: 8, placeholder: '또는 여기를 누르고 Ctrl+V로 붙여넣은 뒤 [읽기]' });
+      body.append(
+        el('p', { text: '자료를 가져오세요. 엑셀에서 학생 칸과 내용 칸을 드래그해 복사하면 셀마다 기록 한 건으로 나눕니다.' }),
+        el('div', { class: 'src-btns' }, [
+          el('button', { type: 'button', class: 'primary', text: '📋 엑셀 붙여넣기(클립보드)', onclick: async () => { const c = await api.read_clipboard(); const t = c && c.ok ? c.text : ''; if (!t.trim()) { toast('클립보드가 비어 있습니다. 아래 칸에 직접 붙여넣어도 됩니다.'); ta.focus(); return; } loadSource(() => call('inbox_source_text', b.id, t)); } }),
+          el('button', { type: 'button', text: '📂 xlsx 불러오기', onclick: () => loadSource(() => call('inbox_source_xlsx', b.id)) }),
+          el('button', { type: 'button', disabled: true, title: 'v0.4에서 제공', text: '🖨 스캔 PDF (v0.4)' }),
+        ]),
+        ta,
+        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '읽기', onclick: () => loadSource(() => call('inbox_source_text', b.id, ta.value)) })]),
+      );
+      return;
+    }
+    const o = IB.opts;
+    const members = IB.view.members;
+    const seg = (key, choices) => el('div', { class: 'segmented' }, choices.map(([v, t]) => el('button', { type: 'button', class: 'seg' + (o[key] === v ? ' active' : ''), text: t, onclick: () => { o[key] = v; renderBatch(); } })));
+    const lineOpts = () => {
+      const g = o.orient === 'cols' ? IB.raw[0].map((_, j) => IB.raw.map((r) => r[j] || '')) : IB.raw.map((r) => r);
+      const width = Math.max(...g.map((r) => r.length));
+      const first = g[o.header ? 1 : 0] || [];
+      return Array.from({ length: width }, (_, j) => [j, `${o.orient === 'cols' ? `${j + 1}행` : `${colName(j)}열`}: ${(first[j] || '').slice(0, 8)}`]);
+    };
+    const pick = (key, label) => el('label', {}, [label, el('select', { onchange: (e) => { o[key] = e.target.value === '' ? null : +e.target.value; renderBatch(); } },
+      [el('option', { value: '', text: '(없음)' }), ...lineOpts().map(([v, t]) => el('option', { value: v, text: t, selected: o[key] === v }))])]);
+    const ctrl = el('div', { class: 'map-row' }, [seg('structure', [['multi', '여러 학생에게'], ['single', '한 학생에게 여러 건']])]);
+    if (o.structure === 'single') {
+      ctrl.append(el('label', {}, ['학생', el('select', { onchange: (e) => { o.student_no = e.target.value; renderBatch(); } }, [el('option', { value: '', text: '학생 고르기' }), ...members.map((x) => el('option', { value: x.student_no, text: `${x.student_no} ${x.name}`, selected: o.student_no === x.student_no }))])]),
+        el('span', { text: '읽는 순서' }), seg('order', [['row', '행 우선(→)'], ['col', '열 우선(↓)']]));
+    } else {
+      ctrl.append(seg('orient', [['rows', '한 행이 한 학생'], ['cols', '한 열이 한 학생']]),
+        el('button', { type: 'button', text: '가로↔세로 바꾸기', onclick: () => { o.orient = o.orient === 'cols' ? 'rows' : 'cols'; o.no_idx = null; o.name_idx = null; renderBatch(); } }),
+        pick('no_idx', '학번'), pick('name_idx', '이름'));
+    }
+    ctrl.append(el('label', {}, [el('input', { type: 'checkbox', checked: !!o.header, onchange: (e) => { o.header = e.target.checked; renderBatch(); } }), '첫 줄은 날짜·회차 제목']));
+    body.appendChild(ctrl);
+    if (o.structure === 'multi' && o.found === false && o.no_idx == null && o.name_idx == null) body.appendChild(el('div', { class: 'warn', text: '학번·이름 줄을 자동으로 찾지 못했습니다. 위에서 직접 고르거나, 한 학생의 자료라면 [한 학생에게 여러 건]을 고르세요.' }));
+    const left = el('div', { class: 'prev-box' });
+    const right = el('div', { class: 'prev-box mk-list' });
+    const summary = el('span', {});
+    const go = el('button', { type: 'button', class: 'primary', text: '확정하고 매칭으로' });
+    body.append(el('div', { class: 'split2' }, [el('div', {}, [el('div', { class: 'col-label', text: '원본 셀 미리보기' }), left]), el('div', {}, [el('div', { class: 'col-label', text: '만들어질 기록' }), right])]),
+      el('div', { class: 'sheet-foot' }, [summary, el('span', { class: 'spacer' }), el('button', { type: 'button', text: '다시 가져오기', onclick: () => { IB.raw = null; renderBatch(); } }), go]));
+    go.addEventListener('click', async () => {
+      const r = await mutate('inbox_import', b.id, o);
+      if (!r) return;
+      toast(`${r.count}건을 만들었습니다. 학생 매칭을 확인하세요.`);
+      await refreshInboxBadge();
+      renderInboxList();
+      loadBatch();
+    });
+    (async () => {
+      const r = await call('inbox_preview', b.id, o);
+      if (!r) return;
+      IB.preview = r.rows;
+      // 셀 색: 학번·이름 줄, 제목 줄, 학생별 내용, 빈 칸
+      const lineOf = {};
+      r.rows.forEach((x) => { lineOf[x.source_ref] = x.line; });
+      const t = el('table', { class: 'grid-prev' });
+      const width = Math.max(...IB.raw.map((x) => x.length));
+      t.appendChild(el('tr', {}, [el('th', { text: '' }), ...Array.from({ length: width }, (_, j) => el('th', { text: colName(j) }))]));
+      IB.raw.forEach((row, i) => {
+        const tr = el('tr', {}, [el('th', { text: String(i + 1) })]);
+        for (let j = 0; j < width; j++) {
+          const v = row[j] || '';
+          const ref = `${colName(j)}${i + 1}`;
+          let cls = '';
+          const lineIdx = o.orient === 'cols' ? j : i;
+          const posIdx = o.orient === 'cols' ? i : j;
+          if (o.header && lineIdx === 0 && (o.structure === 'multi' || i === 0)) cls = 'c-head';
+          else if (o.structure === 'multi' && (posIdx === o.no_idx || posIdx === o.name_idx)) cls = 'c-id';
+          else if (ref in lineOf) cls = `c-l${(lineOf[ref] || 0) % 4}`;
+          else if (!v) cls = 'c-skip';
+          tr.appendChild(el('td', { class: cls, title: v, text: v }));
+        }
+        t.appendChild(tr);
+      });
+      left.appendChild(t);
+      r.rows.forEach((x) => right.appendChild(el('div', { class: 'mk' }, [el('b', { text: o.structure === 'single' ? (members.find((mm) => mm.student_no === o.student_no) || {}).name || '(학생 고르기)' : `${x.ext_no || '학번?'} ${x.ext_name || ''}`.trim() }),
+        el('span', { class: 'tag', text: x.label }), x.date ? el('span', { class: 'muted', text: x.date + ' ' }) : null, x.content.slice(0, 70) + (x.content.length > 70 ? '…' : '')])));
+      if (!r.rows.length) right.appendChild(el('p', { class: 'muted', text: '만들어질 기록이 없습니다.' }));
+      const students = new Set(r.rows.map((x) => (o.structure === 'single' ? 's' : `${x.line}`))).size;
+      const empty = IB.raw.reduce((a, row) => a + row.filter((v) => !v).length, 0);
+      summary.innerHTML = '';
+      summary.append(el('b', { text: `${o.structure === 'single' ? 1 : students}명 / ${r.rows.length}건 생성 예정` }), el('span', { class: 'muted', text: ` · 빈 셀 ${empty}개 제외 · 확정 전에는 항목에 아무것도 들어가지 않습니다` }));
+      go.disabled = !r.rows.length || (o.structure === 'single' && !o.student_no);
+    })();
+  }
+  async function loadSource(fn) {
+    const r = await fn();
+    if (!r) return;
+    IB.raw = r.raw;
+    IB.opts = Object.assign({ structure: IB.view.batch.structure || 'multi', order: 'row' }, r.opts);
+    if (!IB.opts.found) IB.opts.structure = IB.view.members.length ? IB.opts.structure : 'multi';
+    renderBatch();
+  }
+
+  // ② 학생 매칭
+  function renderMatch(body) {
+    const v = IB.view;
+    const b = v.batch;
+    const c = v.counts;
+    const pending = c.suggested + c.none;
+    if (!v.members.length) {
+      body.appendChild(el('div', { class: 'warn' }, ['이 담당의 명렬이 비어 있어 학생을 연결할 수 없습니다. ',
+        el('button', { type: 'button', class: 'primary', text: '명렬 등록하러 가기', onclick: () => { returnTo = { panel: 'inbox', bid: b.id }; rosterSel = b.group_id; showPanel('roster'); } })]));
+    }
+    body.appendChild(el('div', { class: 'toolbar' }, [
+      el('b', { text: `확정 ${c.confirmed}` }), el('span', { class: pending ? 'danger-text' : 'muted', style: 'font-weight:800', text: `확인 필요 ${pending}` }), el('span', { class: 'muted', text: `제외 ${c.excluded}` }),
+      el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'checkbox', checked: IB.onlyPending, onchange: (e) => { IB.onlyPending = e.target.checked; renderBatch(); } }), '확인 필요만 보기']),
+      el('span', { class: 'spacer' }),
+      el('button', { type: 'button', disabled: !c.suggested, text: `추천 ${c.suggested}건 일괄 확정`, onclick: async () => {
+        if (!(await confirmBox('추천은 학번·이름이 완전히 맞지 않아 앱이 짐작한 연결입니다. 원본과 대조해 보셨나요? 추천 모두를 확정합니다.', '확정'))) return;
+        if (await mutate('inbox_confirm_suggested', b.id)) loadBatch();
+      } }),
+      el('button', { type: 'button', text: '명렬 등록·수정', onclick: () => { returnTo = { panel: 'inbox', bid: b.id }; rosterSel = b.group_id; showPanel('roster'); } }),
+      el('button', { type: 'button', text: '다시 매칭', title: '확정·제외하지 않은 행을 명렬과 다시 맞춥니다', onclick: async () => { if (await mutate('inbox_rematch', b.id)) loadBatch(); } }),
+    ]));
+    const t = el('table', { class: 'tbl match-tbl' });
+    t.appendChild(el('tr', {}, ['원본 위치', '읽은 학번·이름', '연결할 학생', '상태', '내용', ''].map((h) => el('th', { text: h }))));
+    v.rows.filter((r) => !IB.onlyPending || r.state === 'none' || r.state === 'suggested').forEach((r) => {
+      const sel = el('select', { disabled: r.state === 'excluded' || b.structure === 'single', onchange: async (e) => { if (await mutate('inbox_set_student', r.id, e.target.value)) loadBatch(); } },
+        [el('option', { value: '', text: '학생 고르기' }), ...v.members.map((x) => el('option', { value: x.student_no, text: `${x.student_no} ${x.name}`, selected: x.student_no === r.student_no }))]);
+      const stateTd = el('td', {}, [el('div', { class: `st-chip ${r.state}`, text: ST_CHIP[r.state] + (r.state === 'excluded' ? ` (${r.exclude_reason})` : '') }),
+        r.note && r.state !== 'confirmed' ? el('div', { class: 'note', text: r.note }) : null,
+        r.dup ? el('div', { class: 'note', text: '같은 학생이 원본의 다른 줄에도 있음(중복 의심)' }) : null,
+        r.state === 'suggested' ? el('button', { type: 'button', class: 'small', text: '확정', onclick: async () => { if (await mutate('inbox_confirm_suggested', b.id, [r.id])) loadBatch(); } }) : null]);
+      t.appendChild(el('tr', { class: r.state === 'excluded' ? 'row-excluded' : (r.state === 'none' || r.state === 'suggested') ? 'row-pending' : '' }, [
+        el('td', { text: r.source_ref }), el('td', { text: `${r.ext_no || '-'} ${r.ext_name || ''}` }), el('td', {}, [sel]), stateTd,
+        el('td', {}, [el('div', { class: 'snip', text: `[${r.label}${r.date ? ' ' + r.date : ''}] ${r.content}` })]),
+        el('td', {}, [r.state === 'excluded'
+          ? el('button', { type: 'button', class: 'small', text: '제외 취소', onclick: async () => { if (await mutate('inbox_exclude', [r.id], '', false)) loadBatch(); } })
+          : el('button', { type: 'button', class: 'small', text: '제외', onclick: () => excludeRows([r.id]) })]),
+      ]));
+    });
+    body.appendChild(t);
+    body.appendChild(el('p', { class: 'hint', text: '학번과 이름이 모두 명렬과 맞으면 자동 확정, 이름만 맞거나 비슷하면 "추천"입니다. 추천은 원본과 대조한 뒤 확정하세요. 백지·다른 반 자료처럼 보내지 않을 행은 [제외]하면 인박스에 남습니다.' }));
+    body.appendChild(el('div', { class: 'sheet-foot' }, [
+      el('button', { type: 'button', text: '← 가져오기 다시', onclick: async () => { if (!(await confirmBox('가져오기 단계로 돌아가면 지금 매칭 결과는 다시 만들어집니다.', '돌아가기'))) return; if (await mutate('inbox_stage', b.id, 'import')) loadBatch(); } }),
+      el('span', { class: 'spacer' }),
+      pending ? el('span', { class: 'danger-text', style: 'font-weight:700', text: `확인 필요 ${pending}건을 확정하거나 제외해야 다음으로 갑니다.` }) : null,
+      el('button', { type: 'button', class: 'primary', disabled: !!pending, text: '다음: AI 정제(선택)', onclick: async () => { if (await mutate('inbox_stage', b.id, 'refine')) loadBatch(); } }),
+    ]));
+  }
+  function excludeRows(ids) {
+    openSheet((box) => {
+      box.style.height = 'auto';
+      box.style.width = 'min(480px, 92vw)';
+      let reason = '백지';
+      const seg = el('div', { class: 'tagpick' });
+      const draw = () => { seg.innerHTML = ''; ['백지', '다른 반', '명렬에 없음(전입 등)', '중복', '기타'].forEach((x) => seg.appendChild(el('button', { type: 'button', class: x === reason ? 'on' : '', text: x, onclick: () => { reason = x; draw(); } }))); };
+      draw();
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `제외 이유 · ${ids.length}건` })]), seg,
+        el('p', { class: 'hint', text: '제외한 행은 보내지 않고 이 묶음에 남습니다. 보내기 검토에서 제외 건수가 표시됩니다.' }),
+        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }),
+          el('button', { type: 'button', class: 'primary', text: '제외', onclick: async () => { if (await mutate('inbox_exclude', ids, reason, true)) { closeSheet(); loadBatch(); } } })]));
+    });
+  }
+
+  // ③ AI 정제(선택)
+  function renderRefine(body) {
+    const v = IB.view;
+    const b = v.batch;
+    const rows = v.rows.filter((r) => r.state === 'confirmed');
+    const model = el('select', {});
+    fillModelSelect(model);
+    IB.sel = new Set([...IB.sel].filter((id) => rows.some((r) => r.id === id)));
+    body.appendChild(el('div', { class: 'toolbar' }, [
+      el('label', { class: 'inline', style: 'margin:0' }, ['모델', model]),
+      el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'checkbox', checked: IB.sel.size && IB.sel.size === rows.length, onchange: (e) => { IB.sel = new Set(e.target.checked ? rows.map((r) => r.id) : []); renderBatch(); } }), '전체 선택']),
+      el('button', { type: 'button', class: 'primary', disabled: !IB.sel.size, text: `선택 ${IB.sel.size}건 정제`, onclick: () => refineRows(rows.filter((r) => IB.sel.has(r.id)), model.value) }),
+      el('span', { class: 'spacer' }),
+      el('span', { class: 'hint', style: 'margin:0', text: `${slotLabel(b.group_id, b.item)}의 '정제' 지침을 씁니다. AI에는 학번·이름 없이 내용만 보냅니다.` }),
+    ]));
+    rows.forEach((r) => {
+      const card = el('div', { class: 'ref-card' });
+      card.appendChild(el('div', { class: 'rcard-head' }, [el('input', { type: 'checkbox', checked: IB.sel.has(r.id), onchange: (e) => { if (e.target.checked) IB.sel.add(r.id); else IB.sel.delete(r.id); renderBatch(); } }),
+        el('b', { text: `${r.student_no} ${r.matched_name}` }), el('span', { class: 'tag', text: r.label }), r.date ? el('span', { class: 'muted', text: r.date }) : null, el('span', { class: 'muted', text: r.source_ref }),
+        el('span', { class: 'spacer' }), bytesEl(r.bytes, 0)]));
+      const usingOrig = r.used_text === null || r.used_text === undefined;
+      const pickBox = el('div', { class: 'use-pick' }, [el('span', { class: 'muted', text: '보낼 내용:' }),
+        el('button', { type: 'button', class: usingOrig ? 'on' : '', text: '원문', onclick: async () => { if (await mutate('inbox_use_cand', r.id, null)) loadBatch(); } }),
+        ...r.cands.map((cd, i) => el('button', { type: 'button', class: !usingOrig && r.used_text === cd.text ? 'on' : '', text: `정제 ${i + 1}`, onclick: async () => { if (await mutate('inbox_use_cand', r.id, cd.id)) loadBatch(); } }))]);
+      const btn = el('button', { type: 'button', class: 'small', text: r.cands.length ? '다시 정제' : '정제(AI)' });
+      btn.addEventListener('click', () => refineRows([r], model.value, btn));
+      card.append(el('div', { class: 'ref-cols' }, [el('div', {}, [el('div', { class: 'muted', text: '원문' }), el('div', { class: 'rcard-body', text: r.content })]),
+        el('div', {}, [el('div', { class: 'muted', text: '보낼 내용' }), el('div', { class: 'rcard-body', text: r.text })])]), el('div', { class: 'rcard-foot' }, [pickBox, el('span', { class: 'spacer' }), btn]));
+      body.appendChild(card);
+    });
+    body.appendChild(el('div', { class: 'sheet-foot' }, [
+      el('button', { type: 'button', text: '← 매칭', onclick: async () => { if (await mutate('inbox_stage', b.id, 'match')) loadBatch(); } }),
+      el('span', { class: 'spacer' }),
+      el('span', { class: 'hint', style: 'margin:0', text: 'AI 정제는 선택입니다. 정제하지 않은 행은 원문 그대로 보냅니다.' }),
+      el('button', { type: 'button', class: 'primary', text: '다음: 보내기 검토', onclick: async () => { if (await mutate('inbox_stage', b.id, 'review')) loadBatch(); } }),
+    ]));
+  }
+  async function refineRows(rows, modelIndex, btn) {
+    if (!rows.length) return;
+    IB.stop = false;
+    let done = 0, fail = 0;
+    const msg = el('div', { class: 'modal-msg' });
+    const stopBtn = el('button', { type: 'button', class: 'btn-danger', text: '중지', onclick: () => { IB.stop = true; stopBtn.disabled = true; stopBtn.textContent = '중지 중…'; } });
+    if (rows.length > 1) {
+      openSheet((box) => { box.style.height = 'auto'; box.style.width = 'min(440px, 92vw)'; box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: 'AI 정제 중' })]), msg, el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), stopBtn])); });
+    } else if (btn) { btn.disabled = true; btn.classList.add('busy-btn'); }
+    const errors = [];
+    for (const r of rows) {
+      if (IB.stop) break;
+      msg.textContent = `${done + fail + 1} / ${rows.length}건 — 실패 ${fail}건\n멈춘 게 아니니 기다려 주세요.`;
+      const res = await api.ai_inbox_row(r.id, modelIndex);
+      if (res && res.ok) { done += 1; runCost = res.run_cost; $('runCost').textContent = fmtCredit(runCost); }
+      else { fail += 1; errors.push(res && res.error); }
+    }
+    closeSheet();
+    refreshBalance();
+    if (fail) alertBox(`정제 ${done}건 완료, 실패 ${fail}건.\n${errors[0] || ''}`);
+    else if (IB.stop) toast(`중지했습니다. ${done}건은 정제했습니다.`);
+    else toast(`${done}건을 정제했습니다. 보낼 내용으로 바로 골라 두었습니다.`);
+    IB.sel.clear();
+    loadBatch();
+  }
+
+  // ④ 보내기 검토
+  async function renderReview(body) {
+    const b = IB.view.batch;
+    const r = await call('inbox_review', b.id);
+    if (!r) return;
+    const date = el('input', { type: 'date', value: b.date || todayStr() });
+    date.addEventListener('change', () => mutate('inbox_update', b.id, { date: date.value }));
+    const tagsBox = el('div', { class: 'tagpick' });
+    const tagSet = new Set(b.tag_ids || []);
+    const tags = await call('tags');
+    const drawTags = () => {
+      tagsBox.innerHTML = '';
+      (tags ? tags.tags : []).forEach((t) => tagsBox.appendChild(el('button', { type: 'button', class: tagSet.has(t.id) ? 'on' : '', text: t.name, onclick: async () => { if (tagSet.has(t.id)) tagSet.delete(t.id); else tagSet.add(t.id); drawTags(); await mutate('inbox_update', b.id, { tag_ids: [...tagSet] }); } })));
+      if (!tags || !tags.tags.length) tagsBox.appendChild(el('span', { class: 'muted', text: '태그가 없습니다(메뉴의 태그에서 만들기).' }));
+    };
+    drawTags();
+    const itemSel = slotSelect(`${b.group_id}:${b.item}`, b.group_id);
+    itemSel.addEventListener('change', async () => { const [, item] = itemSel.value.split(':'); if (await mutate('inbox_update', b.id, { item })) loadBatch(); });
+    body.append(
+      el('div', { class: 'map-row' }, [el('label', {}, ['보낼 항목', itemSel]), el('label', {}, ['기본 날짜', date]), el('span', { class: 'hint', style: 'margin:0', text: '(제목 줄에 날짜가 있으면 그 날짜를 씁니다)' })]),
+      el('label', { text: '태그 (보내는 모든 기록에 붙임)' }), tagsBox,
+      el('div', { class: 'wsection' }, [
+        el('h3', { text: `${r.students.length}명에게 ${r.send_rows}건 추가` }),
+        el('div', { class: 'muted', text: `기존 기록 덮어쓰기 없음 · 제외 ${r.excluded}건 · 회차는 학생마다 이어서 붙습니다` }),
+        el('div', { style: 'margin-top:8px' }, r.students.map((s) => el('span', { class: 'tag', text: `${s.name} ${s.count}건` }))),
+      ]),
+    );
+    const sendBtn = el('button', { type: 'button', class: 'primary', text: `${r.students.length}명에게 ${r.send_rows}건 보내기` });
+    const doSend = async (action) => {
+      const res = await mutate('inbox_send', b.id, action);
+      if (!res) return;
+      toast(`${res.students}명에게 ${res.records}건을 보냈습니다.`);
+      await refreshInboxBadge();
+      renderInboxList();
+      loadBatch();
+    };
+    if (r.closed.length) {
+      body.appendChild(el('div', { class: 'warn', style: 'margin-top:12px' }, [
+        el('b', { text: `마감된 학생 ${r.closed.length}명: ` }), r.closed.map((s) => `${s.student_no} ${s.name}`).join(', '), el('br'),
+        '마감된 학생에게는 그대로 보낼 수 없습니다. ',
+        el('button', { type: 'button', text: '마감 해제하고 보내기', onclick: async () => { if (await confirmBox(`${r.closed.length}명의 마감을 해제하고 보냅니다. 보낸 뒤 다시 검토·마감하세요.`, '보내기')) doSend('reopen'); } }), ' ',
+        el('button', { type: 'button', text: '이 학생들은 제외하고 보내기', onclick: () => doSend('exclude') }),
+      ]));
+      sendBtn.disabled = true;
+    }
+    sendBtn.addEventListener('click', () => doSend('block'));
+    body.appendChild(el('div', { class: 'sheet-foot' }, [
+      el('button', { type: 'button', text: '← 정제', onclick: async () => { if (await mutate('inbox_stage', b.id, 'refine')) loadBatch(); } }),
+      el('span', { class: 'spacer' }), sendBtn]));
+  }
+  function renderSent(body) {
+    const v = IB.view;
+    const b = v.batch;
+    body.append(el('div', { class: 'wsection', style: 'margin-top:0' }, [el('h3', { text: `✔ ${b.sent_at}에 ${b.sent_summary} 보냄` }),
+      el('p', { class: 'hint', text: '보낸 묶음은 다시 보낼 수 없습니다(기록 중복 방지). 보낸 기록은 항목별 기록에서 고치세요.' }),
+      el('button', { type: 'button', class: 'primary', text: '항목별 기록에서 보기', onclick: () => openRecords(b.group_id, b.item, (v.rows.find((r) => r.state === 'confirmed') || {}).student_no) })]));
+    const t = el('table', { class: 'tbl match-tbl' });
+    t.appendChild(el('tr', {}, ['원본 위치', '학생', '상태', '보낸 내용'].map((h) => el('th', { text: h }))));
+    v.rows.forEach((r) => t.appendChild(el('tr', { class: r.state === 'excluded' ? 'row-excluded' : '' }, [el('td', { text: r.source_ref }), el('td', { text: `${r.student_no || '-'} ${r.matched_name || r.ext_name}` }),
+      el('td', { text: r.state === 'excluded' ? `제외(${r.exclude_reason})` : '보냄' }), el('td', {}, [el('div', { class: 'snip', text: r.text })])])));
+    body.appendChild(t);
+  }
+
   // ---------- 파이썬 → 화면 이벤트 ----------
   window.onAppEvent = function (ev) {
     switch (ev.type) {
@@ -1764,6 +2196,7 @@
     const r = await api.year_state();
     ys = r && r.ok ? r : { year: 0, years: [] };
     renderYearSelect();
+    refreshInboxBadge();
     if (!cfg.setup_done || !ys.year) {
       showPanel('dashboard');
       openWizard('first', cfg.openrouter_key ? (ys.year ? 3 : 2) : 1);

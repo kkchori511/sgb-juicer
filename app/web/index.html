@@ -34,7 +34,7 @@
     <!-- ===== 왼쪽 메뉴 ===== -->
     <nav class="sidebar" id="sidebar">
       <button type="button" class="nav" data-panel="dashboard"><i>📊</i><span>현황판</span></button>
-      <button type="button" class="nav" data-panel="inbox"><i>📥</i><span>자료 인박스</span></button>
+      <button type="button" class="nav" data-panel="inbox"><i>📥</i><span>자료 인박스 <b class="nav-badge" id="ibBadge" hidden></b></span></button>
       <button type="button" class="nav" data-panel="records"><i>📝</i><span>항목별 기록</span></button>
       <button type="button" class="nav" data-panel="batch"><i>⚙️</i><span>일괄 종합</span></button>
       <button type="button" class="nav" data-panel="export"><i>📤</i><span>검토·내보내기</span></button>
@@ -72,7 +72,12 @@
       </section>
 
       <!-- ===== 준비 중 화면 ===== -->
-      <section class="panel" data-panel-content="inbox"><div class="card soon" data-soon="자료 인박스|v0.3에서 붙여넣기·xlsx·회차 기록과 학생 매칭, v0.4에서 스캔 PDF(OCR)를 제공합니다."></div></section>
+      <section class="panel" data-panel-content="inbox">
+        <div class="ib-wrap">
+          <aside class="ib-list" id="ibList"></aside>
+          <section class="ib-main" id="ibMain"></section>
+        </div>
+      </section>
       <section class="panel" data-panel-content="records">
         <div class="rec-head">
           <label class="inline">항목 <select id="recSlot"></select></label>

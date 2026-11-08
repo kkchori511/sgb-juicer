@@ -16,6 +16,7 @@ import webview
 
 from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, export, openrouter, prompts, roster, updater, weights
 from .records import Records, items_of
+from .inbox import Inbox
 from .paths import data_dir
 from .textutil import count_bytes
 
@@ -744,6 +745,137 @@ class Api:
         if bad:
             raise db.DbError(f"확인이 필요한 행 {len(bad)}개를 고치거나 빼 주세요. 모든 행이 확실히 매칭되어야 넣을 수 있습니다.")
         return {"count": self._rec().add_existing_bulk(gid, item, built["rows"])}
+
+    # ---------- 자료 인박스 ----------
+    def _ib(self) -> Inbox:
+        return Inbox(self._db())
+
+    @safe
+    def inbox_list(self):
+        return {"batches": self._ib().batches()}
+
+    @safe
+    def inbox_create(self, title, gid, item):
+        self._editable()
+        return {"id": self._ib().create(title, gid, item)}
+
+    @safe
+    def inbox_update(self, bid, data):
+        self._editable()
+        self._ib().update(bid, data or {})
+        return {}
+
+    @safe
+    def inbox_delete(self, bid):
+        self._editable()
+        self._ib().delete(bid)
+        return {}
+
+    @safe
+    def inbox_source_text(self, bid, text):
+        self._editable()
+        raw = roster.parse_text(text or "", delim="\t")
+        if not raw:
+            raise db.DbError("붙여넣은 내용이 없습니다. 엑셀에서 칸을 드래그해 복사한 뒤 붙여넣어 주세요.")
+        return {"opts": self._ib().set_source(bid, raw, "paste"), "raw": raw}
+
+    @safe
+    def inbox_source_xlsx(self, bid):
+        self._editable()
+        res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
+        if not res:
+            return {"ok": False, "cancelled": True}
+        path = res[0] if isinstance(res, (list, tuple)) else res
+        try:
+            raw = roster.parse_xlsx(path)
+        except Exception:
+            raise db.DbError("xlsx 파일을 열지 못했습니다. Excel에서 열려 있으면 닫고 다시 시도해 주세요.")
+        if not raw:
+            raise db.DbError("첫 번째 시트에 내용이 없습니다.")
+        return {"opts": self._ib().set_source(bid, raw, "xlsx", os.path.basename(path)), "raw": raw}
+
+    @safe
+    def inbox_preview(self, bid, opts):
+        rows = self._ib().preview(bid, opts or {})
+        return {"rows": rows}
+
+    @safe
+    def inbox_import(self, bid, opts):
+        self._editable()
+        return {"count": self._ib().confirm_import(bid, opts or {})}
+
+    @safe
+    def inbox_view(self, bid):
+        return self._ib().view(bid)
+
+    @safe
+    def inbox_set_student(self, row_id, sno):
+        self._editable()
+        self._ib().set_student(row_id, sno)
+        return {}
+
+    @safe
+    def inbox_confirm_suggested(self, bid, row_ids=None):
+        self._editable()
+        return {"count": self._ib().confirm_suggested(bid, row_ids)}
+
+    @safe
+    def inbox_exclude(self, row_ids, reason="", on=True):
+        self._editable()
+        self._ib().exclude(row_ids, reason, bool(on))
+        return {}
+
+    @safe
+    def inbox_edit_row(self, row_id, data):
+        self._editable()
+        self._ib().edit_row(row_id, data or {})
+        return {}
+
+    @safe
+    def inbox_rematch(self, bid):
+        self._editable()
+        self._ib().rematch(bid)
+        return {}
+
+    @safe
+    def inbox_stage(self, bid, stage):
+        self._editable()
+        self._ib().to_stage(bid, stage)
+        return {}
+
+    @safe
+    def ai_inbox_row(self, row_id, model_index=None):
+        """인박스 행 한 건 정제. 학번·이름 없이 내용만 보낸다."""
+        self._editable()
+        ib = self._ib()
+        r = ib._row(row_id)
+        b = ib._editable_batch(r["batch_id"])
+        cfg, model = self._model(model_index)
+        pr = prompts.merged(cfg["prompts"])[b["item"]]["refine"]
+        key = ("inbox", r["id"])
+        self._guard(key)
+        try:
+            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"], pr["example"], 0), r["content"], cfg["privacy_block"])
+        finally:
+            self._release(key)
+        cid = ib.add_cand(r["id"], text, {"model": model, "op": "refine", "prompt": pr["prompt"], "example": pr["example"]}, cost)
+        ib.use_cand(r["id"], cid)  # 새 후보를 바로 '보낼 내용'으로(다른 후보·원문으로 바꿀 수 있음)
+        return {"id": cid, "cost": cost, "run_cost": self._run_cost}
+
+    @safe
+    def inbox_use_cand(self, row_id, cand_id=None):
+        self._editable()
+        self._ib().use_cand(row_id, cand_id)
+        return {}
+
+    @safe
+    def inbox_review(self, bid):
+        return self._ib().review(bid)
+
+    @safe
+    def inbox_send(self, bid, closed_action="block"):
+        self._editable()
+        return self._ib().send(bid, closed_action)
 
     # ---------- 내보내기 ----------
     @safe

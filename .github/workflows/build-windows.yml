@@ -30,6 +30,7 @@ jobs:
         run: |
           python tests/test_backend.py
           python tests/test_records.py
+          python tests/test_inbox.py
 
       - name: Version info
         shell: pwsh
