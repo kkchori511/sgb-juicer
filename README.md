@@ -1,0 +1,49 @@
+# 생기부 착즙기 (베타)
+
+> 선생님의 자료 한 방울까지 생기부에 넣겠습니다. — 김한량 디지털 공방 제작
+
+학기말 학교생활기록부(생기부) 작성을 AI로 돕는 Windows 프로그램입니다. 학습지·기록을 학생별로 모으고, AI로 정제·종합해 항목별로 내보냅니다.
+모든 기능은 베타이며, 기능이 모두 들어가기 전까지 버전은 1.0 미만입니다.
+
+- 요구사항: [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)
+- 화면 구성: [docs/design/LAYOUT.md](docs/design/LAYOUT.md)
+
+## 버전 계획
+
+| 버전 | 범위 |
+|---|---|
+| 0.1 | 뼈대와 배포: 화면 틀, 설정(키·모델 4칸·학습 차단), 첫 실행 마법사, 명렬·담당 관리, 현황판, 유의 사항, 학년도별 저장·백업, 자동 업데이트 |
+| 0.2 | 항목별 기록·학생 편집, 정제·종합, 최종안·마감, 태그, 내보내기 |
+| 0.3 | 인박스(붙여넣기·xlsx·회차 기록, 학생 매칭, 보내기) |
+| 0.4 | 스캔 PDF OCR(CLOVA) |
+| 0.5 | 성취기준(붙여넣기·PDF·hwpx), 성취수준별 세특 |
+| 0.6 | 일괄 종합, 문단 이동, 일정·다음 할 일 완성 |
+| 0.7 | 기본 프롬프트 확정, 사용 안내 |
+
+## 내려받기
+
+[Releases](https://github.com/kkchori511/sgb-juicer/releases/latest)에서 `SGB-Juicer.exe`(생기부착즙기.exe)를 내려받아 원하는 폴더에 두고 실행합니다.
+새 버전이 올라오면 앱이 실행될 때 알려 주고, [지금 업데이트]를 누르면 자료를 백업한 뒤 스스로 교체·재실행합니다.
+
+## 자료와 보안
+
+- 키·설정·학생 자료는 exe 옆 `생기부착즙기_데이터` 폴더에 **평문**으로 저장됩니다. 프로그램을 나눠 줄 때는 **exe 파일만** 주세요.
+- AI(OpenRouter)에는 학번·이름을 빼고 내용만 보냅니다. 스캔 PDF는 CLOVA OCR에 이미지가 그대로 전송되므로, 필요하면 스캔 전에 인적사항을 가려 주세요.
+- 설정에서 OpenRouter 학습 차단(`data_collection: deny`, `zdr: true`)을 켤 수 있습니다(기본 꺼짐).
+
+## 개발 실행
+
+Python 3.12.
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt   # Windows: .\.venv\Scripts\pip
+.venv/bin/python run.py
+.venv/bin/python tests/test_backend.py      # 백엔드 테스트
+```
+
+## Windows 빌드와 배포
+
+- `feature/**` 브랜치에 push하면 GitHub Actions가 exe를 빌드합니다(아티팩트 `sgb-juicer-windows`).
+- 배포: `app/__init__.py`의 `VERSION`을 올리고 같은 이름의 태그(예: `v0.1.0`)를 push하면 Release가 만들어지고 exe가 붙습니다. 앱의 자동 업데이트는 이 최신 Release를 봅니다.
+- 직접 빌드: `python packaging/make_version_info.py && pyinstaller packaging/sgb.spec`

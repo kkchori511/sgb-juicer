@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+build/
+dist/
+생기부착즙기_데이터/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.DS_Store

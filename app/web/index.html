@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>생기부 착즙기</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8D%8A%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app" id="app">
+  <!-- ===== 상단 바 ===== -->
+  <header class="topbar">
+    <div class="top-left">
+      <button type="button" class="icon-btn" id="menuToggle" title="메뉴 접기/펼치기" aria-label="메뉴 접기/펼치기">☰</button>
+      <span class="app-title">🍊 생기부 착즙기</span>
+      <button type="button" class="ver-btn" id="verBtn" title="앱 정보"><span id="verText">v0.1</span> <span class="beta">베타</span></button>
+      <select id="yearSelect" class="year-select" title="학년도"></select>
+      <span class="archived-badge" id="archivedBadge" hidden>보관·조회 전용</span>
+    </div>
+    <div class="top-right">
+      <span class="saved" id="savedAt"></span>
+      <div class="credit">이번 작업 <b id="runCost">0</b> / 잔액 <b id="balance">-</b> 크레딧</div>
+    </div>
+  </header>
+  <div class="update-bar" id="updateBar" hidden>
+    <span id="updateText"></span>
+    <span class="spacer"></span>
+    <button type="button" id="updateNotesBtn">변경 내용</button>
+    <button type="button" class="primary" id="updateNowBtn">지금 업데이트</button>
+    <button type="button" id="updateLaterBtn">나중에</button>
+  </div>
+
+  <div class="body">
+    <!-- ===== 왼쪽 메뉴 ===== -->
+    <nav class="sidebar" id="sidebar">
+      <button type="button" class="nav" data-panel="dashboard"><i>📊</i><span>현황판</span></button>
+      <button type="button" class="nav" data-panel="inbox"><i>📥</i><span>자료 인박스</span></button>
+      <button type="button" class="nav" data-panel="records"><i>📝</i><span>항목별 기록</span></button>
+      <button type="button" class="nav" data-panel="batch"><i>⚙️</i><span>일괄 종합</span></button>
+      <button type="button" class="nav" data-panel="export"><i>📤</i><span>검토·내보내기</span></button>
+      <div class="nav-sep"></div>
+      <button type="button" class="nav" data-panel="roster"><i>👥</i><span>명렬·담당 관리</span></button>
+      <button type="button" class="nav" data-panel="tags"><i>🏷️</i><span>태그</span></button>
+      <button type="button" class="nav" data-panel="standards"><i>📚</i><span>성취기준</span></button>
+      <button type="button" class="nav" data-panel="settings"><i>🔧</i><span>설정</span></button>
+      <button type="button" class="nav" data-panel="notice"><i>⚠️</i><span>유의 사항</span></button>
+    </nav>
+
+    <main class="main" id="main">
+      <div class="crumb" id="crumb"></div>
+
+      <!-- ===== 현황판 ===== -->
+      <section class="panel" data-panel-content="dashboard">
+        <div class="sched-line" id="schedLine"></div>
+        <div class="dash-head">
+          <div class="segmented" id="semesterSeg" hidden>
+            <span class="seg-label">세특 학기 보기</span>
+            <button type="button" data-sem="1" class="seg active">1학기</button>
+            <button type="button" data-sem="2" class="seg">2학기</button>
+          </div>
+          <span class="hint-inline muted" id="annualHint" hidden>* 담임 항목·동아리는 연간</span>
+        </div>
+        <div class="cards" id="dashCards"></div>
+        <div class="todo" id="todoLine"></div>
+        <div class="card" id="dashTableCard"></div>
+        <div class="legend">
+          <span><b class="st st-none">○</b> 기록 없음</span>
+          <span><b class="st st-progress">◐</b> 입력 중</span>
+          <span><b class="st st-final">◑</b> 최종안 있음</span>
+          <span><b class="st st-closed">●</b> 마감</span>
+        </div>
+      </section>
+
+      <!-- ===== 준비 중 화면 ===== -->
+      <section class="panel" data-panel-content="inbox"><div class="card soon" data-soon="자료 인박스|v0.3에서 붙여넣기·xlsx·회차 기록과 학생 매칭, v0.4에서 스캔 PDF(OCR)를 제공합니다."></div></section>
+      <section class="panel" data-panel-content="records"><div class="card soon" data-soon="항목별 기록|v0.2에서 학생별 누가기록, 정제·종합, 최종안 채택, 마감을 제공합니다."></div></section>
+      <section class="panel" data-panel-content="batch"><div class="card soon" data-soon="일괄 종합|v0.6에서 여러 학생을 한 번에 종합하는 기능을 제공합니다."></div></section>
+      <section class="panel" data-panel-content="export"><div class="card soon" data-soon="검토·내보내기|v0.2에서 항목별 조회와 xlsx·클립보드 내보내기를 제공합니다."></div></section>
+      <section class="panel" data-panel-content="tags"><div class="card soon" data-soon="태그|v0.2에서 태그 목록 만들기와 기록에 붙이기를 제공합니다."></div></section>
+      <section class="panel" data-panel-content="standards"><div class="card soon" data-soon="성취기준|v0.5에서 과목별 성취기준(붙여넣기·PDF·hwpx)과 성취수준별 세특 생성을 제공합니다."></div></section>
+
+      <!-- ===== 명렬·담당 관리 ===== -->
+      <section class="panel" data-panel-content="roster">
+        <div class="card">
+          <div class="card-head">
+            <h2>명렬·담당 관리</h2>
+            <span class="spacer"></span>
+            <button type="button" id="addGroupBtn" class="edit-only">+ 담당 추가</button>
+          </div>
+          <div class="group-tabs" id="groupTabs"></div>
+          <div id="groupBody"></div>
+        </div>
+      </section>
+
+      <!-- ===== 설정 ===== -->
+      <section class="panel" data-panel-content="settings">
+        <div class="tab-bar" id="settingsTabs">
+          <button type="button" class="tab-btn active" data-stab="conn">연결·모델</button>
+          <button type="button" class="tab-btn" data-stab="year">역할·학년도</button>
+          <button type="button" class="tab-btn" data-stab="sched">분량·일정</button>
+          <button type="button" class="tab-btn" data-stab="prompt">프롬프트</button>
+          <button type="button" class="tab-btn" data-stab="data">백업·자료</button>
+          <button type="button" class="tab-btn" data-stab="about">앱 정보</button>
+        </div>
+
+        <div class="stab" data-stab-content="conn">
+          <div class="card">
+            <h2>OpenRouter (필수)</h2>
+            <details class="guide-box" id="orGuide">
+              <summary>처음 사용하시나요? OpenRouter 가입 - 키 발급 안내 펼치기</summary>
+              <ol>
+                <li><a href="#" data-url="https://openrouter.ai">openrouter.ai</a>에 가입하고 로그인합니다.</li>
+                <li><a href="#" data-url="https://openrouter.ai/settings/credits">Credits</a> 메뉴에서 크레딧을 충전합니다. (1크레딧 = 1달러) 무료 모델만 쓸 때는 충전하지 않아도 됩니다.</li>
+                <li><a href="#" data-url="https://openrouter.ai/settings/keys">Keys</a> 메뉴에서 <b>Create Key</b>를 눌러 키를 만들고, 아래 칸에 붙여넣습니다.</li>
+                <li>키는 만들 때 한 번만 보이니 안전한 곳에 따로 보관하세요.</li>
+              </ol>
+            </details>
+            <label for="orKey">OpenRouter API 키</label>
+            <div class="inline">
+              <div class="pw-wrap grow">
+                <input type="password" id="orKey" data-cfg="openrouter_key" placeholder="sk-or-..." autocomplete="off">
+                <button type="button" class="pw-toggle" data-target="orKey">표시</button>
+              </div>
+              <button type="button" id="checkKeyBtn">연결 확인</button>
+            </div>
+            <div class="check-result" id="keyResult"></div>
+          </div>
+
+          <div class="card">
+            <h2>AI 모델 (4칸)</h2>
+            <p class="hint">작업할 때 4개 중 하나를 고릅니다. [모델 페이지]에서 모델 ID(예: <code>google/gemini-2.5-flash</code>)를 복사해 [붙여넣기]를 누르세요. 1번 칸에는 무료 모델이 들어 있습니다.</p>
+            <div id="modelSlots"></div>
+            <label class="check-line"><input type="checkbox" id="privacyBlock" data-cfg="privacy_block"> OpenRouter 학습 차단 켜기</label>
+            <div class="hint">켜면 데이터를 수집·보관하지 않는 제공자에게만 보냅니다(<code>data_collection: deny</code>, <code>zdr: true</code>). 쓸 수 있는 모델이 줄어들고, 무료 모델과 대부분의 Google 모델은 실패할 수 있습니다. 계정 전체에 적용하려면 <a href="#" data-url="https://openrouter.ai/settings/privacy">OpenRouter 개인정보 설정</a>을 이용하세요.</div>
+          </div>
+
+          <div class="card">
+            <h2>CLOVA OCR (스캔 PDF를 쓸 때만)</h2>
+            <p class="hint">종이 학습지를 스캔한 PDF를 글자로 읽을 때만 필요합니다. 네이버 클라우드 플랫폼에 가입하고 CLOVA OCR API를 설정해야 합니다.</p>
+            <details class="guide-box" id="clovaGuide">
+              <summary>CLOVA OCR 가입 - 키 발급 안내 펼치기</summary>
+              <div class="tab-bar guide-tabs">
+                <button type="button" class="tab-btn active" data-gtab="signup">1. CLOVA OCR 가입</button>
+                <button type="button" class="tab-btn" data-gtab="keys">2. Secret Key / URL 발급</button>
+              </div>
+              <div id="clovaGuideBody"></div>
+            </details>
+            <label for="ocrLang">OCR 언어</label>
+            <select id="ocrLang" data-cfg="ocr_lang">
+              <option value="ko">한국어 (ko)</option>
+              <option value="en">영어 (en)</option>
+              <option value="ja">일본어 (ja)</option>
+            </select>
+            <label for="clovaSecret">CLOVA Secret Key</label>
+            <div class="pw-wrap">
+              <input type="password" id="clovaSecret" data-cfg="clova_secret" placeholder="X-OCR-SECRET 값" autocomplete="off">
+              <button type="button" class="pw-toggle" data-target="clovaSecret">표시</button>
+            </div>
+            <label for="clovaUrl">CLOVA Invoke URL</label>
+            <input type="text" id="clovaUrl" data-cfg="clova_url" placeholder="https://xxxxxxx.apigw.ntruss.com/custom/v1/xxxx/xxxxxxxx/general" autocomplete="off">
+          </div>
+
+          <div class="card">
+            <div class="key-footer">
+              <div class="notice">
+                키는 이 프로그램 폴더의 설정 파일(<code id="cfgPath"></code>)에 <b>평문</b>으로 저장됩니다.
+                공용 PC에서는 사용 후 반드시 <b class="danger-text">[키 초기화]</b>를 눌러 주세요. [키 초기화]는 키만 지우며 학생 자료는 지우지 않습니다.<br>
+                <b>API 키는 본인이 발급받은 키만 사용해야 하며, 타인의 키를 무단으로 사용하는 것은 금지됩니다.</b>
+              </div>
+              <button type="button" id="resetKeysBtn" class="btn-danger">키 초기화</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="stab" data-stab-content="year" hidden>
+          <div class="card">
+            <h2>역할</h2>
+            <div class="role-cards" id="roleCardsSettings"></div>
+            <div class="hint">역할을 바꿔도 자료는 지우지 않습니다. 학년도마다 따로 저장됩니다.</div>
+          </div>
+          <div class="card">
+            <h2>학년도</h2>
+            <p class="hint">새 학년도를 시작하면 이전 학년도 자료는 보관되고 조회만 할 수 있습니다. 상단의 학년도 선택으로 오갈 수 있습니다.</p>
+            <div class="inline">
+              <input type="number" id="newYear" class="num" min="2000" max="2100">
+              <span>학년도</span>
+              <button type="button" id="newYearBtn" class="primary">새 학년도 시작</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="stab" data-stab-content="sched" hidden>
+          <div class="card">
+            <h2>목표 분량 (바이트)</h2>
+            <p class="hint">한글 1자 = 3바이트, 영어·숫자·기호·공백 = 1바이트. 과목·동아리별 분량은 명렬·담당 관리에서 따로 바꿀 수 있습니다.</p>
+            <div class="target-grid" id="targetGrid"></div>
+          </div>
+          <div class="card">
+            <h2>생기부 일정</h2>
+            <p class="hint">현황판 맨 위에 날짜순으로 D-day와 함께 보입니다. 지난 일정은 여기서만 회색으로 남습니다.</p>
+            <div class="inline sched-add">
+              <input type="date" id="schedDate">
+              <input type="text" id="schedTitle" class="grow" placeholder="예: 1학기 세특 입력 마감">
+              <button type="button" class="primary" id="schedAddBtn">추가</button>
+            </div>
+            <table class="tbl" id="schedTable"></table>
+          </div>
+        </div>
+
+        <div class="stab" data-stab-content="prompt" hidden>
+          <div class="card soon" data-soon="프롬프트|v0.2부터 항목별 정제·다듬기·종합 지침과 예시를 고칠 수 있습니다. 기본 프롬프트는 선생님 예시안을 받아 v0.7에서 확정합니다."></div>
+        </div>
+
+        <div class="stab" data-stab-content="data" hidden>
+          <div class="card">
+            <h2>자료 폴더</h2>
+            <p>학생 자료와 설정은 이 폴더에 저장됩니다: <code id="dataDir"></code> <button type="button" id="openDataBtn">폴더 열기</button></p>
+            <div class="notice">학생 자료가 <b>평문</b>으로 들어 있습니다. 프로그램을 다른 사람에게 줄 때는 <b>exe 파일만</b> 주세요. 폴더째 복사하면 다른 PC에서 그대로 이어서 쓸 수 있습니다.</div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>백업</h2><span class="spacer"></span><button type="button" class="primary" id="backupNowBtn">지금 백업</button></div>
+            <p class="hint">앱을 실행할 때 하루 한 번 자동으로 백업하고 최근 7개를 보관합니다. 복원하면 지금 상태를 먼저 백업한 뒤 되돌립니다.</p>
+            <table class="tbl" id="backupTable"></table>
+          </div>
+          <div class="card danger-card">
+            <h2>학년도 자료 삭제</h2>
+            <p class="hint">이 학년도의 명렬·기록을 모두 지웁니다. 지우기 전에 백업을 하나 만듭니다. 확인 칸에 학년도 이름(예: <b id="delYearHint">2026학년도</b>)을 그대로 입력해야 실행됩니다.</p>
+            <div class="inline">
+              <input type="text" id="delYearText" class="grow" placeholder="2026학년도">
+              <button type="button" class="btn-danger" id="delYearBtn">이 학년도 자료 삭제</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="stab" data-stab-content="about" hidden>
+          <div class="card">
+            <h2>앱 정보</h2>
+            <p><b id="aboutName"></b> <span id="aboutVer"></span> (베타) · <span id="aboutMaker"></span></p>
+            <p class="muted">모든 기능은 베타입니다. 기능이 모두 들어가기 전까지 버전은 1.0 미만으로 유지합니다.</p>
+            <button type="button" id="checkUpdateBtn">업데이트 확인</button>
+            <span class="check-result" id="updateCheckResult"></span>
+          </div>
+        </div>
+        <div class="saved-note">입력하면 자동 저장됩니다.</div>
+      </section>
+
+      <!-- ===== 유의 사항 ===== -->
+      <section class="panel" data-panel-content="notice">
+        <div class="card notice-page">
+          <h2>유의 사항 및 안내</h2>
+          <h3>스캔 PDF(CLOVA OCR)</h3>
+          <ul>
+            <li>스캔 PDF를 글자로 읽을 때 <b>스캔 이미지가 그대로 네이버 CLOVA OCR로 전송</b>됩니다. 손으로 쓴 이름·학번도 함께 전송됩니다.</li>
+            <li>이 점이 걱정된다면 <b>스캔하기 전에 인적사항을 직접 가려(마스킹)</b> 주세요. 앱이 이미지 속 인적사항을 가려 주지는 않습니다.</li>
+          </ul>
+          <h3>AI(OpenRouter)</h3>
+          <ul>
+            <li>AI에는 <b>학번·이름을 빼고 내용만</b> 보냅니다. 학생과 기록의 연결은 이 PC 안에서만 관리합니다.</li>
+            <li>설정에서 <b>OpenRouter 학습 차단</b>을 켜면 데이터를 수집·보관하지 않는 제공자에게만 보냅니다. 켜면 쓸 수 있는 모델이 줄어듭니다(무료 모델, 대부분의 Google 모델 등).</li>
+            <li>계정 전체에 적용하려면 <a href="#" data-url="https://openrouter.ai/settings/privacy">OpenRouter 개인정보 설정</a>에서 같은 제한을 켜 두는 것을 권합니다.</li>
+            <li>무료 모델은 제공자가 데이터를 수집할 수 있고, 분당 호출 수 제한이 있어 많은 학생을 한 번에 처리하면 느리거나 실패할 수 있습니다.</li>
+          </ul>
+          <h3>키와 자료 보관</h3>
+          <ul>
+            <li>API 키와 학생 자료는 프로그램 옆 <code>생기부착즙기_데이터</code> 폴더에 <b>평문</b>으로 저장됩니다.</li>
+            <li>공용 PC에서는 사용 후 <b>설정 &gt; 키 초기화</b>를 눌러 주세요. 학생 자료는 지워지지 않으니 필요하면 자료 폴더도 정리해 주세요.</li>
+            <li>프로그램을 다른 사람에게 줄 때는 <b>exe 파일만</b> 전달하세요. 자료 폴더에는 학생 자료가 들어 있습니다.</li>
+            <li>API 키는 <b>본인이 발급받은 키만</b> 사용해야 하며, 타인의 키를 무단으로 사용하는 것은 금지됩니다.</li>
+          </ul>
+          <h3>AI 결과</h3>
+          <ul>
+            <li>AI가 만든 문장은 초안입니다. 학생의 실제 활동과 맞는지 선생님이 반드시 확인한 뒤 마감해 주세요.</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<!-- ===== 첫 실행 설정 마법사 ===== -->
+<div class="wizard" id="wizard" hidden>
+  <div class="wizard-box">
+    <div class="wizard-head">
+      <h2>🍊 생기부 착즙기 시작 설정</h2>
+      <ol class="wsteps" id="wsteps">
+        <li data-w="1">연결</li><li data-w="2">담당</li><li data-w="3">명렬</li><li data-w="4">일정·완료</li>
+      </ol>
+    </div>
+    <div class="wizard-body" id="wizardBody"></div>
+    <div class="wizard-foot">
+      <button type="button" id="wPrev">이전</button>
+      <span class="spacer"></span>
+      <span class="muted" id="wHint"></span>
+      <button type="button" class="primary" id="wNext">다음</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 창 ===== -->
+<div class="modal" id="modal" hidden>
+  <div class="modal-box" id="modalBox">
+    <div class="modal-msg" id="modalMsg"></div>
+    <div class="modal-actions">
+      <button type="button" id="modalCancel">취소</button>
+      <button type="button" class="primary" id="modalOk">확인</button>
+    </div>
+  </div>
+</div>
+<div class="modal" id="sheet" hidden>
+  <div class="modal-box sheet-box" id="sheetBox"></div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>

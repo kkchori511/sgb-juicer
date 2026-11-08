@@ -1,0 +1,78 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'feature/**'
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt pyinstaller
+
+      - name: Backend tests
+        run: python tests/test_backend.py
+
+      - name: Version info
+        shell: pwsh
+        run: |
+          $ver = python packaging/make_version_info.py
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$ver") {
+            Write-Error "태그($env:GITHUB_REF_NAME)와 앱 버전(v$ver)이 다릅니다."; exit 1
+          }
+
+      - name: Build executable
+        run: pyinstaller packaging/sgb.spec
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: sgb-juicer-windows
+          path: dist/생기부착즙기.exe
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download executable
+        uses: actions/download-artifact@v4
+        with:
+          name: sgb-juicer-windows
+          path: dist
+
+      - name: Attach executable to GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          # 자산 이름은 ASCII(한글 파일명은 GitHub에서 바뀔 수 있음), 표시 이름은 한글
+          Copy-Item "dist/생기부착즙기.exe" "dist/SGB-Juicer.exe"
+          gh release view "$env:RELEASE_TAG" --repo "$env:GH_REPO"
+          if ($LASTEXITCODE -ne 0) {
+            gh release create "$env:RELEASE_TAG" --repo "$env:GH_REPO" --title "생기부 착즙기 $env:RELEASE_TAG (베타)" --generate-notes --verify-tag
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          gh release upload "$env:RELEASE_TAG" "dist/SGB-Juicer.exe#생기부착즙기.exe" --repo "$env:GH_REPO" --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
