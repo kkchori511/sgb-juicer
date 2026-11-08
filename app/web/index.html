@@ -12,13 +12,12 @@
   <header class="topbar">
     <div class="top-left">
       <button type="button" class="icon-btn" id="menuToggle" title="메뉴 접기/펼치기" aria-label="메뉴 접기/펼치기">☰</button>
-      <img src="icon.png" alt="" class="app-icon"><span class="app-title">생기부 착즙기</span>
-      <button type="button" class="ver-btn" id="verBtn" title="앱 정보"><span id="verText">v0.1</span> <span class="beta">베타</span></button>
+      <button type="button" class="brand" id="verBtn" title="앱 정보"><img src="face.png" alt="" class="brand-face"><span class="app-title">생기부 착즙기</span> <span class="app-ver" id="verText">v0.1</span> <span class="beta">베타</span></button>
       <select id="yearSelect" class="year-select" title="학년도"></select>
       <span class="archived-badge" id="archivedBadge" hidden>보관·조회 전용</span>
     </div>
+    <button type="button" class="save-state ok" id="savedAt" title="누르면 마지막 저장 시각을 봅니다">저장됨</button>
     <div class="top-right">
-      <span class="saved" id="savedAt"></span>
       <div class="credit">이번 작업 <b id="runCost">0</b> / 잔액 <b id="balance">-</b> 크레딧</div>
     </div>
   </header>

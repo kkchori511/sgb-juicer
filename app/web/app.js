@@ -72,7 +72,12 @@
     if (!job) return true;
     pendingSaves.delete(key);
     clearTimeout(job.t);
-    return !!(await job.fn());
+    saveInflight += 1;
+    try {
+      const r = !!(await job.fn());
+      if (!r) markSaveFailed();
+      return r;
+    } finally { saveInflight -= 1; refreshSaveState(); }
   }
   function dropPending(key) {
     const job = pendingSaves.get(key);
@@ -109,9 +114,36 @@
   function md(date) { const [, m, d] = date.split('-'); return `${+m}/${+d}`; }
   function schoolYear() { const d = new Date(); return d.getMonth() + 1 >= 3 ? d.getFullYear() : d.getFullYear() - 1; }
   function colName(i) { let s = ''; i += 1; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+  // ---------- 저장 상태(상단 가운데) ----------
+  // 저장됨(초록) / 저장 중…(남은 저장·진행 중) / 저장 안 됨(빨강, 실패) — 누르면 마지막 저장 시각
+  let lastSaved = null;
+  let saveFailed = false;
+  let saveInflight = 0;
   function markSaved() {
-    const d = new Date();
-    $('savedAt').textContent = `저장됨 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    lastSaved = new Date();
+    saveFailed = false;
+    refreshSaveState();
+  }
+  function markSaveFailed() { saveFailed = true; refreshSaveState(); }
+  function refreshSaveState() {
+    const b = $('savedAt');
+    if (!b) return;
+    const busy = saveInflight > 0 || pendingSaves.size > 0 || Object.keys(cfgPending).length > 0 || draftDirty();
+    const st = saveFailed ? 'fail' : busy ? 'busy' : 'ok';
+    if (b.dataset.st === st) return;
+    b.dataset.st = st;
+    b.className = `save-state ${st}`;
+    b.textContent = st === 'fail' ? '저장 안 됨' : st === 'busy' ? '저장 중…' : '저장됨';
+  }
+  function fullTime(d) {
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 (${'일월화수목금토'[d.getDay()]}) ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+  function showSaveInfo() {
+    const last = lastSaved ? `마지막 저장: <b>${fullTime(lastSaved)}</b>` : '이번 실행에서는 아직 저장한 내용이 없습니다.';
+    const note = saveFailed ? '<br><span class="danger-text">저장하지 못한 내용이 있습니다. 해당 화면에서 다시 시도하거나 내용을 복사해 두세요.</span>'
+      : $('savedAt').dataset.st === 'busy' ? '<br><span class="muted">지금 저장하는 중입니다.</span>' : '';
+    modal(last + note, false, true);
   }
   function toast(msg, ms) {
     const t = $('toast');
@@ -206,8 +238,8 @@
     });
   }
   function showAbout() {
-    modal(`<div class="about-box"><img src="icon.png" alt="" class="about-icon"><div class="about-title">생기부 착즙기</div><div class="muted">v${info.version} 베타</div>` +
-      `<div class="about-tag">"${info.tagline}"</div><div>${info.maker}</div></div>`, false, true);
+    modal(`<div class="about-box"><img src="face.png" alt="" class="about-face"><div class="about-title">생기부 착즙기</div><div class="muted">v${info.version} 베타</div>` +
+      `<div class="about-tag">"${info.tagline}"</div><div class="about-maker">${info.maker}</div></div>`, false, true);
   }
   function renderYearSelect() {
     const s = $('yearSelect');
@@ -793,9 +825,12 @@
     const p = cfgPending;
     cfgPending = {};
     if (!Object.keys(p).length) return true;
-    const r = await call('save_config', p);
-    if (r) markSaved();
-    return !!r;
+    saveInflight += 1;
+    try {
+      const r = await call('save_config', p);
+      if (r) markSaved(); else markSaveFailed();
+      return !!r;
+    } finally { saveInflight -= 1; refreshSaveState(); }
   }
   function bindConfigInputs() {
     document.querySelectorAll('[data-cfg]').forEach((inp) => {
@@ -1354,7 +1389,7 @@
     const text = d.ta.value;
     if (text.trim() === (d.saved || '').trim()) { if (d.state && d.state.textContent === '저장 중…') d.state.textContent = ''; return true; }
     const r = await call('edit_final', d.ctx.gid, d.ctx.item, d.ctx.sno, text, d.ctx.year);
-    if (!r) { if (d.state) d.state.textContent = '저장 안 됨'; return false; }
+    if (!r) { if (d.state) d.state.textContent = '저장 안 됨'; markSaveFailed(); return false; }
     d.saved = text;
     markSaved();
     if (d.state && d.state.isConnected) d.state.textContent = d.ta.value === text ? '저장됨' : '저장 중…';
@@ -2731,6 +2766,8 @@
       saveCfg({ menu_collapsed: v });
     });
     $('verBtn').addEventListener('click', showAbout);
+    $('savedAt').addEventListener('click', showSaveInfo);
+    setInterval(refreshSaveState, 300);
     $('yearSelect').addEventListener('change', async (e) => {
       const want = +e.target.value;
       if (!(await leaveOk())) { e.target.value = ys.year; return; }

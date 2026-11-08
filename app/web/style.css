@@ -58,6 +58,7 @@ code { background: var(--surface-2); border: 1px solid var(--border); padding: 1
 
 /* ---------- 상단 바 ---------- */
 .topbar {
+  position: relative;
   flex: none; height: var(--topbar-h);
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 0 16px 0 10px;
@@ -72,11 +73,19 @@ code { background: var(--surface-2); border: 1px solid var(--border); padding: 1
 .wizard-head h2 .app-icon { width: 34px; height: 34px; margin-right: 4px; }
 .about-icon { width: 96px; height: 96px; display: block; margin: 0 auto 8px; }
 .app-title { font-size: 18px; font-weight: 800; white-space: nowrap; }
-.ver-btn { padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 800; color: var(--text-2); }
+.brand { display: flex; align-items: center; gap: 6px; padding: 3px 12px 3px 4px; border-radius: 999px; white-space: nowrap; }
+.brand-face { width: 30px; height: 30px; border-radius: 50%; }
+.app-ver { font-size: 13px; font-weight: 800; color: var(--text-2); }
+.about-face { width: 96px; height: 96px; border-radius: 50%; display: block; margin: 0 auto 8px; }
+.about-maker { font-weight: 800; margin-top: 4px; }
 .beta { background: var(--orange); color: #fff; border-radius: 999px; padding: 0 7px; font-size: 11px; margin-left: 2px; }
 .year-select { width: auto; height: 34px; padding: 4px 10px; font-weight: 700; }
 .archived-badge { background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 999px; padding: 2px 10px; font-size: 13px; font-weight: 700; }
-.saved { font-size: 13px; color: var(--muted); white-space: nowrap; }
+/* 저장 상태: 상단 가운데 */
+.save-state { position: absolute; left: 50%; transform: translateX(-50%); padding: 5px 14px; border-radius: 999px; font-size: 13.5px; font-weight: 800; white-space: nowrap; background: var(--input); }
+.save-state.ok { color: #1f9d55; border-color: #9fd8b5; }
+.save-state.busy { color: var(--text-2); }
+.save-state.fail { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
 .credit { padding: 6px 14px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); font-size: 13.5px; color: var(--text-2); white-space: nowrap; }
 .credit b { color: var(--accent-hover); font-size: 14.5px; }
 .update-bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--accent-soft); border-bottom: 1px solid var(--accent); font-weight: 700; }
