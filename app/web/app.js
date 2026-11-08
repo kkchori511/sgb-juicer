@@ -16,8 +16,20 @@
 
   const PANEL_TITLES = {
     dashboard: '현황판', inbox: '자료 인박스', records: '항목별 기록', batch: '일괄 종합', export: '검토·내보내기',
-    roster: '명렬·담당 관리', tags: '태그', standards: '성취기준', settings: '설정', notice: '유의 사항',
+    roster: '명렬·담당 관리', tags: '태그', standards: '성취기준', settings: '설정', notice: '유의 사항', guide: '사용 안내',
   };
+  const HELP = { dashboard: 'g-dashboard', inbox: 'g-inbox', records: 'g-records', batch: 'g-batch', export: 'g-export',
+    roster: 'g-roster', tags: 'g-settings', standards: 'g-standards', settings: 'g-settings', notice: 'g-flow' };
+  function openGuide(anchor) {
+    showPanel('guide');
+    const target = document.getElementById(anchor || 'g-flow');
+    if (!target) return;
+    const body = $('guideBody');
+    body.scrollTop = target.offsetTop - body.offsetTop - 8;
+    document.querySelectorAll('#guideToc a').forEach((a) => a.classList.toggle('on', a.getAttribute('href') === `#${anchor}`));
+    target.classList.add('flash');
+    setTimeout(() => target.classList.remove('flash'), 1400);
+  }
   const ITEM_LABELS = { autonomy: '자율', career: '진로', behavior: '행특', subject: '세특', club: '동아리' };
   const ITEM_FULL = { autonomy: '자율활동', career: '진로활동', behavior: '행동특성 및 종합의견', subject: '과목 세특(기본)', club: '동아리활동(기본)' };
   const STATUS = {
@@ -124,6 +136,7 @@
     document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.dataset.panelContent === name));
     $('crumb').textContent = `${ys.year ? ys.year + '학년도 › ' : ''}${PANEL_TITLES[name] || ''}`;
     $('main').scrollTop = 0;
+    $('helpBtn').hidden = name === 'guide';
     if (name === 'dashboard') loadDashboard();
     if (name === 'roster') renderRoster();
     if (name === 'settings') renderSettings();
@@ -1074,6 +1087,7 @@
     } else {
       await finishWizard();
       showPanel('dashboard');
+      actionToast('설정을 마쳤습니다. 처음이시면 사용 안내를 한 번 훑어보세요.', '사용 안내 열기', () => openGuide('g-flow'), 12000);
       return;
     }
     renderWizard();
@@ -2606,6 +2620,8 @@
       if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); moveStudent(1); }
       if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); moveStudent(-1); }
     });
+    $('helpBtn').addEventListener('click', () => openGuide(HELP[panel]));
+    document.querySelectorAll('#guideToc a').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openGuide(a.getAttribute('href').slice(1)); }));
     $('wNext').addEventListener('click', wizardNext);
     $('wPrev').addEventListener('click', wizardPrev);
     // 바깥 링크는 기본 브라우저로

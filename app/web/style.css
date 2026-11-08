@@ -443,3 +443,22 @@ tr.row-pending td { background: var(--warn-bg); }
 .para-pick div { white-space: pre-wrap; font-size: 14px; }
 .card-head select { width: auto; max-width: 420px; height: 38px; }
 .card-head h2 { white-space: nowrap; }
+
+/* ---------- v0.7: 사용 안내 ---------- */
+.crumb-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.crumb-row .crumb { margin: 0; flex: 1; }
+.help-btn { padding: 2px 10px; font-size: 12.5px; border-radius: 999px; color: var(--accent-hover); }
+.panel[data-panel-content="guide"].active { display: block; height: calc(100vh - var(--topbar-h) - 58px); }
+.guide-wrap { height: 100%; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 12px; }
+.guide-toc { display: flex; flex-direction: column; gap: 2px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; overflow: auto; }
+.guide-toc b { margin-bottom: 6px; }
+.guide-toc a { text-decoration: none; padding: 5px 8px; border-radius: var(--radius-sm); font-weight: 600; color: var(--text-2); }
+.guide-toc a:hover, .guide-toc a.on { background: var(--accent-soft); color: var(--accent-hover); }
+.guide-body { overflow: auto; margin: 0; max-width: none; line-height: 1.75; }
+.guide-body h2 { margin-top: 26px; padding-top: 6px; border-top: 1px solid var(--border); }
+.guide-body h2:first-child { margin-top: 0; border-top: none; }
+.guide-body li { margin-bottom: 5px; }
+.guide-body .flow li { margin-bottom: 6px; }
+.faq dt { font-weight: 800; margin-top: 10px; }
+.faq dd { margin: 2px 0 0 0; color: var(--text-2); }
+.guide-body .flash { background: var(--warn-bg); transition: background 1.2s; }
