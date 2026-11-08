@@ -96,22 +96,23 @@ def download(info: dict, progress=None) -> str:
 
 def launch_swap(new_path: str):
     """앱이 끝나기를 기다렸다가 exe를 바꾸고 다시 실행하는 PowerShell을 띄운다.
-    onefile exe는 부모(부트로더)·자식 두 프로세스가 있으므로 둘 다 기다린다.
+    onefile exe는 부트로더·본체 두 프로세스가 같은 exe를 쓰므로, 그 exe 경로를 쓰는
+    프로세스가 하나도 남지 않을 때까지(최대 2분) 기다린 뒤 교체한다.
     한글 경로가 깨지지 않도록 -EncodedCommand(UTF-16LE)로 넘긴다."""
     if not can_apply():
         raise UpdateError("Windows exe에서만 업데이트할 수 있습니다.")
     exe = sys.executable
-    pids = {os.getpid(), os.getppid()}
 
     def ps_quote(s):
         return "'" + str(s).replace("'", "''") + "'"
 
     script = (
-        f"$pids = @({','.join(str(p) for p in pids)}); "
-        "foreach ($p in $pids) { while (Get-Process -Id $p -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 300 } }; "
+        f"$exe = {ps_quote(exe)}; $new = {ps_quote(new_path)}; "
+        "$until = (Get-Date).AddMinutes(2); "
+        "while ((Get-Process | Where-Object { $_.Path -eq $exe }) -and (Get-Date) -lt $until) { Start-Sleep -Milliseconds 300 }; "
         "Start-Sleep -Milliseconds 500; "
-        f"$ok = $false; for ($i = 0; $i -lt 20 -and -not $ok; $i++) {{ try {{ Move-Item -Force -LiteralPath {ps_quote(new_path)} -Destination {ps_quote(exe)} -ErrorAction Stop; $ok = $true }} catch {{ Start-Sleep -Milliseconds 500 }} }}; "
-        f"Start-Process -FilePath {ps_quote(exe)}"
+        "$ok = $false; for ($i = 0; $i -lt 40 -and -not $ok; $i++) { try { Move-Item -Force -LiteralPath $new -Destination $exe -ErrorAction Stop; $ok = $true } catch { Start-Sleep -Milliseconds 500 } }; "
+        "Start-Process -FilePath $exe"
     )
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     flags = 0x08000000 | 0x00000008  # CREATE_NO_WINDOW | DETACHED_PROCESS
