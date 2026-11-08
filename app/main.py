@@ -75,6 +75,15 @@ def main():
     if not single.acquire(20 if after_update else 0):
         single.notify_running()
         return
+    from . import backup
+
+    try:
+        if backup.recover_interrupted():  # 복원 도중 꺼졌으면 복원 전 상태로
+            from . import updater
+
+            updater.log("끝나지 않은 복원을 되돌림")
+    except Exception:
+        pass
     api = Api()
     geo = config.load().get("window") or {}
     kwargs = {}
@@ -90,7 +99,7 @@ def main():
         **kwargs,
     )
     api.attach(window)
-    window.events.closing += api.save_window
+    window.events.closing += api.on_closing
     webview.start()
 
 

@@ -10,6 +10,7 @@ import platform
 import subprocess
 import threading
 import webbrowser
+from contextlib import contextmanager
 from functools import wraps
 
 import webview
@@ -80,6 +81,10 @@ class Api:
         self._ai_lock = threading.Lock()
         self._ocr_stop = threading.Event()
         self._jobs = 0  # 화면에서 진행 중인 일괄 작업(일괄 종합·인박스 정제 등)
+        self._maint = ""  # 진행 중인 관리 작업(복원·학년도 전환·업데이트 등). 이때는 새 작업·쓰기를 막는다
+        self._halted = ""  # 실행 잠금을 잃은 경우: 더 쓰지 않고 다시 켜 달라고 안내
+        self._close_ok = False
+        self._close_asked = 0.0
         self._last_undo = None
 
     def attach(self, window):
@@ -89,17 +94,53 @@ class Api:
         if self._window:
             self._window.evaluate_js(f"window.onAppEvent({json.dumps(payload, ensure_ascii=False)})")
 
+    def _check_running(self):
+        """관리 작업 중이거나 실행 잠금을 잃었으면 새 작업·쓰기를 막는다(_ai_lock 안에서 부름)."""
+        if self._halted:
+            raise db.DbError(self._halted)
+        if self._maint:
+            raise db.DbError(f"{self._maint} 중입니다. 끝난 뒤 다시 해 주세요.")
+
+    def _maint_begin(self, what, take_busy=False):
+        """관리 작업 시작: AI·OCR·일괄 작업과 서로 막는다(한 잠금 안에서 확인하고 예약)."""
+        with self._ai_lock:
+            self._check_running()
+            if self._ai_keys or self._jobs > 0 or self._busy.locked():
+                raise db.DbError(f"AI·OCR 작업이 진행 중이라 {what}할 수 없습니다. 작업이 끝난 뒤 다시 해 주세요.")
+            if take_busy and not self._busy.acquire(blocking=False):
+                raise db.DbError("다른 작업이 진행 중입니다.")
+            self._maint = what
+
+    def _maint_end(self, take_busy=False):
+        with self._ai_lock:
+            self._maint = ""
+            if take_busy:
+                self._busy.release()
+
+    @contextmanager
+    def _maintenance(self, what, take_busy=False):
+        self._maint_begin(what, take_busy)
+        try:
+            yield
+        finally:
+            self._maint_end(take_busy)
+
     def _require_idle(self, what):
-        """AI·OCR·일괄 작업 중에는 학년도 전환·복원·삭제·업데이트를 막는다."""
-        if self._ai_keys or self._jobs > 0 or self._busy.locked():
-            raise db.DbError(f"AI·OCR 작업이 진행 중이라 {what}할 수 없습니다. 작업이 끝난 뒤 다시 해 주세요.")
+        with self._ai_lock:
+            self._check_running()
+            if self._ai_keys or self._jobs > 0 or self._busy.locked():
+                raise db.DbError(f"AI·OCR 작업이 진행 중이라 {what}할 수 없습니다. 작업이 끝난 뒤 다시 해 주세요.")
 
     def job_begin(self, name=""):
-        self._jobs += 1
+        with self._ai_lock:
+            if self._halted or self._maint:
+                return {"ok": False, "error": self._halted or f"{self._maint} 중입니다. 끝난 뒤 다시 해 주세요."}
+            self._jobs += 1
         return {"ok": True}
 
     def job_end(self, name=""):
-        self._jobs = max(0, self._jobs - 1)
+        with self._ai_lock:
+            self._jobs = max(0, self._jobs - 1)
         return {"ok": True}
 
     def _db(self) -> db.YearDb:
@@ -220,22 +261,26 @@ class Api:
         years = db.list_years()
         if year in years and year < max(years):
             raise db.DbError("보관 학년도는 바꿀 수 없습니다.")
-        if year not in years:
-            self._require_idle("새 학년도를 만들")
+        if year in years:
+            self._editable()
+            db.open_year(year).set_role(role)
+            config.save({"current_year": year})
+            return {}
+        with self._maintenance("새 학년도 만들기"):
             self._last_undo = None
-        d = db.open_year(year)
-        d.set_role(role)
-        config.save({"current_year": year})
+            d = db.open_year(year)
+            d.set_role(role)
+            config.save({"current_year": year})
         return {}
 
     @safe
     def switch_year(self, year):
-        self._require_idle("학년도를 바꿀")
-        self._last_undo = None
         year = int(year)
-        if year not in db.list_years():
-            raise db.DbError("그 학년도 자료가 없습니다.")
-        config.save({"current_year": year})
+        with self._maintenance("학년도 전환"):
+            self._last_undo = None
+            if year not in db.list_years():
+                raise db.DbError("그 학년도 자료가 없습니다.")
+            config.save({"current_year": year})
         return {}
 
     @safe
@@ -286,16 +331,16 @@ class Api:
     @safe
     def delete_group(self, gid):
         self._editable()
-        self._require_idle("담당을 지울")
-        d = self._db()
-        bids = [r["id"] for r in d.q("SELECT id FROM inbox_batches WHERE group_id=?", (int(gid),))]
-        name = backup.make("담당삭제전")
-        d.delete_group(gid)
-        for b in bids:
-            p = scan.pdf_path(d.year, b)
-            if p.exists():
-                p.unlink()
-        self._last_undo = None
+        with self._maintenance("담당 삭제"):
+            d = self._db()
+            bids = [r["id"] for r in d.q("SELECT id FROM inbox_batches WHERE group_id=?", (int(gid),))]
+            name = backup.make("담당삭제전")
+            d.delete_group(gid)
+            for b in bids:
+                p = scan.pdf_path(d.year, b)
+                if p.exists():
+                    p.unlink()
+            self._last_undo = None
         return {"groups": d.groups(), "backup": name}
 
     # ---------- 명렬 ----------
@@ -474,7 +519,12 @@ class Api:
     def _rec(self) -> Records:
         return Records(self._db())
 
-    def _editable(self):
+    def _editable(self, year=None):
+        """쓰기 전에: 관리 작업 중·보관 학년도면 막는다. year를 주면 지금 학년도와 같은지도 본다."""
+        with self._ai_lock:
+            self._check_running()
+        if year is not None and int(year) != config.load()["current_year"]:
+            raise db.DbError("학년도가 바뀌어 저장하지 않았습니다. 화면을 다시 열어 확인해 주세요.")
         st = self.year_state()
         if st.get("ok") and st.get("archived"):
             raise db.DbError("보관 학년도는 조회만 할 수 있습니다. 상단에서 최신 학년도로 바꿔 주세요.")
@@ -565,8 +615,8 @@ class Api:
         return {}
 
     @safe
-    def edit_final(self, gid, item, sno, text):
-        self._editable()
+    def edit_final(self, gid, item, sno, text, year=None):
+        self._editable(year)
         self._rec().edit_final(gid, item, sno, text)
         return {}
 
@@ -659,6 +709,7 @@ class Api:
 
     def _guard(self, key):
         with self._ai_lock:
+            self._check_running()
             if key in self._ai_keys:
                 raise db.DbError("이미 AI 작업이 진행 중입니다. 끝날 때까지 기다려 주세요.")
             self._ai_keys.add(key)
@@ -688,11 +739,11 @@ class Api:
         self._guard(key)
         try:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, r["content"], cfg["privacy_block"])
+            meta = {"model": model, "op": op, "prompt": pr["prompt"], "example": pr["example"], "record_ids": [r["id"]]}
+            nid, dropped = rec.add_result(r["group_id"], r["item"], r["student_no"], op, text, meta, cost, record_id=r["id"])
+            return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
         finally:
             self._release(key)
-        meta = {"model": model, "op": op, "prompt": pr["prompt"], "example": pr["example"], "record_ids": [r["id"]]}
-        nid, dropped = rec.add_result(r["group_id"], r["item"], r["student_no"], op, text, meta, cost, record_id=r["id"])
-        return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
 
     @safe
     def ai_synth(self, gid, item, sno, record_ids, weights_map=None, model_index=None, sum_check=None, std=None):
@@ -724,12 +775,12 @@ class Api:
         self._guard(key)
         try:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, user, cfg["privacy_block"])
+            meta = {"model": model, "op": "synth", "prompt": pr["prompt"], "example": pr["example"], "target": target,
+                    "record_ids": [r["id"] for r in chosen], "ratios": [round(q * 100, 1) for q in ratios], "sum_check": check, **std_meta}
+            nid, dropped = rec.add_result(gid, item, sno, "synth", text, meta, cost)
+            return self._ai_out({"id": nid, "dropped": dropped, "cost": cost, "ratios": meta["ratios"]})
         finally:
             self._release(key)
-        meta = {"model": model, "op": "synth", "prompt": pr["prompt"], "example": pr["example"], "target": target,
-                "record_ids": [r["id"] for r in chosen], "ratios": [round(q * 100, 1) for q in ratios], "sum_check": check, **std_meta}
-        nid, dropped = rec.add_result(gid, item, sno, "synth", text, meta, cost)
-        return self._ai_out({"id": nid, "dropped": dropped, "cost": cost, "ratios": meta["ratios"]})
 
     def _std_rule(self, g, item, std, only):
         if not std or not (std.get("text") or "").strip():
@@ -760,11 +811,11 @@ class Api:
         try:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"] + rule, pr["example"], target),
                                        "(누가기록 없음 — 성취기준과 성취수준으로만 작성)", cfg["privacy_block"])
+            meta.update({"model": model, "op": "synth", "prompt": pr["prompt"], "example": pr["example"], "target": target})
+            nid, dropped = rec.add_result(gid, item, sno, "synth", text, meta, cost)
+            return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
         finally:
             self._release(key)
-        meta.update({"model": model, "op": "synth", "prompt": pr["prompt"], "example": pr["example"], "target": target})
-        nid, dropped = rec.add_result(gid, item, sno, "synth", text, meta, cost)
-        return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
 
     # ---------- 성취기준 ----------
     @safe
@@ -776,8 +827,8 @@ class Api:
         return Standards(self._db()).get(gid)
 
     @safe
-    def standards_save(self, gid, text, source=None):
-        self._editable()
+    def standards_save(self, gid, text, source=None, year=None):
+        self._editable(year)
         Standards(self._db()).save(gid, text, source)
         return {}
 
@@ -809,11 +860,11 @@ class Api:
         self._guard(key)
         try:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"], pr["example"], target), f["text"], cfg["privacy_block"])
+            meta = {"model": model, "op": "polish", "prompt": pr["prompt"], "example": pr["example"], "target": target, "from": "final"}
+            nid, dropped = rec.add_result(gid, item, sno, "polish", text, meta, cost)
+            return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
         finally:
             self._release(key)
-        meta = {"model": model, "op": "polish", "prompt": pr["prompt"], "example": pr["example"], "target": target, "from": "final"}
-        nid, dropped = rec.add_result(gid, item, sno, "polish", text, meta, cost)
-        return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
 
     @safe
     def run_cost(self):
@@ -991,8 +1042,10 @@ class Api:
         b = ib._editable_batch(bid)
         if not (b["meta"].get("scan") or {}).get("pages"):
             raise db.DbError("먼저 스캔 PDF를 고르세요.")
-        if not self._busy.acquire(blocking=False):
-            raise db.DbError("다른 작업이 진행 중입니다.")
+        with self._ai_lock:
+            self._check_running()
+            if not self._busy.acquire(blocking=False):
+                raise db.DbError("다른 작업이 진행 중입니다.")
         self._ocr_stop.clear()
         year = config.load()["current_year"]
 
@@ -1100,11 +1153,11 @@ class Api:
         self._guard(key)
         try:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"], pr["example"], 0), r["content"], cfg["privacy_block"])
+            cid = ib.add_cand(r["id"], text, {"model": model, "op": "refine", "prompt": pr["prompt"], "example": pr["example"]}, cost)
+            ib.use_cand(r["id"], cid)  # 새 후보를 바로 '보낼 내용'으로(다른 후보·원문으로 바꿀 수 있음)
+            return {"id": cid, "cost": cost, "run_cost": self._run_cost}
         finally:
             self._release(key)
-        cid = ib.add_cand(r["id"], text, {"model": model, "op": "refine", "prompt": pr["prompt"], "example": pr["example"]}, cost)
-        ib.use_cand(r["id"], cid)  # 새 후보를 바로 '보낼 내용'으로(다른 후보·원문으로 바꿀 수 있음)
-        return {"id": cid, "cost": cost, "run_cost": self._run_cost}
 
     @safe
     def inbox_use_cand(self, row_id, cand_id=None):
@@ -1166,31 +1219,26 @@ class Api:
 
     @safe
     def restore_backup(self, name):
-        self._require_idle("복원")
-        self._last_undo = None
-        if not self._busy.acquire(blocking=False):
-            raise db.DbError("다른 작업이 진행 중입니다.")
-        try:
+        with self._maintenance("복원", take_busy=True):
+            self._last_undo = None
             return backup.restore(name)
-        finally:
-            self._busy.release()
 
     @safe
     def delete_year(self, year, typed):
-        self._require_idle("학년도 자료를 지울")
-        self._last_undo = None
         year = int(year)
         if (typed or "").strip() != f"{year}학년도":
             raise db.DbError(f"확인 칸에 '{year}학년도'를 정확히 입력해 주세요.")
-        if year not in db.list_years():
-            raise db.DbError("그 학년도 자료가 없습니다.")
-        backup.make("삭제전")
-        db.close_all()
-        backup.delete_year_files(year)
-        cfg = config.load()
-        if cfg["current_year"] == year:
-            rest = db.list_years()
-            config.save({"current_year": max(rest) if rest else 0, "setup_done": bool(rest)})
+        with self._maintenance("학년도 자료 삭제", take_busy=True):
+            self._last_undo = None
+            if year not in db.list_years():
+                raise db.DbError("그 학년도 자료가 없습니다.")
+            backup.make("삭제전")
+            db.close_all()
+            backup.delete_year_files(year)
+            cfg = config.load()
+            if cfg["current_year"] == year:
+                rest = db.list_years()
+                config.save({"current_year": max(rest) if rest else 0, "setup_done": bool(rest)})
         return {}
 
     @safe
@@ -1219,33 +1267,65 @@ class Api:
             raise updater.UpdateError("Windows exe에서만 자동 업데이트할 수 있습니다.")
         if not info.get("sha256"):
             raise updater.UpdateError("이 릴리스에는 검증값(SHA-256)이 없어 자동 업데이트하지 않습니다. 릴리스 페이지에서 직접 내려받아 주세요.")
-        self._require_idle("업데이트")
-        if not self._busy.acquire(blocking=False):
-            raise updater.UpdateError("다른 작업이 진행 중입니다. 끝난 뒤 업데이트해 주세요.")
+        self._maint_begin("업데이트", take_busy=True)
 
         def run():
+            from . import single
+
+            released = []
+
+            def hand_over():  # 새 앱을 띄우기 바로 전에 잠금을 넘겨준다
+                db.close_all()
+                single.release()
+                released.append(True)
+
             try:
                 self._emit({"type": "update_progress", "stage": "backup"})
                 backup.make("업데이트전")
                 path = updater.download(info, lambda d, t: self._emit({"type": "update_progress", "stage": "download", "done": d, "total": t}))
                 self._emit({"type": "update_progress", "stage": "restart"})
-                db.close_all()
-                from . import single
-
-                single.release()  # 새 앱이 잠금을 바로 얻도록
-                updater.swap_and_launch(path)
+                updater.swap_and_launch(path, before_launch=hand_over)
+                self._close_ok = True
                 if self._window:
                     self._window.destroy()
+                return  # 창이 닫힌다. 관리 작업 표시는 그대로 둔다
             except Exception as e:
                 updater.log(f"업데이트 실패: {e}")
-                self._emit({"type": "update_error", "message": str(e)})
-            finally:
-                self._busy.release()
+                msg = str(e)
+                if released and not single.acquire(3):
+                    self._halted = "업데이트에 실패했고 다른 창이 이미 자료를 쓰고 있습니다. 이 창을 닫아 주세요."
+                    msg += " " + self._halted
+                    updater.log("업데이트 실패 뒤 실행 잠금을 되찾지 못해 이 창의 쓰기를 막음")
+                self._emit({"type": "update_error", "message": msg})
+            self._maint_end(take_busy=True)
 
         threading.Thread(target=run, daemon=True).start()
         return {}
 
     # ---------- 창 ----------
+    def on_closing(self):
+        """창 닫기: 화면에 남은 저장(최종안·성취기준·프롬프트·설정)을 먼저 마치게 하고 닫는다.
+        화면이 응답하지 않을 때를 대비해, 몇 초 안에 다시 닫으면 바로 닫는다."""
+        import time
+
+        self.save_window()
+        if self._close_ok or not self._window:
+            return True
+        now = time.time()
+        if now - self._close_asked < 8:
+            return True
+        self._close_asked = now
+        w = self._window
+        threading.Thread(target=lambda: w.evaluate_js(
+            "setTimeout(function(){ if (window.__beforeClose) window.__beforeClose(); else window.pywebview.api.close_app(); }, 0); 0"), daemon=True).start()
+        return False
+
+    def close_app(self):
+        self._close_ok = True
+        if self._window:
+            self._window.destroy()
+        return {"ok": True}
+
     def save_window(self):
         w = self._window
         if not w:

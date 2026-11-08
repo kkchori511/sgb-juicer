@@ -59,6 +59,43 @@
     let t;
     return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
   }
+  // 대상별로 따로 미뤄 두는 저장(성취기준·프롬프트). 다른 대상의 저장을 취소하지 않고,
+  // 화면·학년도를 바꾸거나 창을 닫기 전에 모두 마저 저장한다.
+  const pendingSaves = new Map();
+  function saveLater(key, fn, ms) {
+    const old = pendingSaves.get(key);
+    if (old) clearTimeout(old.t);
+    pendingSaves.set(key, { fn, t: setTimeout(() => runPending(key), ms) });
+  }
+  async function runPending(key) {
+    const job = pendingSaves.get(key);
+    if (!job) return true;
+    pendingSaves.delete(key);
+    clearTimeout(job.t);
+    return !!(await job.fn());
+  }
+  function dropPending(key) {
+    const job = pendingSaves.get(key);
+    if (job) { clearTimeout(job.t); pendingSaves.delete(key); }
+  }
+  async function flushPending() {
+    let ok = true;
+    for (const key of [...pendingSaves.keys()]) ok = (await runPending(key)) && ok;
+    return ok;
+  }
+  const SAVE_FAIL_MSG = '저장하지 못한 내용이 있어 화면을 그대로 두었습니다. 다시 시도하거나 내용을 복사해 두세요.';
+  async function saveAllPending() {
+    const a = await flushFinal();
+    const b = await flushPending();
+    const c = await flushCfg();
+    return a && b && c;
+  }
+  // 학생·항목·학년도·화면을 바꾸기 전에: 저장에 실패하면 false(지금 화면을 그대로 둔다)
+  async function leaveOk() {
+    if (await saveAllPending()) return true;
+    toast(SAVE_FAIL_MSG, 5000);
+    return false;
+  }
   function fmtCredit(v) {
     if (v === null || v === undefined || isNaN(v)) return '-';
     if (v === 0) return '0';
@@ -131,8 +168,14 @@
 
   // ---------- 상단 바·메뉴 ----------
   function showPanel(name) {
-    flushFinal();
+    if (draftDirty() || pendingSaves.size) {
+      saveAllPending().then((ok) => { if (ok) showPanelNow(name); else toast(SAVE_FAIL_MSG, 5000); });
+      return;
+    }
     flushCfg();
+    showPanelNow(name);
+  }
+  function showPanelNow(name) {
     $('actionToast').hidden = true;
     panel = name;
     document.querySelectorAll('.nav').forEach((b) => b.classList.toggle('active', b.dataset.panel === name));
@@ -178,6 +221,7 @@
     const r = await call('year_state');
     if (!r) return;
     ys = r;
+    finalDraft = null; // 이전 학년도 화면의 초안은 끝(바꾸기 전에 저장을 마쳤다)
     R.slots = [];
     R.slot = null;
     renderYearSelect();
@@ -915,8 +959,10 @@
     t.innerHTML = '';
     t.appendChild(el('tr', {}, ['백업', '파일', ''].map((h) => el('th', { text: h }))));
     if (!r || !r.backups.length) { t.appendChild(el('tr', {}, [el('td', { colspan: 3, class: 'muted', text: '아직 백업이 없습니다.' })])); return; }
-    r.backups.forEach((b) => t.appendChild(el('tr', {}, [el('td', { text: b.name.replace('_', ' ') }), el('td', { text: b.files.join(', ') }),
+    r.backups.forEach((b) => t.appendChild(el('tr', {}, [el('td', { text: b.name.replace('_', ' ') }),
+      el('td', {}, [b.files.join(', '), b.legacy ? el('div', { class: 'muted', text: '이전 형식(스캔 원본 미포함) — 복원해도 지금 스캔 원본은 그대로 둡니다.' }) : (b.scans ? el('div', { class: 'muted', text: `스캔 원본 ${b.scans}개 포함` }) : null)]),
       el('td', {}, [el('button', { type: 'button', text: '이 백업으로 복원', onclick: async () => {
+        if (!(await leaveOk())) return;
         if (!(await confirmBox(`'${b.name}' 백업으로 되돌립니다. 지금 상태는 먼저 백업해 둡니다. 계속할까요?`, '복원'))) return;
         const x = await mutate('restore_backup', b.name);
         if (x) { toast('복원했습니다.'); await reloadYear(); loadBackups(); }
@@ -1242,7 +1288,7 @@
     const list = filteredStudents();
     list.forEach((s) => {
       const st = STATUS[s.status] || STATUS.none;
-      box.appendChild(el('button', { type: 'button', class: 'stu' + (s.student_no === R.sno ? ' active' : '') + (s.active ? '' : ' inactive'), title: st.text, onclick: () => { R.sno = s.student_no; R.selected.clear(); renderStudentList(); loadStudent(); } }, [
+      box.appendChild(el('button', { type: 'button', class: 'stu' + (s.student_no === R.sno ? ' active' : '') + (s.active ? '' : ' inactive'), title: st.text, onclick: async () => { if (s.student_no !== R.sno && !(await leaveOk())) return; R.sno = s.student_no; R.selected.clear(); renderStudentList(); loadStudent(); } }, [
         el('span', { class: `st ${st.cls}`, text: st.icon }), el('span', { class: 'no', text: s.student_no }), el('span', { text: s.name }),
         el('span', { class: 'cnt', text: (s.stale ? '! ' : '') + (s.records ? `${s.records}건` : '') + (s.active ? '' : ' 비활성') }),
       ]));
@@ -1251,11 +1297,12 @@
     const done = R.students.filter((s) => s.active && s.status === 'closed').length;
     box.appendChild(el('p', { class: 'hint', text: `마감 ${done}/${R.students.filter((s) => s.active).length}명` }));
   }
-  function moveStudent(step) {
+  async function moveStudent(step) {
     const list = filteredStudents();
     const i = list.findIndex((s) => s.student_no === R.sno);
     const next = list[i + step];
     if (!next) { toast(step > 0 ? '마지막 학생입니다.' : '첫 학생입니다.'); return; }
+    if (!(await leaveOk())) return;
     R.sno = next.student_no;
     R.selected.clear();
     renderStudentList();
@@ -1264,7 +1311,7 @@
   let studentReq = 0;
   async function loadStudent(keepScroll) {
     if (!R.sno) return;
-    await flushFinal();
+    if (!(await flushFinal())) { toast(SAVE_FAIL_MSG, 5000); return; }
     const scroll = [$('recRecords').scrollTop, $('recFinal').scrollTop];
     const req = ++studentReq;
     const ctx = { year: ys.year, gid: R.slot.group_id, item: R.slot.item, sno: R.sno };
@@ -1285,19 +1332,46 @@
     renderStudentList();
   }
   // 최종안 직접 수정: 쉬면 자동 저장, 학생·화면을 바꾸기 전에도 저장
+  // 저장은 한 줄로 세워 차례대로 한다(늦게 끝난 저장이 새 글을 덮어쓰지 않게).
+  // 채택·마감도 같은 줄에서 앞선 저장이 끝난 뒤에 한다.
   let finalDraft = null;
+  let finalChain = Promise.resolve();
+  let finalBusy = 0;
   const finalAutoSave = debounce(() => flushFinal(), 900);
-  async function flushFinal() {
+  function finalSerial(fn) {
+    finalBusy += 1;
+    const p = finalChain.then(fn);
+    finalChain = p.then(() => {}, () => {}).then(() => { finalBusy -= 1; });
+    return p;
+  }
+  function draftDirty() {
     const d = finalDraft;
-    if (!d || !d.ta.isConnected && d.ta.value === d.saved) return true;
+    return finalBusy > 0 || !!(d && !d.dead && d.ta.value.trim() !== (d.saved || '').trim());
+  }
+  async function doFlushFinal() {
+    const d = finalDraft;
+    if (!d || d.dead) return true;
     const text = d.ta.value;
-    if (text.trim() === (d.saved || '').trim()) { if (d.state) d.state.textContent = ''; return true; }
-    const r = await call('edit_final', d.ctx.gid, d.ctx.item, d.ctx.sno, text);
+    if (text.trim() === (d.saved || '').trim()) { if (d.state && d.state.textContent === '저장 중…') d.state.textContent = ''; return true; }
+    const r = await call('edit_final', d.ctx.gid, d.ctx.item, d.ctx.sno, text, d.ctx.year);
     if (!r) { if (d.state) d.state.textContent = '저장 안 됨'; return false; }
     d.saved = text;
     markSaved();
-    if (d.state && d.state.isConnected) d.state.textContent = '저장됨';
+    if (d.state && d.state.isConnected) d.state.textContent = d.ta.value === text ? '저장됨' : '저장 중…';
+    if (d.onSaved) d.onSaved(text);
     return true;
+  }
+  function flushFinal() { return finalSerial(doFlushFinal); }
+  // 최종안을 먼저 저장하고, 같은 줄에서 최종안을 바꾸는 작업(채택·마감)을 한다. 성공하면 이 초안은 끝.
+  function afterFinalSaved(fn) {
+    return finalSerial(async () => {
+      if (!(await doFlushFinal())) return null;
+      const d = finalDraft;
+      if (d) d.ta.disabled = true;
+      const r = await fn();
+      if (d) { if (r) d.dead = true; else d.ta.disabled = d.ro; }
+      return r;
+    });
   }
   const closedNow = () => !!(R.view && R.view.final && R.view.final.closed) || !!ys.archived;
 
@@ -1356,7 +1430,7 @@
     card.appendChild(el('div', { class: 'rcard-foot' }, [
       bytesEl(r.bytes, r.kind === 'existing' ? R.target : 0), el('span', { class: 'spacer' }),
       aiBtn,
-      r.kind === 'existing' ? el('button', { type: 'button', disabled: locked, text: '그대로 최종안으로', onclick: async () => { if ((await flushFinal()) && await mutate('adopt_record', r.id)) { toast('최종안으로 채택했습니다.'); loadStudent(true); } } }) : null,
+      r.kind === 'existing' ? el('button', { type: 'button', disabled: locked, text: '그대로 최종안으로', onclick: async () => { if (await afterFinalSaved(() => mutate('adopt_record', r.id))) { toast('최종안으로 채택했습니다.'); loadStudent(true); } } }) : null,
       el('button', { type: 'button', disabled: locked, text: '수정', onclick: () => recordForm(r, r.kind) }),
       el('button', { type: 'button', disabled: locked, title: '이 기록(또는 문단)을 다른 항목으로', text: '이동', onclick: () => openMove([r]) }),
       el('button', { type: 'button', class: 'link danger-text', disabled: locked, text: '삭제', onclick: async () => {
@@ -1369,7 +1443,7 @@
       r.candidates.slice().reverse().forEach((cd) => c.appendChild(candEl(cd, locked, [
         el('button', { type: 'button', class: 'small', disabled: locked, text: '이 내용으로 기록 바꾸기', onclick: async () => { if (await mutate('apply_candidate', cd.id)) { toast('기록을 바꿨습니다. 원문은 남겨 둡니다.'); loadStudent(true); } } }),
         el('button', { type: 'button', class: 'small', text: '정보', onclick: () => candInfo(cd) }),
-        r.kind === 'existing' ? el('button', { type: 'button', class: 'small', disabled: locked, text: '최종안으로 채택', onclick: async () => { if ((await flushFinal()) && await mutate('adopt_result', cd.id)) { toast('최종안으로 채택했습니다.'); loadStudent(true); } } }) : null,
+        r.kind === 'existing' ? el('button', { type: 'button', class: 'small', disabled: locked, text: '최종안으로 채택', onclick: async () => { if (await afterFinalSaved(() => mutate('adopt_result', cd.id))) { toast('최종안으로 채택했습니다.'); loadStudent(true); } } }) : null,
       ])));
       card.appendChild(c);
     }
@@ -1564,7 +1638,7 @@
     ta.addEventListener('input', () => { upd(); saveState.textContent = '저장 중…'; finalAutoSave(); });
     const saveState = el('span', { class: 'muted' });
     const ctx = R.viewCtx;
-    finalDraft = { ctx, saved: f ? f.text : '', ta, state: saveState };
+    finalDraft = { ctx, saved: f ? f.text : '', ta, state: saveState, ro };
     const saveBtn = el('button', { type: 'button', hidden: true, text: '저장' });
     const polishBtn = el('button', { type: 'button', disabled: ro || !f, title: '최종안을 AI로 다듬어 후보로 만듭니다', text: '다듬기(AI)' });
     polishBtn.addEventListener('click', async () => {
@@ -1575,9 +1649,25 @@
     const closeBtn = closed
       ? el('button', { type: 'button', disabled: !!ys.archived, text: '마감 해제', onclick: async () => { if (await mutate('set_closed', R.slot.group_id, R.slot.item, R.sno, false)) { toast('마감을 해제했습니다.'); loadStudent(true); } } })
       : el('button', { type: 'button', class: 'primary', disabled: !f || !!ys.archived, text: '● 마감', title: f ? '검토를 끝내고 편집을 잠급니다' : '최종안이 있어야 마감할 수 있습니다', onclick: async () => {
-        if (!(await flushFinal())) return;
-        if (await mutate('set_closed', R.slot.group_id, R.slot.item, R.sno, true)) { toast('마감했습니다. 다음 학생으로 넘어가세요.'); loadStudent(true); }
+        const c = ctx;
+        if (await afterFinalSaved(() => mutate('set_closed', c.gid, c.item, c.sno, true))) { toast('마감했습니다. 다음 학생으로 넘어가세요.'); loadStudent(true); }
       } });
+    // 직접 쓴 글이 저장되면 마감·다듬기 버튼과 학생 상태를 바로 맞춘다
+    finalDraft.onSaved = (text) => {
+      const has = !!text.trim();
+      if (!closed) {
+        closeBtn.disabled = !has || !!ys.archived;
+        closeBtn.title = has ? '검토를 끝내고 편집을 잠급니다' : '최종안이 있어야 마감할 수 있습니다';
+        polishBtn.disabled = ro || !has;
+      }
+      if (R.view !== v) return;
+      v.final = has ? { ...(v.final || {}), text, closed: false, stale: false } : null;
+      const st = R.students.find((s) => s.student_no === ctx.sno);
+      if (st && R.sno === ctx.sno && st.status !== 'closed') {
+        st.status = has ? 'final' : (v.records.length || v.results.length) ? 'progress' : 'none';
+        renderStudentList();
+      }
+    };
     upd();
     fb.append(ta, el('div', { class: 'final-actions' }, [bc, saveState, el('span', { class: 'spacer' }), saveBtn, polishBtn, closeBtn]));
     if (closed) fb.appendChild(el('div', { class: 'hint', text: `● ${f.closed_at || ''} 마감 — 기록·AI·최종안 편집이 잠겼습니다. 조회·복사·내보내기는 됩니다.` }));
@@ -1588,8 +1678,8 @@
     v.results.slice().reverse().forEach((cd) => box.appendChild(candEl(cd, ro, [
       el('button', { type: 'button', class: 'small primary', disabled: ro, text: '✔ 최종안으로 채택', onclick: async () => {
         if (!(await flushFinal())) return;
-        if (f && f.text && ta.value.trim() !== cd.text.trim() && !(await confirmBox('지금 최종안을 이 후보로 바꿉니다. 계속할까요?', '채택'))) return;
-        if (await mutate('adopt_result', cd.id)) { toast('최종안으로 채택했습니다.'); loadStudent(true); }
+        if (ta.value.trim() && ta.value.trim() !== cd.text.trim() && !(await confirmBox('지금 최종안을 이 후보로 바꿉니다. 계속할까요?', '채택'))) return;
+        if (await afterFinalSaved(() => mutate('adopt_result', cd.id))) { toast('최종안으로 채택했습니다.'); loadStudent(true); }
       } }),
       el('button', { type: 'button', class: 'small', text: '정보', onclick: () => candInfo(cd) }),
     ])));
@@ -1746,10 +1836,15 @@
     const def = r.defaults[P.item][P.op];
     $('prState').textContent = cur.prompt === def.prompt && cur.example === def.example ? '기본값 사용 중' : '개인 프롬프트';
   }
-  const savePromptLater = debounce(async (item, op, prompt, example) => {
-    if (await mutate('prompts_save', item, op, prompt, example) && P.item === item && P.op === op) $('prState').textContent = '개인 프롬프트 · 저장됨';
-  }, 600);
-  function savePrompt() { $('prState').textContent = '저장 중…'; savePromptLater(P.item, P.op, $('prPrompt').value, $('prExample').value); }
+  function savePrompt() {
+    $('prState').textContent = '저장 중…';
+    const item = P.item, op = P.op, prompt = $('prPrompt').value, example = $('prExample').value;
+    saveLater(`prompt:${item}:${op}`, async () => {
+      const r = await mutate('prompts_save', item, op, prompt, example);
+      if (r && P.item === item && P.op === op) $('prState').textContent = '개인 프롬프트 · 저장됨';
+      return r;
+    }, 600);
+  }
 
   // =====================================================================
   // v0.3: 자료 인박스 — ① 가져오기 → ② 학생 매칭 → ③ AI 정제(선택) → ④ 보내기 검토
@@ -2313,6 +2408,7 @@
   // v0.5: 성취기준(붙여넣기·PDF·hwpx) · 세특 종합에 반영 · 성취기준만으로 생성
   // =====================================================================
   const SD = { gid: null, data: null };
+  let stdReq = 0;
   async function renderStandards() {
     const r = await call('standards_overview');
     if (!r) return;
@@ -2329,17 +2425,21 @@
     r.subjects.forEach((x) => list.appendChild(el('button', { type: 'button', class: 'ib-item' + (x.id === SD.gid ? ' active' : ''), onclick: () => { SD.gid = x.id; renderStandards(); } }, [
       el('span', { class: 't', text: x.label }), el('span', { class: 's', text: x.has ? `✔ 입력됨 · ${x.updated_at.slice(0, 16)}` : '아직 없음' })])));
     list.appendChild(el('p', { class: 'hint', text: '모든 과목을 미리 넣을 필요는 없습니다. 세특에 성취기준을 쓸 과목만 넣으세요. 학년도마다 따로 저장됩니다.' }));
-    const d = await call('standards_get', SD.gid);
-    if (!d) return;
+    const sreq = ++stdReq, gidAsk = SD.gid, yearAsk = ys.year;
+    const d = await call('standards_get', gidAsk);
+    if (!d || sreq !== stdReq || SD.gid !== gidAsk || ys.year !== yearAsk) return;
     SD.data = d;
     const g = (ys.groups || []).find((x) => x.id === SD.gid);
     const m = $('stdMain');
     m.innerHTML = '';
     const ta = el('textarea', { id: 'stdText', value: d.text, disabled: !!ys.archived, placeholder: '예)\n[10공수1-01-01] 다항식의 사칙연산을 할 수 있다.\n[10공수1-01-02] 항등식의 성질과 나머지정리를 이해한다.\n\n성취수준 A: …  B: …  C: …\n\n성취기준 코드와 문장, 필요하면 성취수준별 설명까지 넣으세요.' });
     const state = el('span', { class: 'muted', text: d.source ? `가져온 곳: ${d.source}` : '' });
-    const gidNow = SD.gid;
-    const save = debounce(async (gid, text) => { if (await mutate('standards_save', gid, text, null)) { state.textContent = '저장됨'; } }, 600);
-    ta.addEventListener('input', () => { state.textContent = '저장 중…'; save(gidNow, ta.value); });
+    const gidNow = SD.gid, yearNow = ys.year, skey = `std:${yearNow}:${gidNow}`;
+    ta.addEventListener('input', () => {
+      state.textContent = '저장 중…';
+      const text = ta.value;
+      saveLater(skey, async () => { const r = await mutate('standards_save', gidNow, text, null, yearNow); if (r && state.isConnected) state.textContent = '저장됨'; return r; }, 600);
+    });
     const put = async (text, source) => {
       let mode = 'replace';
       if (ta.value.trim()) {
@@ -2353,7 +2453,9 @@
         if (!mode) return;
       }
       ta.value = mode === 'append' ? `${ta.value.trim()}\n\n${text}` : text;
-      await mutate('standards_save', SD.gid, ta.value, source);
+      dropPending(skey);
+      if (!(await mutate('standards_save', gidNow, ta.value, source, yearNow))) return;
+      if (SD.gid !== gidNow || ys.year !== yearNow) return;
       toast(`${source}에서 읽어 넣었습니다. 필요 없는 부분은 지우세요.`);
       renderStandards();
     };
@@ -2629,7 +2731,12 @@
       saveCfg({ menu_collapsed: v });
     });
     $('verBtn').addEventListener('click', showAbout);
-    $('yearSelect').addEventListener('change', async (e) => { await flushFinal(); $('actionToast').hidden = true; if (await call('switch_year', +e.target.value)) { await reloadYear(); toast(`${e.target.value}학년도로 바꿨습니다.`); } });
+    $('yearSelect').addEventListener('change', async (e) => {
+      const want = +e.target.value;
+      if (!(await leaveOk())) { e.target.value = ys.year; return; }
+      $('actionToast').hidden = true;
+      if (await call('switch_year', want)) { finalDraft = null; await reloadYear(); toast(`${want}학년도로 바꿨습니다.`); } else e.target.value = ys.year;
+    });
     document.querySelectorAll('#semesterSeg .seg').forEach((b) => b.addEventListener('click', () => {
       semester = +b.dataset.sem;
       document.querySelectorAll('#semesterSeg .seg').forEach((x) => x.classList.toggle('active', x === b));
@@ -2648,6 +2755,7 @@
     $('delYearBtn').addEventListener('click', async () => {
       const typed = $('delYearText').value;
       if (typed.trim() !== `${ys.year}학년도`) { alertBox(`확인 칸에 '${ys.year}학년도'를 정확히 입력해 주세요.`); return; }
+      if (!(await leaveOk())) return;
       if (!(await confirmBox(`${ys.year}학년도의 명렬과 기록을 모두 지웁니다. 지우기 전에 백업을 하나 만듭니다. 정말 지울까요?`, '삭제'))) return;
       if (await mutate('delete_year', ys.year, typed)) {
         $('delYearText').value = '';
@@ -2669,12 +2777,17 @@
     $('updateNowBtn').addEventListener('click', async () => {
       if (!updateInfo) return;
       if (!updateInfo.can_apply) { api.open_url('https://github.com/kkchori511/sgb-juicer/releases/latest'); return; }
+      if (!(await leaveOk())) return;
       if (!(await confirmBox(`v${updateInfo.version}로 업데이트합니다.\n자료를 먼저 백업한 뒤 새 버전을 내려받고 앱을 다시 시작합니다.`, '업데이트'))) return;
       $('updateNowBtn').disabled = true;
       const r = await call('update_apply');
       if (!r) $('updateNowBtn').disabled = false;
     });
-    $('recSlot').addEventListener('change', (e) => { R.slot = R.slots.find((s) => slotKey(s) === e.target.value); R.sno = null; R.selected.clear(); R.filter = ''; loadSlotStudents(); });
+    $('recSlot').addEventListener('change', async (e) => {
+      const want = e.target.value;
+      if (!(await leaveOk())) { e.target.value = R.slot ? slotKey(R.slot) : ''; return; }
+      R.slot = R.slots.find((s) => slotKey(s) === want); R.sno = null; R.selected.clear(); R.filter = ''; loadSlotStudents();
+    });
     $('recPrev').addEventListener('click', () => moveStudent(-1));
     $('recListToggle').addEventListener('click', () => { $('recBody').classList.toggle('list-hidden'); });
     $('recNext').addEventListener('click', () => moveStudent(1));
@@ -2698,6 +2811,12 @@
       if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); moveStudent(-1); }
     });
     $('helpBtn').addEventListener('click', () => openGuide(HELP[panel]));
+    // 창을 닫을 때: 남은 저장을 마치고 닫는다(파이썬이 닫기를 잠시 멈추고 이 함수를 부름)
+    window.__beforeClose = async () => {
+      const okSave = await saveAllPending();
+      if (!okSave && !(await confirmBox('저장하지 못한 내용이 있습니다. 그래도 닫을까요?', '닫기'))) return;
+      api.close_app();
+    };
     document.querySelectorAll('#guideToc a').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openGuide(a.getAttribute('href').slice(1)); }));
     $('wNext').addEventListener('click', wizardNext);
     $('wPrev').addEventListener('click', wizardPrev);

@@ -128,8 +128,9 @@ def _clean_env():
     return env
 
 
-def swap_and_launch(new_path: str, args=()):
-    """exe 교체 후 새 exe를 띄운다. 실패하면 원래대로 되돌리고 UpdateError."""
+def swap_and_launch(new_path: str, args=(), before_launch=None):
+    """exe 교체 후 새 exe를 띄운다. 실패하면 원래대로 되돌리고 UpdateError.
+    before_launch: 새 exe를 띄우기 바로 전에 부른다(실행 잠금 넘겨주기). 이름 바꾸기가 실패하면 부르지 않는다."""
     if not can_apply():
         raise UpdateError("Windows exe에서만 업데이트할 수 있습니다.")
     exe = current_exe()
@@ -158,6 +159,8 @@ def swap_and_launch(new_path: str, args=()):
     flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     if not args:
         args = ["--after-update"]  # 새 앱은 이 앱이 잠금을 풀 때까지 기다린다
+    if before_launch:
+        before_launch()
     try:
         subprocess.Popen([str(exe), *args], cwd=str(exe.parent), env=_clean_env(), creationflags=flags, close_fds=True)
     except OSError as e:

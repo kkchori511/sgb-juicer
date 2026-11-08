@@ -301,6 +301,16 @@ class Records:
                     "closed": self.is_closed(g["id"], it, sno)})
         return out
 
+    @staticmethod
+    def _snap(c, rid):
+        """되돌리기 충돌 검사용: 기록의 내용·제목·날짜·비중·태그와 그 기록에 달린 후보(잠금 포함)."""
+        row = c.execute("SELECT content, title, date, weight FROM records WHERE id=?", (int(rid),)).fetchone()
+        if row is None:
+            return None
+        tags = sorted(t[0] for t in c.execute("SELECT tag_id FROM record_tags WHERE record_id=?", (int(rid),)))
+        res = sorted([r[0], r[1], r[2]] for r in c.execute("SELECT id, locked, text FROM results WHERE record_id=?", (int(rid),)))
+        return [row[0], row[1], row[2], row[3], tags, res]
+
     def move(self, moves, dest_gid, dest_item):
         """moves: [{record_id, paras: [번호] 또는 None(전체)}] → 도착 항목의 새 기록. 전부 성공 또는 전부 취소.
         반환: 되돌리기 정보."""
@@ -353,6 +363,9 @@ class Records:
                     c.execute("DELETE FROM records WHERE id=?", (r["id"],))
                 self._stale(c, r["group_id"], r["item"], sno)
             self._stale(c, dest_gid, dest_item, sno)
+            undo["snap"] = {str(nid): self._snap(c, nid) for nid in undo["created"]}
+            for src in undo["sources"]:
+                src["snap"] = None if src["deleted"] else self._snap(c, src["row"]["id"])
         undo.update(year=self.d.year, dest=[dest_gid, dest_item], sno=sno)
         return undo
 
@@ -362,21 +375,23 @@ class Records:
             raise DbError("학년도가 바뀌어 이 이동은 되돌릴 수 없습니다.")
         sno = undo["sno"]
         slots = {(undo["dest"][0], undo["dest"][1])} | {(x["row"]["group_id"], x["row"]["item"]) for x in undo["sources"]}
-        for gid, item in slots:
-            if self.is_closed(gid, item, sno):
-                raise DbError("이동한 뒤 마감된 항목이 있어 되돌릴 수 없습니다. 마감을 해제한 뒤 직접 옮겨 주세요.")
-        for nid in undo["created"]:
-            rows = self.d.q("SELECT content FROM records WHERE id=?", (int(nid),))
-            if not rows or rows[0]["content"] != undo["moved_text"][str(nid)]:
-                raise DbError("옮긴 기록을 그 뒤에 고치거나 지워서 되돌릴 수 없습니다.")
-        for src in undo["sources"]:
-            rows = self.d.q("SELECT content FROM records WHERE id=?", (src["row"]["id"],))
-            if src["deleted"]:
-                if rows:
-                    raise DbError("원래 기록 자리가 이미 쓰여 되돌릴 수 없습니다.")
-            elif not rows or rows[0]["content"] != src["after"]:
-                raise DbError("원래 기록을 그 뒤에 고쳐서 되돌릴 수 없습니다.")
         with self.d.tx() as c:
+            # 검사와 되돌리기를 한 트랜잭션에서: 검사 뒤에 다른 변경이 끼어들지 않게
+            for gid, item in slots:
+                if self.is_closed(gid, item, sno):
+                    raise DbError("이동한 뒤 마감된 항목이 있어 되돌릴 수 없습니다. 마감을 해제한 뒤 직접 옮겨 주세요.")
+            snaps = undo.get("snap") or {}
+            for nid in undo["created"]:
+                now = self._snap(c, nid)
+                if now is None or now != snaps.get(str(nid)):
+                    raise DbError("옮긴 기록을 그 뒤에 고치거나(제목·날짜·태그·비중·후보 포함) 지워서 되돌릴 수 없습니다.")
+            for src in undo["sources"]:
+                now = self._snap(c, src["row"]["id"])
+                if src["deleted"]:
+                    if now is not None:
+                        raise DbError("원래 기록 자리가 이미 쓰여 되돌릴 수 없습니다.")
+                elif now is None or now != src.get("snap"):
+                    raise DbError("원래 기록을 그 뒤에 고쳐서 되돌릴 수 없습니다.")
             for nid in undo["created"]:
                 c.execute("DELETE FROM results WHERE record_id=?", (int(nid),))
                 c.execute("DELETE FROM records WHERE id=?", (int(nid),))
@@ -501,9 +516,9 @@ class Records:
 
     def edit_final(self, gid, item, sno, text):
         self.slot(gid, item)
-        self.require_open(gid, item, sno)
         text = (text or "").strip()
         with self.d.tx() as c:
+            self.require_open(gid, item, sno)
             if not text:
                 c.execute("DELETE FROM finals WHERE group_id=? AND item=? AND student_no=?", (int(gid), item, str(sno)))
                 return
