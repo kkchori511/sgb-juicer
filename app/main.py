@@ -4,7 +4,49 @@ from . import APP_NAME, VERSION, config
 from .api import Api
 
 
+def selftest(out_path):
+    """빌드 확인용(CI): 묶인 라이브러리가 exe 안에서 동작하는지 본다. 창은 띄우지 않는다."""
+    import io
+    import sys
+    import traceback
+
+    lines = []
+    try:
+        import pypdfium2 as pdfium
+        from pypdf import PdfWriter
+
+        from . import scan
+
+        w = PdfWriter()
+        w.add_blank_page(width=200, height=200)
+        buf = io.BytesIO()
+        w.write(buf)
+        pdf = pdfium.PdfDocument(buf.getvalue())
+        bm = pdf[0].render(scale=1, rev_byteorder=True)
+        png = scan._png(bm.width, bm.height, bm.n_channels, bm.stride, bytes(bm.buffer))
+        assert png.startswith(b"\x89PNG")
+        lines.append("pdfium OK")
+        import openpyxl  # noqa: F401
+        import webview  # noqa: F401
+
+        from . import web_ok
+
+        lines.append("web OK" if web_ok() else "web MISSING")
+        lines.append(f"version {VERSION}")
+        code = 0 if "web OK" in lines else 1
+    except Exception:
+        lines.append(traceback.format_exc())
+        code = 1
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    sys.exit(code)
+
+
 def main():
+    import sys
+
+    if len(sys.argv) >= 3 and sys.argv[1] == "--selftest":
+        selftest(sys.argv[2])
     api = Api()
     geo = config.load().get("window") or {}
     kwargs = {}

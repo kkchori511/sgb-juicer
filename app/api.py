@@ -14,7 +14,7 @@ from functools import wraps
 
 import webview
 
-from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, export, openrouter, prompts, roster, updater, weights
+from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, export, ocr, openrouter, prompts, roster, scan, updater, weights
 from .records import Records, items_of
 from .inbox import Inbox
 from .paths import data_dir
@@ -77,6 +77,7 @@ class Api:
         self._run_cost = 0.0
         self._ai_keys = set()
         self._ai_lock = threading.Lock()
+        self._ocr_stop = threading.Event()
 
     def attach(self, window):
         self._window = window
@@ -793,6 +794,82 @@ class Api:
         if not raw:
             raise db.DbError("첫 번째 시트에 내용이 없습니다.")
         return {"opts": self._ib().set_source(bid, raw, "xlsx", os.path.basename(path)), "raw": raw}
+
+    # ----- 스캔 PDF -----
+    @safe
+    def clova_ready(self):
+        cfg = config.load()
+        missing = [label for k, label in (("clova_secret", "CLOVA Secret Key"), ("clova_url", "CLOVA Invoke URL")) if not cfg[k].strip()]
+        return {"ready": not missing, "missing": missing}
+
+    @safe
+    def inbox_scan_pick(self, bid):
+        self._editable()
+        res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("PDF 파일 (*.pdf)",))
+        if not res:
+            return {"ok": False, "cancelled": True}
+        path = res[0] if isinstance(res, (list, tuple)) else res
+        if os.path.getsize(path) > ocr.MAX_FILE_BYTES:
+            raise db.DbError("파일 크기가 50MB를 넘습니다. PDF를 나눠서 가져와 주세요.")
+        return {"scan": self._ib().scan_set(bid, path, os.path.basename(path))}
+
+    @safe
+    def inbox_scan_ocr(self, bid, per):
+        """백그라운드로 OCR. 진행은 ocr_progress / ocr_done / ocr_error / ocr_stopped 이벤트."""
+        self._editable()
+        cfg = config.load()
+        if not (cfg["clova_url"].strip() and cfg["clova_secret"].strip()):
+            raise db.DbError("CLOVA OCR 키가 없습니다. 설정 > 연결·모델에서 Secret Key와 Invoke URL을 넣어 주세요.")
+        ib = self._ib()
+        b = ib.batch(bid)
+        if not (b["meta"].get("scan") or {}).get("pages"):
+            raise db.DbError("먼저 스캔 PDF를 고르세요.")
+        if not self._busy.acquire(blocking=False):
+            raise db.DbError("다른 작업이 진행 중입니다.")
+        self._ocr_stop.clear()
+        year = config.load()["current_year"]
+
+        def run():
+            try:
+                def prog(n, total_chunks, total_pages):
+                    self._emit({"type": "ocr_progress", "bid": int(bid), "done": n, "total": total_chunks, "pages": total_pages})
+
+                texts = ocr.ocr_pdf(str(scan.pdf_path(bid)), cfg["clova_url"].strip(), cfg["clova_secret"].strip(), cfg["ocr_lang"], prog, self._ocr_stop.is_set)
+                Inbox(db.open_year(year)).scan_save_ocr(bid, texts, per)
+                self._emit({"type": "ocr_done", "bid": int(bid), "pages": len(texts)})
+            except ocr.Stopped:
+                self._emit({"type": "ocr_stopped", "bid": int(bid)})
+            except Exception as e:
+                self._emit({"type": "ocr_error", "bid": int(bid), "message": str(e)})
+            finally:
+                self._busy.release()
+
+        threading.Thread(target=run, daemon=True).start()
+        return {}
+
+    def inbox_ocr_stop(self):
+        self._ocr_stop.set()
+        return {"ok": True}
+
+    @safe
+    def inbox_scan_groups(self, bid, starts=None, skipped=None):
+        return self._ib().scan_groups(bid, starts, skipped)
+
+    @safe
+    def inbox_scan_confirm(self, bid, starts, skipped):
+        self._editable()
+        return {"count": self._ib().scan_confirm(bid, starts, skipped)}
+
+    @safe
+    def inbox_page_image(self, bid, page):
+        try:
+            return {"src": scan.render_page(bid, page)}
+        except FileNotFoundError:
+            raise db.DbError("원본 PDF가 없습니다(묶음을 지웠거나 자료 폴더를 옮겼을 수 있습니다).")
+
+    @safe
+    def inbox_scan_text(self, bid, pages):
+        return {"pages": self._ib().scan_raw_text(bid, pages or [])}
 
     @safe
     def inbox_preview(self, bid, opts):

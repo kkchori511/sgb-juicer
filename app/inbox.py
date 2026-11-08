@@ -10,6 +10,7 @@ import re
 
 from .db import DbError, YearDb
 from .records import Records
+from . import scan
 from .roster import split_student_no
 from .textutil import count_bytes
 
@@ -239,6 +240,9 @@ class Inbox:
     def delete(self, bid):
         with self.d.tx() as c:
             c.execute("DELETE FROM inbox_batches WHERE id=?", (int(bid),))
+        p = scan.pdf_path(bid)
+        if p.exists():
+            p.unlink()
 
     # ---------- ① 가져오기 ----------
     def set_source(self, bid, raw, source, filename=""):
@@ -287,6 +291,90 @@ class Inbox:
                 )
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False), structure=structure, stage="match")
         return len(recs)
+
+    # ---------- ① 가져오기: 스캔 PDF ----------
+    def scan_set(self, bid, src_path, filename):
+        import shutil
+
+        b = self._editable_batch(bid)
+        dest = scan.pdf_path(bid)
+        shutil.copyfile(src_path, dest)
+        try:
+            n = scan.page_count(dest)
+        except Exception:
+            dest.unlink()
+            raise DbError("PDF를 열지 못했습니다.")
+        if n == 0:
+            raise DbError("PDF에 페이지가 없습니다.")
+        meta = b["meta"]
+        meta.pop("raw", None)
+        meta["scan"] = {"pages": n, "filename": filename, "per": 1, "ocr": None, "starts": None, "skipped": []}
+        with self.d.tx() as c:
+            self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False), source="scan", structure="multi")
+        return meta["scan"]
+
+    def scan_save_ocr(self, bid, texts, per):
+        b = self.batch(bid)
+        meta = b["meta"]
+        sc = meta.get("scan") or {}
+        sc["ocr"] = texts
+        sc["per"] = max(1, int(per or 1))
+        sc["starts"] = [g[0] for g in scan.default_groups(len(texts), sc["per"])]
+        sc["skipped"] = []
+        meta["scan"] = sc
+        with self.d.tx() as c:
+            self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
+
+    def _scan(self, bid):
+        b = self.batch(bid)
+        sc = b["meta"].get("scan") or {}
+        if not sc.get("ocr"):
+            raise DbError("먼저 OCR을 실행해 주세요.")
+        return b, sc
+
+    def scan_groups(self, bid, starts=None, skipped=None):
+        b, sc = self._scan(bid)
+        texts = sc["ocr"]
+        starts = sc["starts"] if starts is None else starts
+        skipped = sc["skipped"] if skipped is None else skipped
+        members = self.d.members(b["group_id"]) if b["group_id"] else []
+        out = []
+        for i, g in enumerate(scan.groups_from_starts(len(texts), starts, skipped)):
+            raw = "\n\n".join(texts[p] for p in g).strip()
+            no, name = scan.extract_ids(texts[g[0]], members)
+            out.append({"index": i, "pages": g, "ext_no": no, "ext_name": name, "content": scan.strip_ids(raw, no, name), "empty": not raw.strip()})
+        return {"groups": out, "page_texts": [t[:300] for t in texts], "starts": starts, "skipped": skipped}
+
+    def scan_confirm(self, bid, starts, skipped):
+        b, sc = self._scan(bid)
+        res = self.scan_groups(bid, starts, skipped)
+        groups = [g for g in res["groups"] if not g["empty"]]
+        if not groups:
+            raise DbError("인식된 글자가 있는 페이지가 없습니다.")
+        members = self.d.members(b["group_id"])
+        meta = b["meta"]
+        sc["starts"], sc["skipped"] = starts, skipped
+        meta["scan"] = sc
+        with self.d.tx() as c:
+            c.execute("DELETE FROM inbox_rows WHERE batch_id=?", (int(bid),))
+            for k, g in enumerate(groups):
+                pg = g["pages"]
+                ref = f"{pg[0] + 1}쪽" if len(pg) == 1 else f"{pg[0] + 1}~{pg[-1] + 1}쪽"
+                sno, state, note = match_one(g["ext_no"], g["ext_name"], members)
+                if not g["ext_no"] and not g["ext_name"]:
+                    note = "학번·이름을 읽지 못함 — 원본을 보고 골라 주세요"
+                c.execute(
+                    """INSERT INTO inbox_rows(batch_id, ord, source_ref, ext_no, ext_name, student_no, state, note, line, label, date, content, pages)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (int(bid), k, ref, g["ext_no"], g["ext_name"], sno, state, note, k + 1, b["title"], "", g["content"] or "(내용 없음)",
+                     ",".join(str(p) for p in pg)),
+                )
+            self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False), stage="match")
+        return len(groups)
+
+    def scan_raw_text(self, bid, pages):
+        _, sc = self._scan(bid)
+        return [{"page": int(p), "text": sc["ocr"][int(p)]} for p in pages if 0 <= int(p) < len(sc["ocr"])]
 
     # ---------- ② 매칭 ----------
     def _rows(self, bid):

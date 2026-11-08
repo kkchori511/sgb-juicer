@@ -111,6 +111,7 @@
   function openSheet(build) {
     const box = $('sheetBox');
     box.innerHTML = '';
+    box.removeAttribute('style'); // 앞 창의 크기가 남지 않게
     build(box);
     $('sheet').hidden = false;
   }
@@ -1709,7 +1710,7 @@
     m.appendChild(el('div', { class: 'empty-state' }, [
       el('h2', { text: '자료 인박스' }),
       el('p', { text: '어떤 활동 자료든 여기로 가져와 학생별로 나눈 뒤 항목에 보냅니다.' }),
-      el('p', { class: 'hint', text: '① 가져오기(엑셀 붙여넣기·xlsx) → ② 학생 매칭 → ③ AI 정제(선택) → ④ 보내기 검토. 스캔 PDF는 v0.4에서 제공합니다. 한 학생씩 직접 쓰는 기록은 항목별 기록의 [+ 누가기록]을 쓰세요.' }),
+      el('p', { class: 'hint', text: '① 가져오기(엑셀 붙여넣기·xlsx·스캔 PDF) → ② 학생 매칭 → ③ AI 정제(선택) → ④ 보내기 검토. 스캔 PDF는 CLOVA OCR로 읽습니다. 한 학생씩 직접 쓰는 기록은 항목별 기록의 [+ 누가기록]을 쓰세요.' }),
       el('div', { class: 'steps-btns' }, [el('button', { type: 'button', class: 'primary edit-only', text: '+ 새 자료 묶음', onclick: newBatch })]),
     ]));
   }
@@ -1788,6 +1789,7 @@
   // ① 가져오기
   function renderImport(body) {
     const b = IB.view.batch;
+    if (b.source === 'scan' && b.meta.scan) { renderScan(body); return; }
     if (!IB.raw) {
       const ta = el('textarea', { rows: 8, placeholder: '또는 여기를 누르고 Ctrl+V로 붙여넣은 뒤 [읽기]' });
       body.append(
@@ -1795,7 +1797,7 @@
         el('div', { class: 'src-btns' }, [
           el('button', { type: 'button', class: 'primary', text: '📋 엑셀 붙여넣기(클립보드)', onclick: async () => { const c = await api.read_clipboard(); const t = c && c.ok ? c.text : ''; if (!t.trim()) { toast('클립보드가 비어 있습니다. 아래 칸에 직접 붙여넣어도 됩니다.'); ta.focus(); return; } loadSource(() => call('inbox_source_text', b.id, t)); } }),
           el('button', { type: 'button', text: '📂 xlsx 불러오기', onclick: () => loadSource(() => call('inbox_source_xlsx', b.id)) }),
-          el('button', { type: 'button', disabled: true, title: 'v0.4에서 제공', text: '🖨 스캔 PDF (v0.4)' }),
+          el('button', { type: 'button', text: '🖨 스캔 PDF (CLOVA OCR)', onclick: () => startScanPick(b) }),
         ]),
         ta,
         el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '읽기', onclick: () => loadSource(() => call('inbox_source_text', b.id, ta.value)) })]),
@@ -1904,6 +1906,7 @@
         if (await mutate('inbox_confirm_suggested', b.id)) loadBatch();
       } }),
       el('button', { type: 'button', text: '명렬 등록·수정', onclick: () => { returnTo = { panel: 'inbox', bid: b.id }; rosterSel = b.group_id; showPanel('roster'); } }),
+      b.source === 'scan' ? el('button', { type: 'button', text: '페이지 다시 묶기', onclick: async () => { if (!(await confirmBox('페이지 묶기로 돌아갑니다. OCR은 다시 하지 않지만 지금 매칭 결과는 새로 만들어집니다.', '돌아가기'))) return; if (await mutate('inbox_stage', b.id, 'import')) { SC.starts = null; loadBatch(); } } }) : null,
       el('button', { type: 'button', text: '다시 매칭', title: '확정·제외하지 않은 행을 명렬과 다시 맞춥니다', onclick: async () => { if (await mutate('inbox_rematch', b.id)) loadBatch(); } }),
     ]));
     const t = el('table', { class: 'tbl match-tbl' });
@@ -1917,7 +1920,8 @@
         r.state === 'suggested' ? el('button', { type: 'button', class: 'small', text: '확정', onclick: async () => { if (await mutate('inbox_confirm_suggested', b.id, [r.id])) loadBatch(); } }) : null]);
       t.appendChild(el('tr', { class: r.state === 'excluded' ? 'row-excluded' : (r.state === 'none' || r.state === 'suggested') ? 'row-pending' : '' }, [
         el('td', { text: r.source_ref }), el('td', { text: `${r.ext_no || '-'} ${r.ext_name || ''}` }), el('td', {}, [sel]), stateTd,
-        el('td', {}, [el('div', { class: 'snip', text: `[${r.label}${r.date ? ' ' + r.date : ''}] ${r.content}` })]),
+        el('td', {}, [el('div', { class: 'snip', text: b.source === 'scan' ? r.content : `[${r.label}${r.date ? ' ' + r.date : ''}] ${r.content}` }),
+          r.pages ? el('button', { type: 'button', class: 'small', text: '원본 보기', onclick: () => showOriginal(b.id, r.pages.split(',')) }) : null]),
         el('td', {}, [r.state === 'excluded'
           ? el('button', { type: 'button', class: 'small', text: '제외 취소', onclick: async () => { if (await mutate('inbox_exclude', [r.id], '', false)) loadBatch(); } })
           : el('button', { type: 'button', class: 'small', text: '제외', onclick: () => excludeRows([r.id]) })]),
@@ -1926,7 +1930,7 @@
     body.appendChild(t);
     body.appendChild(el('p', { class: 'hint', text: '학번과 이름이 모두 명렬과 맞으면 자동 확정, 이름만 맞거나 비슷하면 "추천"입니다. 추천은 원본과 대조한 뒤 확정하세요. 백지·다른 반 자료처럼 보내지 않을 행은 [제외]하면 인박스에 남습니다.' }));
     body.appendChild(el('div', { class: 'sheet-foot' }, [
-      el('button', { type: 'button', text: '← 가져오기 다시', onclick: async () => { if (!(await confirmBox('가져오기 단계로 돌아가면 지금 매칭 결과는 다시 만들어집니다.', '돌아가기'))) return; if (await mutate('inbox_stage', b.id, 'import')) loadBatch(); } }),
+      el('button', { type: 'button', text: '← 가져오기 다시', onclick: async () => { if (!(await confirmBox('가져오기 단계로 돌아가면 지금 매칭 결과는 다시 만들어집니다.', '돌아가기'))) return; if (await mutate('inbox_stage', b.id, 'import')) { SC.starts = null; loadBatch(); } } }),
       el('span', { class: 'spacer' }),
       pending ? el('span', { class: 'danger-text', style: 'font-weight:700', text: `확인 필요 ${pending}건을 확정하거나 제외해야 다음으로 갑니다.` }) : null,
       el('button', { type: 'button', class: 'primary', disabled: !!pending, text: '다음: AI 정제(선택)', onclick: async () => { if (await mutate('inbox_stage', b.id, 'refine')) loadBatch(); } }),
@@ -2073,6 +2077,136 @@
     body.appendChild(t);
   }
 
+  // =====================================================================
+  // v0.4: 스캔 PDF — CLOVA OCR, 페이지 묶기, 학번·이름 규칙 추출, 원본 보기
+  // =====================================================================
+  const SC = { starts: null, skipped: null, per: 1, timer: null, start: 0, bid: null };
+  async function startScanPick(b) {
+    const ready = await call('clova_ready');
+    if (!ready) return;
+    if (!ready.ready) {
+      const go = await modal(`스캔 PDF를 글자로 읽으려면 <b>CLOVA OCR 키</b>가 필요합니다.<br>네이버 클라우드 플랫폼에 가입하고 CLOVA OCR을 설정한 뒤, 설정 &gt; 연결·모델에 ${ready.missing.join(', ')}를 넣어 주세요.<br><span class="muted">가입·발급 안내가 설정 화면에 있습니다.</span>`, true, true, '설정으로 가기');
+      if (go) { showPanel('settings'); showSettingsTab('conn'); $('clovaGuide').open = true; $('clovaGuide').scrollIntoView(); }
+      return;
+    }
+    const r = await call('inbox_scan_pick', b.id);
+    if (!r) return;
+    SC.starts = null;
+    loadBatch();
+  }
+  function renderScan(body) {
+    const b = IB.view.batch;
+    const sc = b.meta.scan;
+    if (!sc.ocr) {
+      const per = el('input', { type: 'number', class: 'num', min: 1, value: sc.per || 1 });
+      const est = el('span', { class: 'muted' });
+      const upd = () => {
+        const n = Math.max(1, +per.value || 1);
+        const rem = sc.pages % n;
+        est.textContent = `약 ${Math.ceil(sc.pages / n)}명분${rem ? ` · 나누어떨어지지 않음(마지막 학생 ${rem}쪽) — 다음 단계에서 고칠 수 있습니다` : ''}`;
+      };
+      per.addEventListener('input', upd);
+      upd();
+      body.append(
+        el('div', { class: 'wsection', style: 'margin-top:0' }, [el('h3', { text: `🖨 ${sc.filename} · ${sc.pages}쪽` }),
+          el('div', { class: 'map-row' }, [el('label', {}, ['학생 1명당 페이지 수', per]), est]),
+          el('div', { class: 'hint', text: '단면 스캔은 1, 양면 스캔은 2입니다. 백지가 섞여 있어도 다음 단계에서 페이지를 빼거나 경계를 옮길 수 있습니다.' })]),
+        el('div', { class: 'warn', style: 'margin-top:12px', html: '⚠ <b>스캔 이미지가 그대로 네이버 CLOVA OCR로 전송됩니다.</b> 손으로 쓴 이름·학번도 함께 전송됩니다. 걱정되면 스캔하기 전에 인적사항을 직접 가려 주세요.<br><span class="muted">AI(OpenRouter)에는 인식한 글에서 학번·이름 줄을 뺀 내용만 보냅니다.</span>' }),
+        el('div', { class: 'sheet-foot' }, [el('button', { type: 'button', text: '다른 PDF 고르기', onclick: () => startScanPick(b) }), el('span', { class: 'spacer' }),
+          el('button', { type: 'button', class: 'primary', text: 'OCR 시작', onclick: () => runOcr(b, Math.max(1, +per.value || 1)) })]),
+      );
+      return;
+    }
+    if (SC.bid !== b.id || !SC.starts) { SC.bid = b.id; SC.starts = sc.starts.slice(); SC.skipped = (sc.skipped || []).slice(); SC.per = sc.per || 1; }
+    const per = el('input', { type: 'number', class: 'num', min: 1, value: SC.per });
+    body.appendChild(el('div', { class: 'map-row' }, [el('b', { text: `🖨 ${sc.filename} · ${sc.ocr.length}쪽 OCR 완료` }), el('span', { class: 'spacer' }),
+      el('label', {}, ['학생당 페이지 수', per]),
+      el('button', { type: 'button', text: '이 간격으로 다시 나누기', onclick: () => { SC.per = Math.max(1, +per.value || 1); SC.starts = []; for (let i = 0; i < sc.ocr.length; i += SC.per) SC.starts.push(i); SC.skipped = []; renderBatch(); } })]));
+    body.appendChild(el('p', { class: 'hint', text: '학생 경계가 밀렸다면 페이지의 [여기서 새 학생]을 켜고 끄세요. 백지·표지는 [빼기]. 학번·이름은 각 학생 첫 페이지 머리글에서 규칙으로 읽습니다(AI 미사용).' }));
+    const list = el('div', {});
+    const summary = el('span', {});
+    const go = el('button', { type: 'button', class: 'primary', text: '확정하고 매칭으로' });
+    body.append(list, el('div', { class: 'sheet-foot' }, [summary, el('span', { class: 'spacer' }), go]));
+    go.addEventListener('click', async () => {
+      const r = await mutate('inbox_scan_confirm', b.id, SC.starts, SC.skipped);
+      if (!r) return;
+      toast(`${r.count}명분을 만들었습니다. 학생 매칭을 확인하세요.`);
+      SC.starts = null;
+      loadBatch();
+    });
+    (async () => {
+      const r = await call('inbox_scan_groups', b.id, SC.starts, SC.skipped);
+      if (!r) return;
+      const firstOf = {};
+      r.groups.forEach((g) => { firstOf[g.pages[0]] = g; });
+      const skip = new Set(SC.skipped);
+      const starts = new Set(SC.starts);
+      r.page_texts.forEach((t, p) => {
+        const g = firstOf[p];
+        if (g) list.appendChild(el('div', { class: 'sec-title', style: 'margin-top:10px' }, [`학생 ${g.index + 1}`,
+          g.ext_no || g.ext_name ? el('span', { class: 'tag', text: `읽은 값: ${g.ext_no || '학번?'} ${g.ext_name || '이름?'}` }) : el('span', { class: 'tag warn-tag', text: '학번·이름을 읽지 못함' }),
+          el('span', { class: 'muted', text: `${g.pages.map((x) => x + 1).join('·')}쪽` })]));
+        const isSkip = skip.has(p);
+        list.appendChild(el('div', { class: 'ref-card', style: isSkip ? 'opacity:.5' : '' }, [
+          el('div', { class: 'rcard-head' }, [el('b', { text: `${p + 1}쪽` }),
+            el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'checkbox', disabled: p === 0, checked: p === 0 || starts.has(p), onchange: (e) => { if (e.target.checked) SC.starts.push(p); else SC.starts = SC.starts.filter((x) => x !== p); renderBatch(); } }), '여기서 새 학생']),
+            el('button', { type: 'button', class: 'small', text: isSkip ? '되살리기' : '빼기(백지 등)', onclick: () => { if (isSkip) SC.skipped = SC.skipped.filter((x) => x !== p); else SC.skipped.push(p); renderBatch(); } }),
+            el('button', { type: 'button', class: 'small', text: '원본 보기', onclick: () => showOriginal(b.id, [p]) }),
+            t.trim() ? null : el('span', { class: 'tag warn-tag', text: '글자 없음' })]),
+          el('div', { class: 'snip', style: 'max-width:none', text: t.split('\n').slice(0, 3).join('\n') || '(인식된 글자 없음)' }),
+        ]));
+      });
+      summary.innerHTML = '';
+      summary.append(el('b', { text: `${r.groups.filter((g) => !g.empty).length}명분` }), el('span', { class: 'muted', text: ` · 뺀 쪽 ${SC.skipped.length}개` }));
+    })();
+  }
+  function runOcr(b, per) {
+    let stopped = false;
+    const msg = el('div', { class: 'modal-msg', text: 'CLOVA OCR에 보내는 중…' });
+    const time = el('b', { text: '0:00' });
+    const stopBtn = el('button', { type: 'button', class: 'btn-danger', text: '중지', onclick: () => { stopped = true; stopBtn.disabled = true; stopBtn.textContent = '중지 중…'; api.inbox_ocr_stop(); } });
+    openSheet((box) => {
+      box.style.height = 'auto';
+      box.style.width = 'min(460px, 92vw)';
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: 'OCR 진행 중' })]), msg,
+        el('div', { class: 'sheet-foot' }, [el('span', {}, ['경과 시간 ', time, ' — 멈춘 게 아니니 기다려 주세요']), el('span', { class: 'spacer' }), stopBtn]));
+    });
+    SC.start = Date.now();
+    clearInterval(SC.timer);
+    SC.timer = setInterval(() => { const s = Math.floor((Date.now() - SC.start) / 1000); time.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }, 1000);
+    SC.msg = msg;
+    api.inbox_scan_ocr(b.id, per).then((r) => {
+      if (!r || !r.ok) { clearInterval(SC.timer); closeSheet(); alertBox((r && r.error) || 'OCR을 시작하지 못했습니다.'); }
+    });
+  }
+  function ocrEvent(ev) {
+    if (ev.type === 'ocr_progress') {
+      if (SC.msg) SC.msg.textContent = `${ev.pages}쪽을 10쪽씩 나눠 읽는 중: ${ev.done + 1} / ${ev.total} 구간`;
+      return;
+    }
+    clearInterval(SC.timer);
+    closeSheet();
+    if (ev.type === 'ocr_done') { toast(`${ev.pages}쪽을 읽었습니다. 학생별로 묶인 것을 확인하세요.`); SC.starts = null; }
+    else if (ev.type === 'ocr_stopped') toast('OCR을 중지했습니다. 다시 시작할 수 있습니다.');
+    else alertBox('OCR 실패: ' + ev.message);
+    if (IB.bid === ev.bid && panel === 'inbox') loadBatch();
+  }
+  function showOriginal(bid, pages) {
+    openSheet(async (box) => {
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `원본 보기 · ${pages.map((p) => +p + 1).join('·')}쪽` }), el('span', { class: 'muted', text: '이 PC 안에서만 보여 줍니다' }), el('span', { class: 'spacer' }), el('button', { type: 'button', text: '닫기', onclick: closeSheet })]));
+      const body = el('div', { class: 'sheet-body' });
+      box.appendChild(body);
+      const t = await call('inbox_scan_text', bid, pages);
+      for (const p of pages) {
+        const img = el('img', { alt: `${+p + 1}쪽`, style: 'width:100%;border:1px solid var(--border);border-radius:8px;background:#fff' });
+        const txt = ((t && t.pages.find((x) => x.page === +p)) || {}).text || '';
+        body.appendChild(el('div', { class: 'split2', style: 'margin-bottom:14px' }, [el('div', {}, [el('div', { class: 'col-label', text: `${+p + 1}쪽 스캔` }), img]),
+          el('div', {}, [el('div', { class: 'col-label', text: 'OCR 글자(학번·이름 포함, AI로 보내지 않음)' }), el('div', { class: 'rcard-body', style: 'max-height:none;background:var(--input);border:1px solid var(--border);border-radius:8px;padding:8px', text: txt || '(글자 없음)' })])]));
+        api.inbox_page_image(bid, p).then((r) => { if (r && r.ok) img.src = r.src; else img.alt = (r && r.error) || '그림을 불러오지 못했습니다'; });
+      }
+    });
+  }
+
   // ---------- 파이썬 → 화면 이벤트 ----------
   window.onAppEvent = function (ev) {
     switch (ev.type) {
@@ -2083,6 +2217,12 @@
         if (ev.stage === 'backup') $('updateText').textContent = '자료를 백업하는 중…';
         else if (ev.stage === 'download') $('updateText').textContent = `내려받는 중… ${Math.round((ev.done / ev.total) * 100)}%`;
         else $('updateText').textContent = '곧 다시 시작합니다…';
+        break;
+      case 'ocr_progress':
+      case 'ocr_done':
+      case 'ocr_stopped':
+      case 'ocr_error':
+        ocrEvent(ev);
         break;
       case 'update_error':
         $('updateText').textContent = '업데이트 실패: ' + ev.message;

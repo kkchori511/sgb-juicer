@@ -31,6 +31,7 @@ jobs:
           python tests/test_backend.py
           python tests/test_records.py
           python tests/test_inbox.py
+          python tests/test_scan.py
 
       - name: Version info
         shell: pwsh
@@ -42,6 +43,13 @@ jobs:
 
       - name: Build executable
         run: pyinstaller packaging/sgb.spec
+
+      - name: Smoke test executable
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist/생기부착즙기.exe" -ArgumentList "--selftest","selftest.txt" -Wait -PassThru
+          Get-Content selftest.txt
+          if ($p.ExitCode -ne 0) { Write-Error "exe 자체 시험 실패"; exit 1 }
 
       - name: Upload executable
         uses: actions/upload-artifact@v4

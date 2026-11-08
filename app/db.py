@@ -3,6 +3,7 @@
 v1: 역할·담당(학급/과목/동아리)·학생·소속(명렬)·일정.
 v2: 태그·누가기록·AI 결과 후보·최종안(마감). 기록 다루는 함수는 records.py.
 v3: 자료 인박스(묶음·행·정제 후보). 다루는 함수는 inbox.py.
+v4: 인박스 행에 원본 페이지 번호(pages) — 스캔 PDF 원본 보기용.
 """
 import re
 import sqlite3
@@ -11,7 +12,7 @@ from contextlib import contextmanager
 
 from .paths import data_dir
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 KINDS = ("homeroom", "subject", "club")
 ROLES = ("homeroom", "subject")  # 담임 / 비담임
 
@@ -127,6 +128,7 @@ CREATE TABLE IF NOT EXISTS inbox_rows (
     exclude_reason TEXT DEFAULT '',
     note TEXT DEFAULT '',            -- 매칭 안내(이름 다름, 동명이인 등)
     line INTEGER DEFAULT 0,          -- 원본에서 몇 번째 학생 줄인지
+    pages TEXT DEFAULT '',           -- 스캔: 원본 페이지 번호(0부터, 쉼표)
     label TEXT DEFAULT '',           -- 회차·활동 제목
     date TEXT DEFAULT '',
     content TEXT NOT NULL DEFAULT '',  -- 원문(인적사항 뺀 내용)
@@ -179,8 +181,15 @@ class YearDb:
         self._conn.execute("PRAGMA journal_mode = WAL")
         self._conn.execute("PRAGMA synchronous = FULL")
         self._conn.executescript(SCHEMA)
+        self._migrate()
         if (_int(self.get_meta("schema_version")) or 0) < SCHEMA_VERSION:
             self.set_meta("schema_version", str(SCHEMA_VERSION))
+
+    def _migrate(self):
+        """이전 버전 파일에 빠진 열을 채운다(CREATE IF NOT EXISTS로는 열이 추가되지 않음)."""
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(inbox_rows)")}
+        if "pages" not in cols:
+            self._conn.execute("ALTER TABLE inbox_rows ADD COLUMN pages TEXT DEFAULT ''")
 
     def close(self):
         with self._lock:
