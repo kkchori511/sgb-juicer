@@ -68,6 +68,9 @@ code { background: var(--surface-2); border: 1px solid var(--border); padding: 1
 .top-left, .top-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .icon-btn { border: none; background: none; font-size: 20px; padding: 6px 10px; }
 .icon-btn:hover { background: var(--surface-2); border: none; }
+.app-icon { width: 30px; height: 30px; vertical-align: middle; }
+.wizard-head h2 .app-icon { width: 34px; height: 34px; margin-right: 4px; }
+.about-icon { width: 96px; height: 96px; display: block; margin: 0 auto 8px; }
 .app-title { font-size: 18px; font-weight: 800; white-space: nowrap; }
 .ver-btn { padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 800; color: var(--text-2); }
 .beta { background: var(--orange); color: #fff; border-radius: 999px; padding: 0 7px; font-size: 11px; margin-left: 2px; }

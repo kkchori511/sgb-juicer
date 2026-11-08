@@ -140,7 +140,7 @@
     });
   }
   function showAbout() {
-    modal(`<div class="about-box"><div class="about-title">🍊 생기부 착즙기</div><div class="muted">v${info.version} 베타</div>` +
+    modal(`<div class="about-box"><img src="icon.png" alt="" class="about-icon"><div class="about-title">생기부 착즙기</div><div class="muted">v${info.version} 베타</div>` +
       `<div class="about-tag">"${info.tagline}"</div><div>${info.maker}</div></div>`, false, true);
   }
   function renderYearSelect() {
@@ -858,7 +858,7 @@
   let updateInfo = null;
   function showUpdate(ev) {
     updateInfo = ev;
-    $('updateText').textContent = `🍊 새 버전 v${ev.version}이(가) 있습니다.`;
+    $('updateText').textContent = `새 버전 v${ev.version}이(가) 있습니다.`;
     $('updateNowBtn').textContent = ev.can_apply ? '지금 업데이트' : '내려받기 페이지';
     $('updateBar').hidden = false;
   }
