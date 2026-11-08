@@ -4,6 +4,7 @@
 담임반은 autonomy/career/behavior, 과목은 subject, 동아리는 club 항목을 가진다.
 """
 import json
+import re
 
 from .db import DbError, YearDb
 from .textutil import count_bytes
@@ -260,6 +261,118 @@ class Records:
             c.execute("DELETE FROM results WHERE record_id=?", (r["id"],))
             c.execute("DELETE FROM records WHERE id=?", (r["id"],))
             self._stale(c, r["group_id"], r["item"], r["student_no"])
+
+    # ---------- 문단 이동 ----------
+    @staticmethod
+    def paragraphs(text: str) -> list[str]:
+        """빈 줄로 나눈 문단. 빈 줄이 없으면 줄 단위."""
+        t = (text or "").strip()
+        parts = [p.strip() for p in re.split(r"\n\s*\n", t) if p.strip()]
+        if len(parts) <= 1:
+            parts = [p.strip() for p in t.splitlines() if p.strip()]
+        return parts or ([t] if t else [])
+
+    def move_targets(self, gid, item, sno):
+        """이 학생이 속한(활성) 다른 항목들."""
+        out = []
+        for g in self.d.groups():
+            rows = self.d.q("SELECT active FROM memberships WHERE group_id=? AND student_no=?", (g["id"], str(sno)))
+            if not rows or not rows[0]["active"]:
+                continue
+            for it in items_of(g):
+                if g["id"] == int(gid) and it == item:
+                    continue
+                out.append({"group_id": g["id"], "item": it, "label": f"{ITEM_LABEL[it]} · {g['name']}" if g["kind"] == "homeroom" else (
+                    f"세특 · {g['name']}({g['semester']}학기)" if g["kind"] == "subject" else f"동아리 · {g['name']}"),
+                    "closed": self.is_closed(g["id"], it, sno)})
+        return out
+
+    def move(self, moves, dest_gid, dest_item):
+        """moves: [{record_id, paras: [번호] 또는 None(전체)}] → 도착 항목의 새 기록. 전부 성공 또는 전부 취소.
+        반환: 되돌리기 정보."""
+        dest_gid = int(dest_gid)
+        self.slot(dest_gid, dest_item)
+        undo = {"created": [], "sources": []}
+        recs = [self.record(m["record_id"]) for m in moves]
+        if not recs:
+            raise DbError("옮길 기록을 고르세요.")
+        sno = recs[0]["student_no"]
+        if any(r["student_no"] != sno for r in recs):
+            raise DbError("한 학생의 기록만 함께 옮길 수 있습니다.")
+        if not any(t["group_id"] == dest_gid and t["item"] == dest_item for t in self.move_targets(recs[0]["group_id"], recs[0]["item"], sno)):
+            raise DbError("이 학생이 속하지 않은 항목으로는 옮길 수 없습니다.")
+        for r in recs:
+            self.require_open(r["group_id"], r["item"], r["student_no"])
+        self.require_open(dest_gid, dest_item, sno)
+        tagmap = {}
+        for r in recs:
+            tagmap[r["id"]] = [t["tag_id"] for t in self.d.q("SELECT tag_id FROM record_tags WHERE record_id=?", (r["id"],))]
+        with self.d.tx() as c:
+            seq = c.execute("SELECT COALESCE(MAX(seq),0) FROM records WHERE group_id=? AND item=? AND student_no=? AND kind='record'",
+                            (dest_gid, dest_item, sno)).fetchone()[0] or 0
+            for m, r in zip(moves, recs):
+                paras = self.paragraphs(r["content"])
+                pick = sorted(set(int(i) for i in m.get("paras") or [] if 0 <= int(i) < len(paras))) if m.get("paras") is not None else list(range(len(paras)))
+                if not pick:
+                    raise DbError("옮길 문단을 고르세요.")
+                moved = "\n\n".join(paras[i] for i in pick)
+                rest = [p for i, p in enumerate(paras) if i not in pick]
+                kind = r["kind"]
+                if kind == "record":
+                    seq += 1
+                nid = c.execute(
+                    "INSERT INTO records(group_id,item,student_no,kind,seq,date,title,content,source) VALUES(?,?,?,?,?,?,?,?,?)",
+                    (dest_gid, dest_item, sno, kind, seq if kind == "record" else None, r["date"], r["title"], moved,
+                     f"moved:{r['item']}:{r['group_id']}"),
+                ).lastrowid
+                for tid in tagmap[r["id"]]:
+                    c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (nid, tid))
+                undo["created"].append(nid)
+                undo["sources"].append({"row": {k: r[k] for k in ("id", "group_id", "item", "student_no", "kind", "seq", "date", "title", "content", "original", "source", "weight", "created_at")},
+                                        "tags": tagmap[r["id"]], "deleted": not rest})
+                if rest:
+                    c.execute("UPDATE records SET content=?, updated_at=datetime('now','localtime') WHERE id=?", ("\n\n".join(rest), r["id"]))
+                else:
+                    c.execute("DELETE FROM results WHERE record_id=?", (r["id"],))
+                    c.execute("DELETE FROM records WHERE id=?", (r["id"],))
+                self._stale(c, r["group_id"], r["item"], sno)
+            self._stale(c, dest_gid, dest_item, sno)
+        return undo
+
+    def undo_move(self, undo):
+        with self.d.tx() as c:
+            for nid in undo["created"]:
+                c.execute("DELETE FROM results WHERE record_id=?", (int(nid),))
+                c.execute("DELETE FROM records WHERE id=?", (int(nid),))
+            for src in undo["sources"]:
+                r = src["row"]
+                if src["deleted"]:
+                    c.execute("""INSERT INTO records(id,group_id,item,student_no,kind,seq,date,title,content,original,source,weight,created_at)
+                                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", tuple(r[k] for k in ("id", "group_id", "item", "student_no", "kind", "seq", "date", "title", "content", "original", "source", "weight", "created_at")))
+                    for tid in src["tags"]:
+                        c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (r["id"], tid))
+                else:
+                    c.execute("UPDATE records SET content=? WHERE id=?", (r["content"], r["id"]))
+
+    # ---------- 일괄 종합 준비 ----------
+    def batch_info(self, gid, item):
+        """학생마다 일괄 종합 가능 여부."""
+        g, target = self.slot(gid, item)
+        out = []
+        for m in self.d.members(gid):
+            recs = self.d.q("SELECT id, kind, content, weight FROM records WHERE group_id=? AND item=? AND student_no=? ORDER BY kind='record', COALESCE(seq,0), id",
+                            (int(gid), item, m["student_no"]))
+            slot_res = self._scope_rows(gid, item, m["student_no"], None)
+            f = self.final(gid, item, m["student_no"])
+            out.append({
+                "student_no": m["student_no"], "name": m["name"], "grade": m["grade"], "class_no": m["class_no"],
+                "active": bool(m["active"]), "level": m["level"] or "",
+                "record_ids": [r["id"] for r in recs], "records": len(recs),
+                "bytes": sum(count_bytes(r["content"]) for r in recs),
+                "closed": bool(f and f["closed"]), "has_final": bool(f and f["text"]),
+                "all_locked": len(slot_res) >= MAX_RESULTS and all(r["locked"] for r in slot_res),
+            })
+        return {"group": g, "target": target, "students": out}
 
     # ---------- 결과 후보(최근 3개, 잠금 포함) ----------
     def result(self, res_id):

@@ -93,7 +93,9 @@
           <section class="rec-final" id="recFinal"></section>
         </div>
       </section>
-      <section class="panel" data-panel-content="batch"><div class="card soon" data-soon="일괄 종합|v0.6에서 여러 학생을 한 번에 종합하는 기능을 제공합니다."></div></section>
+      <section class="panel" data-panel-content="batch">
+        <div class="card" id="batchCard"></div>
+      </section>
       <section class="panel" data-panel-content="export">
         <div class="card">
           <div class="map-row">
@@ -378,6 +380,7 @@
   <div class="modal-box sheet-box" id="sheetBox"></div>
 </div>
 <div class="toast" id="toast" hidden></div>
+<div class="toast action-toast" id="actionToast" hidden><span id="actionToastText"></span> <button type="button" id="actionToastBtn"></button></div>
 
 <script src="app.js"></script>
 </body>

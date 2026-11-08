@@ -397,6 +397,13 @@ class Api:
             todo.append({"kind": "final", "label": f"최종안 만들기 {todo_final}건"})
         if todo_close:
             todo.append({"kind": "close", "label": f"마감 검토 {todo_close}건"})
+        ib = Inbox(d).batches()
+        need = [b for b in ib if b["stage"] in ("import", "match") and (b["pending"] or b["stage"] == "import")]
+        ready = [b for b in ib if b["stage"] in ("refine", "review")]
+        if need:
+            todo.insert(1 if empty else 0, {"kind": "inbox", "label": f"인박스 확인 필요 {len(need)}묶음", "batch_id": need[0]["id"]})
+        if ready:
+            todo.insert(1 if empty else 0, {"kind": "inbox", "label": f"인박스 보내기 대기 {len(ready)}묶음", "batch_id": ready[0]["id"]})
         return {"role": role, "groups": out, "todo": todo, "schedules": d.schedules()}
 
     # ---------- 항목별 기록 ----------
@@ -504,6 +511,31 @@ class Api:
         self._editable()
         self._rec().set_closed(gid, item, sno, bool(closed))
         return {}
+
+    # ---------- 문단 이동 ----------
+    @safe
+    def move_targets(self, gid, item, sno):
+        return {"targets": self._rec().move_targets(gid, item, sno)}
+
+    @safe
+    def move_records(self, moves, dest_gid, dest_item):
+        self._editable()
+        self._last_undo = self._rec().move(moves or [], dest_gid, dest_item)
+        return {"moved": len(moves or [])}
+
+    @safe
+    def undo_move(self):
+        self._editable()
+        u = getattr(self, "_last_undo", None)
+        if not u:
+            raise db.DbError("되돌릴 이동이 없습니다.")
+        self._rec().undo_move(u)
+        self._last_undo = None
+        return {}
+
+    @safe
+    def batch_info(self, gid, item):
+        return self._rec().batch_info(gid, item)
 
     # ---------- 태그 ----------
     @safe
