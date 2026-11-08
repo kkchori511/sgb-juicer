@@ -156,6 +156,8 @@ def swap_and_launch(new_path: str, args=()):
             log(f"되돌리기 실패: {e2}")
         raise UpdateError(f"새 버전으로 바꾸지 못했습니다({e.__class__.__name__}). 다시 시도하거나 릴리스 페이지에서 직접 내려받아 주세요.") from e
     flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    if not args:
+        args = ["--after-update"]  # 새 앱은 이 앱이 잠금을 풀 때까지 기다린다
     try:
         subprocess.Popen([str(exe), *args], cwd=str(exe.parent), env=_clean_env(), creationflags=flags, close_fds=True)
     except OSError as e:

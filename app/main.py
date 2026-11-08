@@ -34,8 +34,9 @@ def selftest(out_path):
         lines.append("web OK" if web_ok() else "web MISSING")
         lines.append(f"version {VERSION}")
         if "--after-swap" in sys.argv:
-            from . import updater
+            from . import single, updater
 
+            lines.append("lock OK" if single.acquire(20) else "lock FAILED")
             removed = updater.cleanup_leftovers(60)
             lines.append("leftovers cleaned: " + ",".join(removed))
         code = 0 if "web OK" in lines else 1
@@ -54,10 +55,15 @@ def main():
         selftest(sys.argv[2])
     if len(sys.argv) >= 4 and sys.argv[1] == "--selftest-swap":
         # CI: 실행 중인 exe를 실제로 교체하고 새 exe가 자체 시험을 하게 한다
-        from . import updater
+        from . import single, updater
 
         try:
-            updater.swap_and_launch(sys.argv[2], ["--selftest", sys.argv[3], "--after-swap"])
+            if not single.acquire():
+                raise RuntimeError("잠금을 얻지 못함")
+            updater.swap_and_launch(sys.argv[2], ["--selftest", sys.argv[3], "--after-swap", "--after-update"])
+            import time
+
+            time.sleep(1.5)  # 실제 앱처럼 잠시 잠금을 쥔 채 남아 있다가 끝난다
             sys.exit(0)
         except Exception as e:
             with open(sys.argv[3], "w", encoding="utf-8") as f:
@@ -65,7 +71,8 @@ def main():
             sys.exit(1)
     from . import single
 
-    if not single.acquire():
+    after_update = "--after-update" in sys.argv
+    if not single.acquire(20 if after_update else 0):
         single.notify_running()
         return
     api = Api()

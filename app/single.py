@@ -6,8 +6,40 @@ from .paths import data_dir
 _handle = None
 
 
-def acquire() -> bool:
-    """잠금을 얻으면 True. 프로세스가 끝나면 운영체제가 자동으로 푼다."""
+def acquire(wait_seconds: float = 0) -> bool:
+    """잠금을 얻으면 True. 업데이트 직후처럼 이전 앱이 막 끝나는 중이면 wait_seconds 동안 다시 시도한다."""
+    import time
+
+    deadline = time.time() + wait_seconds
+    while True:
+        if _try():
+            return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(0.3)
+
+
+def release():
+    """업데이트로 새 앱을 띄우기 전에 잠금을 넘겨준다."""
+    global _handle
+    if _handle is not None:
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                _handle.seek(0)
+                msvcrt.locking(_handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(_handle.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        _handle.close()
+        _handle = None
+
+
+def _try() -> bool:
     global _handle
     path = data_dir() / ".실행중.lock"
     f = open(path, "a+b")

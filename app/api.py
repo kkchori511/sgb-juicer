@@ -1230,6 +1230,9 @@ class Api:
                 path = updater.download(info, lambda d, t: self._emit({"type": "update_progress", "stage": "download", "done": d, "total": t}))
                 self._emit({"type": "update_progress", "stage": "restart"})
                 db.close_all()
+                from . import single
+
+                single.release()  # 새 앱이 잠금을 바로 얻도록
                 updater.swap_and_launch(path)
                 if self._window:
                     self._window.destroy()

@@ -72,7 +72,7 @@ jobs:
           Get-Content $out
           Get-ChildItem $w | Format-Table Name, Length
           $txt = Get-Content $out -Raw
-          if ($txt -notmatch "pdfium OK" -or $txt -notmatch "leftovers cleaned: .*\.old") { Write-Error "새 exe 실행 또는 정리 실패"; exit 1 }
+          if ($txt -notmatch "pdfium OK" -or $txt -notmatch "lock OK" -or $txt -notmatch "leftovers cleaned: .*\.old") { Write-Error "새 exe 실행·잠금·정리 실패"; exit 1 }
           if (Test-Path $new) { Write-Error ".new가 남음"; exit 1 }
           if (Get-ChildItem $w -Filter "*.old") { Write-Error ".old가 남음"; exit 1 }
           if (-not (Test-Path $exe)) { Write-Error "exe가 없음"; exit 1 }
