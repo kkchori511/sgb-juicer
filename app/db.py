@@ -13,7 +13,7 @@ from contextlib import contextmanager
 
 from .paths import data_dir
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 KINDS = ("homeroom", "subject", "club")
 ROLES = ("homeroom", "subject")  # 담임 / 비담임
 
@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS memberships (
     student_no TEXT NOT NULL REFERENCES students(student_no),
     active INTEGER NOT NULL DEFAULT 1,
     level TEXT DEFAULT '',
+    section TEXT DEFAULT '',     -- 선택과목: 같은 수업(예: 물리학 A반). 비면 학년-반으로 묶음
     PRIMARY KEY (group_id, student_no)
 );
 CREATE TABLE IF NOT EXISTS tags (
@@ -201,6 +202,9 @@ class YearDb:
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(records)")}
         if "pos" not in cols:
             self._conn.execute("ALTER TABLE records ADD COLUMN pos INTEGER")
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(memberships)")}
+        if "section" not in cols:
+            self._conn.execute("ALTER TABLE memberships ADD COLUMN section TEXT DEFAULT ''")
 
     def close(self):
         with self._lock:
@@ -367,11 +371,21 @@ class YearDb:
     # ---------- 명렬 ----------
     def members(self, gid):
         return self.q(
-            """SELECT s.student_no, s.name, s.grade, s.class_no, s.number, m.active, m.level
+            """SELECT s.student_no, s.name, s.grade, s.class_no, s.number, m.active, m.level, COALESCE(m.section,'') AS section
                FROM memberships m JOIN students s USING(student_no)
                WHERE m.group_id=? ORDER BY s.student_no""",
             (int(gid),),
         )
+
+    def set_section(self, gid, student_nos, section):
+        """선택과목 수업 지정(비우면 학년-반으로 묶음)."""
+        nos = [str(n) for n in student_nos or []]
+        if not nos:
+            return 0
+        marks = ",".join("?" * len(nos))
+        with self.tx() as c:
+            return c.execute(f"UPDATE memberships SET section=? WHERE group_id=? AND student_no IN ({marks})",
+                             ((section or "").strip()[:40], int(gid), *nos)).rowcount
 
     def known_names(self, student_nos):
         if not student_nos:
@@ -396,10 +410,11 @@ class YearDb:
                     (r["student_no"], r["name"], _int(r.get("grade")), _int(r.get("class_no")), _int(r.get("number"))),
                 )
                 c.execute(
-                    """INSERT INTO memberships(group_id,student_no,active,level) VALUES(?,?,1,?)
+                    """INSERT INTO memberships(group_id,student_no,active,level,section) VALUES(?,?,1,?,?)
                        ON CONFLICT(group_id,student_no) DO UPDATE SET
-                           level=CASE WHEN excluded.level<>'' THEN excluded.level ELSE memberships.level END""",
-                    (g["id"], r["student_no"], (r.get("level") or "").strip().upper()),
+                           level=CASE WHEN excluded.level<>'' THEN excluded.level ELSE memberships.level END,
+                           section=CASE WHEN excluded.section<>'' THEN excluded.section ELSE memberships.section END""",
+                    (g["id"], r["student_no"], (r.get("level") or "").strip().upper(), (r.get("section") or "").strip()[:40]),
                 )
             if not replace:
                 return {"count": len(rows), "removed": 0, "deactivated": 0}

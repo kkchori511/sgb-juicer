@@ -406,6 +406,7 @@ class Api:
             for k in ("grade", "class_no", "number"):
                 r[k] = roster._digits(r.get(k))
             r["level"] = str(r.get("level") or "").strip().upper()
+            r["section"] = str(r.get("section") or "").strip()[:40]
             if not r["student_no"] and r["grade"] and r["class_no"] and r["number"]:  # 학년·반·번호로 학번 만들기
                 r["student_no"] = f"{int(r['grade'])}{int(r['class_no']):02d}{int(r['number']):02d}"
             if r["student_no"] and not (r["grade"] and r["class_no"]):
@@ -431,6 +432,13 @@ class Api:
         return {**result, "groups": d.groups()}
 
     @safe
+    def set_section(self, gid, student_nos, section):
+        """선택과목: 고른 학생의 수업 이름(비우면 학년-반으로 묶음)."""
+        self._editable()
+        d = self._db()
+        return {"changed": d.set_section(gid, student_nos, section)}
+
+    @safe
     def members(self, gid):
         return {"members": self._db().members(gid)}
 
@@ -446,7 +454,7 @@ class Api:
         """다른 담당의 명렬(활성 학생만)을 명렬 입력에 넣을 행으로."""
         d = self._db()
         rows = [{"student_no": m["student_no"], "name": m["name"], "grade": str(m["grade"] or ""), "class_no": str(m["class_no"] or ""),
-                 "number": str(m["number"] or ""), "level": ""} for m in d.members(src_gid) if m["active"]]
+                 "number": str(m["number"] or ""), "level": "", "section": m["section"]} for m in d.members(src_gid) if m["active"]]
         return {"rows": rows, "label": d.group(src_gid)["name"]}
 
     @safe

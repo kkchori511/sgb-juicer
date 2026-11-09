@@ -555,6 +555,7 @@
       el('span', { class: 'edit-only muted', text: '|' }),
       el('button', { type: 'button', class: 'edit-only', text: '선택 학생 전출·빼기', onclick: () => transferOut() }),
       el('button', { type: 'button', class: 'edit-only', text: '다시 활성화', onclick: () => changeActive(true, false) }),
+      ...(g.kind === 'subject' ? [el('button', { type: 'button', class: 'edit-only', title: '선택과목: 같은 수업끼리 묶어 보입니다', text: '수업 지정', onclick: () => setSection() })] : []),
     );
     body.appendChild(toolbar);
     const list = members.filter((m) => showInactive || m.active);
@@ -563,17 +564,39 @@
     const wrap = el('div', { class: 'tbl-wrap' });
     const t = el('table', { class: 'tbl' });
     const checkAll = el('input', { type: 'checkbox', onchange: (e) => t.querySelectorAll('.rowcheck').forEach((c) => { c.checked = e.target.checked; }) });
-    t.appendChild(el('tr', {}, [el('th', {}, [checkAll]), ...['학년', '반', '번호', '이름', '학번', '상태'].map((h) => el('th', { text: h }))]));
+    const subj = g.kind === 'subject';
+    t.appendChild(el('tr', {}, [el('th', {}, [checkAll]), ...['학년', '반', '번호', '이름', '학번', ...(subj ? ['수업'] : []), '상태'].map((h) => el('th', { text: h }))]));
     list.forEach((m) => {
       const tr = el('tr', { class: m.active ? '' : 'inactive' });
       tr.appendChild(el('td', {}, [el('input', { type: 'checkbox', class: 'rowcheck', 'data-no': m.student_no })]));
       tr.append(el('td', { text: m.grade ?? '' }), el('td', { text: m.class_no ?? '' }), el('td', { text: m.number ?? '' }), el('td', { text: m.name }), el('td', { class: 'muted', text: m.student_no }),
+        ...(subj ? [el('td', { text: m.section || '' })] : []),
         el('td', {}, [m.active ? '활성' : el('span', { class: 'inactive-badge', text: '비활성' })]));
       t.appendChild(tr);
     });
     wrap.appendChild(t);
     body.appendChild(wrap);
 
+    // 선택과목 수업 지정: 같은 수업끼리 묶어 보인다(비우면 학년-반으로)
+    async function setSection() {
+      const nos = [...t.querySelectorAll('.rowcheck:checked')].map((c) => c.dataset.no);
+      if (!nos.length) { toast('학생을 먼저 체크하세요.'); return; }
+      const known = [...new Set(members.map((m) => m.section).filter(Boolean))];
+      const name = await new Promise((resolve) => openSheet((box) => {
+        box.style.height = 'auto'; box.style.width = 'min(520px, 92vw)';
+        const inp = el('input', { type: 'text', list: 'secList', placeholder: '예: 물리학 A반 (비우면 학년-반으로 묶음)' });
+        box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `${nos.length}명 수업 지정` })]),
+          el('p', { class: 'hint', text: '선택과목은 여러 반 학생이 섞여 있으므로, 같은 수업끼리 묶어 항목별 기록의 학생 목록에 보여 줍니다.' }),
+          inp, el('datalist', { id: 'secList' }, known.map((k) => el('option', { value: k }))),
+          known.length ? el('div', { class: 'toolbar', style: 'margin-top:8px' }, known.map((k) => el('button', { type: 'button', class: 'small', text: k, onclick: () => { inp.value = k; } }))) : null,
+          el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: () => { closeSheet(); resolve(null); } }),
+            el('button', { type: 'button', class: 'primary', text: '지정', onclick: () => { closeSheet(); resolve(inp.value.trim()); } })]));
+        setTimeout(() => inp.focus(), 50);
+      }));
+      if (name === null) return;
+      const r = await mutate('set_section', g.id, nos, name);
+      if (r) { toast(name ? `${r.changed}명을 '${name}' 수업으로 지정했습니다.` : `${r.changed}명의 수업 지정을 풀었습니다.`); renderRoster(); }
+    }
     // 전출·빼기: 비활성화(기록 보존) 또는 삭제(기록도 지움, 먼저 백업)
     async function transferOut() {
       const nos = [...t.querySelectorAll('.rowcheck:checked')].map((c) => c.dataset.no);
@@ -666,9 +689,23 @@
     else if (first === 'line') addLine();
     else if (first === 'copy') addCopy();
 
-    function plainRow(r) { return { student_no: r.student_no, name: r.name, grade: r.grade, class_no: r.class_no, number: r.number, level: '', rename_ok: !!r.rename_ok }; }
+    function plainRow(r) { return { student_no: r.student_no, name: r.name, grade: r.grade, class_no: r.class_no, number: r.number, level: '', section: r.section || '', rename_ok: !!r.rename_ok }; }
+    // 선택과목: 묶음(파일·붙여넣기)마다 수업 이름. 파일은 파일 이름이 기본, 비우면 학년-반으로 묶는다.
+    const isSub = g.kind === 'subject';
     function log() {
-      logBox.textContent = st.batches.length ? `추가 ${st.batches.length}번: ` + st.batches.map((b) => `${b.label} ${b.count}명`).join(' · ') : '';
+      logBox.innerHTML = '';
+      if (st.batches.length) {
+        logBox.append(`추가 ${st.batches.length}번: `);
+        st.batches.forEach((b, i) => {
+          const rows = st.rows.filter((r) => r._batch === b.id);
+          const secs = [...new Set(rows.map((r) => r.section || ''))];
+          logBox.append(i ? ' · ' : '', `${b.label} ${b.count}명`);
+          if (isSub) {
+            logBox.append(' ', el('input', { type: 'text', class: 'sec-in', placeholder: secs.length > 1 ? '(여러 수업)' : '수업 이름', title: '이 묶음 학생의 수업 이름(예: 물리학 A반). 비우면 학년-반으로 묶습니다.',
+              value: secs.length === 1 ? secs[0] : '', onchange: (e) => { rows.forEach((r) => { r.section = e.target.value.trim(); }); renderRows(); } }));
+          }
+        });
+      }
       undoBtn.disabled = !st.batches.length;
       undoBtn.textContent = st.batches.length ? `↶ 마지막 추가 취소(${st.batches[st.batches.length - 1].label})` : '↶ 마지막 추가 취소';
     }
@@ -727,7 +764,7 @@
         const pick = (!isPaste && src.header && usable(cols)) ? { columns: cols, header: true } : await askFormat(src);
         if (!pick) continue;
         const r = await call('roster_build', g.id, src.raw, pick.header, pick.columns, true);
-        if (r) all.push(...r.rows);
+        if (r) all.push(...r.rows.map((x) => ({ ...x, section: isSub && !isPaste && src.file ? src.file.replace(/\.[^.]+$/, '') : '' })));
       }
       if (all.length) pushBatch(all, label);
     }
@@ -853,12 +890,13 @@
         return;
       }
       const t = el('table', { class: 'tbl' });
-      t.appendChild(el('tr', {}, ['#', '학년', '반', '번호', '이름', '학번', '확인', ''].map((h) => el('th', { text: h }))));
+      t.appendChild(el('tr', {}, ['#', '학년', '반', '번호', '이름', '학번', ...(isSub ? ['수업'] : []), '확인', ''].map((h) => el('th', { text: h }))));
       st.rows.forEach((row, idx) => {
         if (st.onlyBad && !(row.issues && row.issues.length)) return;
         const tr = el('tr', {});
         const inp = (key, cls) => el('td', {}, [el('input', { type: 'text', class: cls || '', 'data-k': key, value: row[key] || '', oninput: (e) => { row[key] = e.target.value.trim(); revalidate(); } })]);
         tr.append(el('td', { class: 'muted', text: String(idx + 1) }), inp('grade', 'narrow'), inp('class_no', 'narrow'), inp('number', 'narrow'), inp('name'), inp('student_no'));
+        if (isSub) tr.appendChild(el('td', {}, [el('input', { type: 'text', class: 'sec-in', value: row.section || '', placeholder: '(학년-반)', onchange: (e) => { row.section = e.target.value.trim(); log(); } })]));
         row._check = el('td', {});
         tr.appendChild(row._check);
         tr.appendChild(el('td', {}, [el('button', { type: 'button', class: 'link', title: '행 빼기', text: '✕', onclick: () => { st.rows.splice(idx, 1); renderRows(); revalidate(); } })]));
@@ -1395,6 +1433,77 @@
     cfg.models.forEach((m, i) => { if (m) sel.appendChild(el('option', { value: i, text: `${i + 1}번 · ${m}`, selected: prev === '' ? i === cfg.default_model : String(i) === prev })); });
     if (!sel.options.length) sel.appendChild(el('option', { value: '', text: '모델 없음(설정에서 등록)' }));
   }
+  // ---------- AI 작업: 확인 창 → 진행 창 → 결과 ----------
+  // 모든 AI 버튼은 바로 실행하지 않고 확인을 한 번 받는다. 실행 중에는 진행 창(건수·경과 시간·여러 건이면 중지)을 띄운다.
+  const escHtml = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  function modelName(sel) { const o = sel && sel.selectedOptions && sel.selectedOptions[0]; return o ? o.textContent : '-'; }
+  function aiConfirm(title, rows, warn) {
+    const html = `<div class="ai-conf"><b>${escHtml(title)}</b> — AI로 실행할까요?<table>${rows.filter(Boolean).map(([k, v]) => `<tr><th>${escHtml(k)}</th><td>${escHtml(v)}</td></tr>`).join('')}</table>`
+      + `<p class="hint">AI에는 학번·이름 없이 내용만 보냅니다. 실행하면 크레딧이 듭니다.${warn ? `<br>${escHtml(warn)}` : ''}</p></div>`;
+    return modal(html, true, true, 'AI 실행', '취소');
+  }
+  function aiProgress(title, total, onStop) {
+    let box = $('aiProg');
+    if (!box) { box = el('div', { id: 'aiProg', class: 'ai-prog', hidden: true }); document.body.appendChild(box); }
+    box.innerHTML = '';
+    const t0 = Date.now();
+    const count = el('div', { class: 'ai-prog-count', text: 'AI에 보내는 중…' });
+    const time = el('b', { text: '0:00' });
+    const bar = el('div', { class: 'ai-bar' }, [el('span', {})]);
+    const stopBtn = onStop ? el('button', { type: 'button', class: 'btn-danger', text: '중지', onclick: () => { stopBtn.disabled = true; stopBtn.textContent = '중지 중… (지금 건까지 마칩니다)'; onStop(); } }) : null;
+    const result = el('div', { class: 'ai-prog-result' });
+    const foot = el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), stopBtn]);
+    const spin = el('div', { class: 'ai-spin' });
+    const wait = el('div', { class: 'muted' }, ['경과 ', time, ' · 멈춘 것이 아니니 기다려 주세요. AI 응답에 수십 초 걸릴 수 있습니다.']);
+    box.appendChild(el('div', { class: 'ai-prog-card', role: 'dialog', 'aria-live': 'polite' }, [el('h2', { text: title }), spin, count, total > 1 ? bar : null, wait, result, foot]));
+    box.hidden = false;
+    const tick = () => { const x = Math.floor((Date.now() - t0) / 1000); time.textContent = `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}`; };
+    const timer = setInterval(tick, 500);
+    return {
+      set(done, fail, label) {
+        count.textContent = total > 1 ? `${Math.min(done + fail + 1, total)} / ${total}건 처리 중 · 완료 ${done}${fail ? ` · 실패 ${fail}` : ''}${label ? `\n지금: ${label}` : ''}` : `AI에 보내는 중…${label ? ` (${label})` : ''}`;
+        bar.firstChild.style.width = `${Math.round(((done + fail) / total) * 100)}%`;
+      },
+      // 실패가 있거나 요약을 보여야 하면 창을 남기고 [확인]을 기다린다. 아니면 바로 닫는다.
+      finish(errors, summary) {
+        clearInterval(timer);
+        tick();
+        if (!errors.length && !summary) { box.hidden = true; return Promise.resolve(); }
+        spin.remove(); wait.remove();
+        bar.firstChild.style.width = '100%';
+        count.textContent = summary || '끝났습니다.';
+        if (errors.length) result.appendChild(el('div', { class: 'danger-text', text: `실패 ${errors.length}건\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? `\n… 외 ${errors.length - 5}건` : ''}` }));
+        foot.innerHTML = '';
+        return new Promise((resolve) => {
+          const ok = el('button', { type: 'button', class: 'primary', text: '확인', onclick: () => { box.hidden = true; resolve(); } });
+          foot.append(el('span', { class: 'spacer' }), ok);
+          setTimeout(() => ok.focus(), 50);
+        });
+      },
+    };
+  }
+  // jobs: [{ label, run: () => api 결과 }] — api를 직접 불러 오류도 진행 창에서 모아 보여 준다.
+  async function aiRun({ title, rows, warn, jobs, summary, skipConfirm }) {
+    if (!skipConfirm && !(await aiConfirm(title, rows, warn))) return null;
+    let stop = false;
+    const pg = aiProgress(title, jobs.length, jobs.length > 1 ? () => { stop = true; } : null);
+    const results = [];
+    const errors = [];
+    let done = 0, fail = 0;
+    for (const j of jobs) {
+      if (stop) break;
+      pg.set(done, fail, j.label);
+      let r;
+      try { r = await j.run(); } catch (e) { r = { ok: false, error: String(e) }; }
+      if (r && r.ok !== false) { done += 1; results.push(r); setCredits(r); if (j.onDone) j.onDone(r); }
+      else { fail += 1; errors.push(`${j.label ? `${j.label}: ` : ''}${(r && r.error) || '처리하지 못했습니다.'}`); if (j.onFail) j.onFail(r); }
+    }
+    const out = { done, fail, stopped: stop, skipped: jobs.length - done - fail, results, errors };
+    await pg.finish(errors, summary ? summary(out) : (jobs.length > 1 && (fail || stop) ? `완료 ${done}건 · 실패 ${fail}건${out.skipped ? ` · 중지로 건너뜀 ${out.skipped}건` : ''}` : ''));
+    return out;
+  }
+  const DROP_WARN = '후보가 3개 차 있으면 잠기지 않은 가장 오래된 후보가 지워집니다.';
+
   async function busyRun(btn, key, fn) {
     if (R.busy.has(key)) return null;
     R.busy.add(key);
@@ -1475,10 +1584,17 @@
     renderStudentList();
     await loadStudent();
   }
+  // 학생 묶음: 선택과목에 수업이 지정돼 있으면 수업끼리, 아니면 학년-반끼리
+  function bySection() { return R.slot && R.slot.kind === 'subject' && R.students.some((s) => s.section); }
+  function groupOf(s) {
+    if (bySection()) return { key: `s:${s.section || ''}`, label: s.section || '수업 미지정', order: s.section ? `0${s.section}` : '1' };
+    if (!s.grade || !s.class_no) return { key: 'c:-', label: '반 정보 없음', order: '9' };
+    return { key: `c:${s.grade}-${s.class_no}`, label: `${s.grade}학년 ${s.class_no}반`, order: `0${String(s.grade).padStart(2, '0')}${String(s.class_no).padStart(3, '0')}` };
+  }
   function filteredStudents() {
     const q = R.search.trim();
     return R.students.filter((s) => (!R.filter || s.status === R.filter || (R.filter === 'stale' && s.stale)) && (!q || s.name.includes(q) || s.student_no.includes(q)))
-      .sort((a, b) => (b.active - a.active) || a.student_no.localeCompare(b.student_no));
+      .sort((a, b) => groupOf(a).order.localeCompare(groupOf(b).order, 'ko', { numeric: true }) || (b.active - a.active) || a.student_no.localeCompare(b.student_no));
   }
   function renderStudentList() {
     const box = $('recList');
@@ -1491,13 +1607,35 @@
     ]);
     box.append(search, filter);
     const list = filteredStudents();
+    // 묶음마다 제목(접기). 검색·필터 중에는 맞는 학생이 있는 묶음을 펼쳐 보인다.
+    const narrowing = !!(R.search.trim() || R.filter);
+    const groups = [];
     list.forEach((s) => {
+      const gk = groupOf(s);
+      let gr = groups.find((x) => x.key === gk.key);
+      if (!gr) { gr = { ...gk, items: [] }; groups.push(gr); }
+      gr.items.push(s);
+    });
+    groups.forEach((gr) => {
+      const fk = `stu:${R.slot.group_id}:${gr.key}`;
+      const all = R.students.filter((s) => groupOf(s).key === gr.key && s.active);
+      const done = all.filter((s) => s.status === 'closed').length;
+      const holder = el('div', { class: 'stu-group' });
+      const folded = !narrowing && !!fold[fk];
+      const head = el('button', { type: 'button', class: 'stu-group-head', 'aria-expanded': folded ? 'false' : 'true', title: folded ? '펼치기' : '접기',
+        onclick: () => { setFold(fk, !folded); renderStudentList(); } }, [`${folded ? '▸' : '▾'} ${gr.label}`, el('span', { class: 'cnt', text: `마감 ${done}/${all.length}` })]);
+      holder.appendChild(head);
+      box.appendChild(holder);
+      if (folded) return;
+      gr.items.forEach((s) => renderStu(holder, s));
+    });
+    function renderStu(parent, s) {
       const st = STATUS[s.status] || STATUS.none;
-      box.appendChild(el('button', { type: 'button', class: 'stu' + (s.student_no === R.sno ? ' active' : '') + (s.active ? '' : ' inactive'), title: st.text, onclick: async () => { if (s.student_no !== R.sno && !(await leaveOk())) return; R.sno = s.student_no; R.selected.clear(); renderStudentList(); loadStudent(); } }, [
+      parent.appendChild(el('button', { type: 'button', class: 'stu' + (s.student_no === R.sno ? ' active' : '') + (s.active ? '' : ' inactive'), title: st.text, onclick: async () => { if (s.student_no !== R.sno && !(await leaveOk())) return; R.sno = s.student_no; R.selected.clear(); renderStudentList(); loadStudent(); } }, [
         el('span', { class: `st ${st.cls}`, text: st.icon }), el('span', { class: 'no', text: s.student_no }), el('span', { text: s.name }),
         el('span', { class: 'cnt', text: (s.stale ? '! ' : '') + (s.records ? `${s.records}건` : '') + (s.active ? '' : ' 비활성') }),
       ]));
-    });
+    }
     if (!list.length) box.appendChild(el('p', { class: 'muted', text: '조건에 맞는 학생이 없습니다.' }));
     const done = R.students.filter((s) => s.active && s.status === 'closed').length;
     box.appendChild(el('p', { class: 'hint', text: `마감 ${done}/${R.students.filter((s) => s.active).length}명` }));
@@ -1694,10 +1832,15 @@
     ]);
   }
   async function aiRecord(r, btn) {
-    const res = await busyRun(btn, `rec${r.id}`, () => call('ai_record', r.id, $('recModel').value));
-    if (!res) return;
-    setCredits(res);
-    toast(res.dropped ? '새 후보를 만들고 가장 오래된 후보를 지웠습니다.' : '새 후보를 만들었습니다.');
+    const what = r.kind === 'existing' ? '기존 완성문 다듬기' : '누가기록 정제';
+    const out = await busyRun(btn, `rec${r.id}`, () => aiRun({
+      title: what,
+      rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['대상', `${r.kind === 'existing' ? '기존 완성문' : `${r.seq}회 기록`}${r.title ? ` · ${r.title}` : ''} (${r.bytes}B)`], ['모델', modelName($('recModel'))]],
+      warn: DROP_WARN,
+      jobs: [{ run: () => api.ai_record(r.id, $('recModel').value) }],
+    }));
+    if (!out || !out.done) return;
+    toast(out.results[0].dropped ? '새 후보를 만들고 가장 오래된 후보를 지웠습니다.' : '새 후보를 만들었습니다. 기록 카드 아래에 있습니다.');
     loadStudent(true);
   }
 
@@ -1841,9 +1984,15 @@
         const wm = {};
         recs.forEach((r) => { wm[r.id] = inputs[r.id].value; });
         const std = stdChk && stdChk.checked ? { text: stdTa.value, level: stdLvl.value } : null;
-        const res = await busyRun(runBtn, `synth${R.sno}`, () => call('ai_synth', R.slot.group_id, R.slot.item, R.sno, recs.map((r) => r.id), wm, model.value, sumCheck, std));
-        if (!res) return;
-        setCredits(res);
+        const out = await busyRun(runBtn, `synth${R.sno}`, () => aiRun({
+          title: '선택 기록 종합',
+          rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['기록', `${recs.length}건 (${recs.reduce((a, r) => a + r.bytes, 0)}B)`], ['목표', `${R.target}B`], ['모델', modelName(model)],
+            std ? ['성취기준', `사용 · 성취수준 ${std.level || '없음'}`] : null],
+          warn: DROP_WARN,
+          jobs: [{ run: () => api.ai_synth(R.slot.group_id, R.slot.item, R.sno, recs.map((r) => r.id), wm, model.value, sumCheck, std) }],
+        }));
+        if (!out || !out.done) return;
+        const res = out.results[0];
         closeSheet();
         revealResults();
         toast(res.dropped ? '종합 후보를 만들고 가장 오래된 후보를 지웠습니다.' : '종합 후보를 만들었습니다. 최종안 아래 [종합·다듬기 후보]에서 확인하세요.');
@@ -1892,8 +2041,13 @@
     const polishBtn = el('button', { type: 'button', disabled: ro || !f, title: '최종안을 AI로 다듬어 후보로 만듭니다', text: '다듬기(AI)' });
     polishBtn.addEventListener('click', async () => {
       if (!(await flushFinal())) return;
-      const res = await busyRun(polishBtn, `synth${R.sno}`, () => call('ai_polish_final', R.slot.group_id, R.slot.item, R.sno, $('recModel').value));
-      if (res) { setCredits(res); revealResults(); toast('다듬기 후보를 만들었습니다.'); loadStudent(true); }
+      const out = await busyRun(polishBtn, `synth${R.sno}`, () => aiRun({
+        title: '최종안 다듬기',
+        rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['최종안', `${bytesOf(ta.value)}B → 목표 ${R.target}B`], ['모델', modelName($('recModel'))]],
+        warn: `${DROP_WARN} 최종안 자체는 바뀌지 않고 후보로 만듭니다.`,
+        jobs: [{ run: () => api.ai_polish_final(R.slot.group_id, R.slot.item, R.sno, $('recModel').value) }],
+      }));
+      if (out && out.done) { revealResults(); toast('다듬기 후보를 만들었습니다. 최종안 아래 후보에서 확인하세요.'); loadStudent(true); }
     });
     const closeBtn = closed
       ? el('button', { type: 'button', disabled: !!ys.archived, text: '마감 해제', onclick: async () => { if (await mutate('set_closed', R.slot.group_id, R.slot.item, R.sno, false)) { toast('마감을 해제했습니다.'); loadStudent(true); } } })
@@ -2709,7 +2863,7 @@
     body.appendChild(el('div', { class: 'toolbar' }, [
       el('label', { class: 'inline', style: 'margin:0' }, ['모델', model]),
       el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'checkbox', checked: IB.sel.size && IB.sel.size === rows.length, onchange: (e) => { IB.sel = new Set(e.target.checked ? rows.map((r) => r.id) : []); renderBatch(); } }), '전체 선택']),
-      el('button', { type: 'button', class: 'primary', disabled: !IB.sel.size, text: `선택 ${IB.sel.size}건 정제`, onclick: () => refineRows(rows.filter((r) => IB.sel.has(r.id)), model.value) }),
+      el('button', { type: 'button', class: 'primary', disabled: !IB.sel.size, text: `선택 ${IB.sel.size}건 정제`, onclick: () => refineRows(rows.filter((r) => IB.sel.has(r.id)), model.value, null, modelName(model)) }),
       el('span', { class: 'spacer' }),
       el('span', { class: 'hint', style: 'margin:0', text: `${slotLabel(b.group_id, b.item)}의 '정제' 지침을 씁니다. AI에는 학번·이름 없이 내용만 보냅니다.` }),
     ]));
@@ -2723,7 +2877,7 @@
         el('button', { type: 'button', class: usingOrig ? 'on' : '', text: '원문', onclick: async () => { if (await mutate('inbox_use_cand', r.id, null)) loadBatch(); } }),
         ...r.cands.map((cd, i) => el('button', { type: 'button', class: !usingOrig && r.used_text === cd.text ? 'on' : '', text: `정제 ${i + 1}`, onclick: async () => { if (await mutate('inbox_use_cand', r.id, cd.id)) loadBatch(); } }))]);
       const btn = el('button', { type: 'button', class: 'small', text: r.cands.length ? '다시 정제' : '정제(AI)' });
-      btn.addEventListener('click', () => refineRows([r], model.value, btn));
+      btn.addEventListener('click', () => refineRows([r], model.value, btn, modelName(model)));
       card.append(el('div', { class: 'ref-cols' }, [el('div', {}, [el('div', { class: 'muted', text: '원문' }), el('div', { class: 'rcard-body', text: r.content })]),
         el('div', {}, [el('div', { class: 'muted', text: '보낼 내용' }), el('div', { class: 'rcard-body', text: r.text })])]), el('div', { class: 'rcard-foot' }, [pickBox, el('span', { class: 'spacer' }), btn]));
       body.appendChild(card);
@@ -2735,32 +2889,20 @@
       el('button', { type: 'button', class: 'primary', text: '다음: 보내기 검토', onclick: async () => { if (await mutate('inbox_stage', b.id, 'review')) loadBatch(); } }),
     ]));
   }
-  async function refineRows(rows, modelIndex, btn) {
+  async function refineRows(rows, modelIndex, btn, modelLabel) {
     if (!rows.length) return;
+    const b = IB.view.batch;
+    if (!(await aiConfirm('인박스 자료 정제', [['묶음', `${b.title} → ${slotLabel(b.group_id, b.item)}`], ['대상', `${rows.length}건 (${new Set(rows.map((r) => r.student_no)).size}명)`], ['모델', modelLabel || '-']],
+      '정제한 내용은 보낼 내용으로 바로 골라 둡니다. 원문은 그대로 남습니다.'))) return;
+    if (btn) { btn.disabled = true; btn.classList.add('busy-btn'); }
     await jobStart();
-    try { await refineRowsInner(rows, modelIndex, btn); } finally { await jobEnd(); }
-  }
-  async function refineRowsInner(rows, modelIndex, btn) {
-    IB.stop = false;
-    let done = 0, fail = 0;
-    const msg = el('div', { class: 'modal-msg' });
-    const stopBtn = el('button', { type: 'button', class: 'btn-danger', text: '중지', onclick: () => { IB.stop = true; stopBtn.disabled = true; stopBtn.textContent = '중지 중…'; } });
-    if (rows.length > 1) {
-      openSheet((box) => { box.style.height = 'auto'; box.style.width = 'min(440px, 92vw)'; box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: 'AI 정제 중' })]), msg, el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), stopBtn])); });
-    } else if (btn) { btn.disabled = true; btn.classList.add('busy-btn'); }
-    const errors = [];
-    for (const r of rows) {
-      if (IB.stop) break;
-      msg.textContent = `${done + fail + 1} / ${rows.length}건 — 실패 ${fail}건\n멈춘 게 아니니 기다려 주세요.`;
-      const res = await api.ai_inbox_row(r.id, modelIndex);
-      if (res && res.ok) { done += 1; runCost = res.run_cost; $('runCost').textContent = fmtCredit(runCost); }
-      else { fail += 1; errors.push(res && res.error); }
-    }
-    closeSheet();
+    let out;
+    try {
+      out = await aiRun({ title: '인박스 자료 정제', skipConfirm: true,
+        jobs: rows.map((r) => ({ label: `${r.name || r.student_no || ''} ${(r.content || '').slice(0, 16)}`.trim(), run: () => api.ai_inbox_row(r.id, modelIndex) })) });
+    } finally { await jobEnd(); }
     refreshBalance();
-    if (fail) alertBox(`정제 ${done}건 완료, 실패 ${fail}건.\n${errors[0] || ''}`);
-    else if (IB.stop) toast(`중지했습니다. ${done}건은 정제했습니다.`);
-    else toast(`${done}건을 정제했습니다. 보낼 내용으로 바로 골라 두었습니다.`);
+    if (out && !out.fail) toast(out.stopped ? `중지했습니다. ${out.done}건은 정제했습니다.` : `${out.done}건을 정제했습니다. 보낼 내용으로 바로 골라 두었습니다.`);
     IB.sel.clear();
     loadBatch();
   }
@@ -3053,9 +3195,14 @@
       run.addEventListener('click', async () => {
         if (!lvl.value) { toast('성취수준을 골라 주세요.'); lvl.focus(); return; }
         if (lvl.value !== (v.student.level || '')) await call('set_level', R.slot.group_id, R.sno, lvl.value);
-        const res = await busyRun(run, `synth${R.sno}`, () => call('ai_standards_only', R.slot.group_id, R.slot.item, R.sno, { text: ta.value, level: lvl.value }, model.value));
-        if (!res) return;
-        setCredits(res);
+        const out = await busyRun(run, `synth${R.sno}`, () => aiRun({
+          title: '성취기준만으로 생성',
+          rows: [['학생', `${v.student.name} · ${R.slot.label}`], ['성취수준', lvl.value], ['성취기준', `${bytesOf(ta.value)}B`], ['목표', `${R.target}B`], ['모델', modelName(model)]],
+          warn: `${DROP_WARN} 기록이 없어 성취기준만으로 쓰므로 실제 수업 모습과 맞는지 꼭 확인하세요.`,
+          jobs: [{ run: () => api.ai_standards_only(R.slot.group_id, R.slot.item, R.sno, { text: ta.value, level: lvl.value }, model.value) }],
+        }));
+        if (!out || !out.done) return;
+        revealResults();
         closeSheet();
         toast('후보를 만들었습니다. "기록 없음, 성취기준으로 생성" 표시가 붙습니다. 실제 수업 모습과 맞는지 꼭 확인하세요.');
         loadStudent(true);
@@ -3218,44 +3365,36 @@
     const runBtn = el('button', { type: 'button', class: 'primary', disabled: !targets.length, text: `종합 실행: ${targets.length}명` });
     runBtn.addEventListener('click', async () => {
       if (pp.value !== p.prompt || pe.value !== p.example) await call('prompts_save', s.item, 'synth', pp.value, pe.value);
-      runBatch(s, targets, { model: model.value, sumCheck: sumChk.checked, std: isSub && BT.useStd ? stdText : null });
+      runBatch(s, targets, { model: model.value, modelLabel: modelName(model), sumCheck: sumChk.checked, std: isSub && BT.useStd ? stdText : null });
     });
     card.appendChild(el('div', { class: 'sheet-foot' }, [
       el('b', { text: `실행 ${targets.length}명` }), el('span', { class: 'muted', text: ` · 제외 ${list.length - can.length}명(마감·잠김·기록 없음·비활성)` }), el('span', { class: 'spacer' }),
-      failed.length ? el('button', { type: 'button', text: `실패한 ${failed.length}명만 다시 실행`, onclick: () => runBatch(s, info.students.filter((x) => failed.includes(x.student_no)), { model: model.value, sumCheck: sumChk.checked, std: isSub && BT.useStd ? stdText : null }) }) : null,
+      failed.length ? el('button', { type: 'button', text: `실패한 ${failed.length}명만 다시 실행`, onclick: () => runBatch(s, info.students.filter((x) => failed.includes(x.student_no)), { model: model.value, modelLabel: modelName(model), sumCheck: sumChk.checked, std: isSub && BT.useStd ? stdText : null }) }) : null,
       runBtn]));
   }
   async function jobStart() { await api.job_begin(); $('yearSelect').disabled = true; }
   async function jobEnd() { await api.job_end(); $('yearSelect').disabled = false; }
   async function runBatch(s, students, opt) {
     if (!students.length) return;
-    if (!(await confirmBox(`${students.length}명을 종합합니다. 학생마다 AI를 한 번씩 부르며, 후보 3칸이 차 있으면 잠기지 않은 가장 오래된 후보가 지워집니다.`, '실행'))) return;
+    const noRec = students.filter((x) => !x.records).length;
+    if (!(await aiConfirm('일괄 종합', [['담당', s.label], ['학생', `${students.length}명 (학생마다 AI를 한 번씩 부름)`], ['모델', opt.modelLabel || '-'],
+      opt.std ? ['성취기준', `사용${noRec ? ` · 기록 없는 ${noRec}명은 성취기준만으로 생성` : ''}`] : null], DROP_WARN))) return;
     await jobStart();
-    try { await runBatchInner(s, students, opt); } finally { await jobEnd(); }
-  }
-  async function runBatchInner(s, students, opt) {
-    BT.stop = false;
-    let done = 0, fail = 0;
-    const msg = el('div', { class: 'modal-msg' });
-    const time = el('b', { text: '0:00' });
-    const stopBtn = el('button', { type: 'button', class: 'btn-danger', text: '중지', onclick: () => { BT.stop = true; stopBtn.disabled = true; stopBtn.textContent = '중지 중… (지금 학생까지 마칩니다)'; } });
-    openSheet((box) => { box.style.height = 'auto'; box.style.width = 'min(480px, 92vw)'; box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: '일괄 종합 중' })]), msg, el('div', { class: 'sheet-foot' }, [el('span', {}, ['경과 ', time]), el('span', { class: 'spacer' }), stopBtn])); });
-    const start = Date.now();
-    const timer = setInterval(() => { const x = Math.floor((Date.now() - start) / 1000); time.textContent = `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}`; }, 1000);
-    for (const st of students) {
-      if (BT.stop) break;
-      msg.textContent = `완료 ${done} · 실패 ${fail} · 대기 ${students.length - done - fail}\n지금: ${st.student_no} ${st.name}`;
-      let r;
-      if (!st.records && opt.std) r = await api.ai_standards_only(s.group_id, s.item, st.student_no, { text: opt.std, level: st.level }, opt.model);
-      else r = await api.ai_synth(s.group_id, s.item, st.student_no, st.record_ids, {}, opt.model, opt.sumCheck, opt.std ? { text: opt.std, level: st.level } : null);
-      BT.results[st.student_no] = r && r.ok ? { ok: true } : { ok: false, error: (r && r.error) || '실패' };
-      if (r && r.ok) { done += 1; runCost = r.run_cost; $('runCost').textContent = fmtCredit(runCost); } else fail += 1;
-    }
-    clearInterval(timer);
-    closeSheet();
+    try {
+      await aiRun({
+        title: '일괄 종합', skipConfirm: true,
+        jobs: students.map((st) => ({
+          label: `${st.student_no} ${st.name}`,
+          run: () => (!st.records && opt.std
+            ? api.ai_standards_only(s.group_id, s.item, st.student_no, { text: opt.std, level: st.level }, opt.model)
+            : api.ai_synth(s.group_id, s.item, st.student_no, st.record_ids, {}, opt.model, opt.sumCheck, opt.std ? { text: opt.std, level: st.level } : null)),
+          onDone: () => { BT.results[st.student_no] = { ok: true }; },
+          onFail: (r) => { BT.results[st.student_no] = { ok: false, error: (r && r.error) || '실패' }; },
+        })),
+        summary: (o) => `완료 ${o.done}명 · 실패 ${o.fail}명${o.skipped ? ` · 중지로 건너뜀 ${o.skipped}명` : ''}\n후보는 학생 화면의 '종합·다듬기 후보'에 있습니다. 확인한 뒤 최종안으로 채택하세요.${o.fail ? '\n실패한 학생은 [실패한 학생만 다시 실행]으로 다시 돌릴 수 있습니다.' : ''}`,
+      });
+    } finally { await jobEnd(); }
     refreshBalance();
-    const left = students.length - done - fail;
-    alertBox(`완료 ${done}명 · 실패 ${fail}명${left ? ` · 중지로 건너뜀 ${left}명` : ''}\n후보는 학생 화면의 '종합·다듬기 후보'에 있습니다. 확인한 뒤 최종안으로 채택하세요.${fail ? '\n실패한 학생은 [실패한 학생만 다시 실행]으로 다시 돌릴 수 있습니다.' : ''}`);
     BT.touched = true;
     BT.sel.clear();
     renderBatchPanel();

@@ -90,5 +90,17 @@ if __name__ == "__main__":
     assert [c[1] for c in export.columns("full")] == ["학년", "반", "번호", "이름", "상태", "최종안", "바이트"]
     ex = ok(api.export_preview(club, "club"))["rows"][0]
     assert ex["number"] is not None and ex["grade"] is not None, ex
+    # 7) v0.14 선택과목 수업: 명렬 입력 때 지정, 나중에 바꾸기, 비우면 유지(추가 입력), 다른 담당 가져오기에 따라감
+    ok(api.roster_apply(sub, [{"student_no": "20681", "name": "물리일", "section": "물리 A반"}, {"student_no": "20682", "name": "물리이", "section": "물리 B반"}], "add"))
+    sec = {m["student_no"]: m["section"] for m in ok(api.members(sub))["members"]}
+    assert sec["20681"] == "물리 A반" and sec["20682"] == "물리 B반", sec
+    ok(api.roster_apply(sub, [{"student_no": "20681", "name": "물리일"}], "add"))  # 수업 칸이 비면 그대로
+    assert {m["student_no"]: m["section"] for m in ok(api.members(sub))["members"]}["20681"] == "물리 A반"
+    assert ok(api.set_section(sub, ["20681", "20682"], "물리 C반"))["changed"] == 2
+    assert {m["section"] for m in ok(api.members(sub))["members"] if m["student_no"] in ("20681", "20682")} == {"물리 C반"}
+    assert ok(api.slot_view(sub, "subject"))["students"][0].get("section") is not None
+    assert any(r["section"] == "물리 C반" for r in ok(api.roster_copy_source(sub))["rows"])
+    ok(api.set_section(sub, ["20681"], ""))
+    assert {m["student_no"]: m["section"] for m in ok(api.members(sub))["members"]}["20681"] == ""
     ok(api.save_now())
     print("ROSTER INPUT OK")

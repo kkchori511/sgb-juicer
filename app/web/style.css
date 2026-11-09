@@ -543,3 +543,23 @@ textarea.cell-edit { min-height: 54px; font-size: 13px; width: 100%; }
 .final-bulk tr.off td { color: var(--muted); }
 .final-bulk td:nth-child(2) { white-space: nowrap; }
 .final-bulk td:nth-child(3) { min-width: 120px; }
+/* v0.14: 학생 목록 묶음(학년-반 / 선택과목은 수업) */
+.stu-group { margin-bottom: 4px; }
+.stu-group-head { display: flex; align-items: center; gap: 6px; width: 100%; border: none; background: var(--surface-2); padding: 5px 8px; border-radius: var(--radius-sm); font-weight: 800; font-size: 13.5px; text-align: left; color: var(--text); }
+.stu-group-head:hover { background: var(--accent-soft); border: none; }
+.stu-group-head .cnt { margin-left: auto; font-size: 12px; color: var(--muted); font-weight: 600; }
+input.sec-in { width: 130px; height: 28px; padding: 2px 6px; font-size: 13px; display: inline-block; }
+/* v0.14: AI 확인·진행 창 */
+.ai-conf table { margin: 10px 0 6px; border-collapse: collapse; }
+.ai-conf th { text-align: left; color: var(--text-2); font-weight: 700; padding: 3px 14px 3px 0; white-space: nowrap; vertical-align: top; }
+.ai-conf td { padding: 3px 0; }
+.ai-prog { position: fixed; inset: 0; z-index: 120; background: rgba(15, 23, 42, 0.45); display: flex; align-items: center; justify-content: center; }
+.ai-prog[hidden] { display: none; }
+.ai-prog-card { background: var(--surface); border-radius: var(--radius); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25); padding: 22px 24px 16px; width: min(480px, 92vw); }
+.ai-prog-card h2 { margin: 0 0 12px; font-size: 18px; }
+.ai-prog-count { white-space: pre-wrap; font-weight: 700; margin: 8px 0; }
+.ai-prog-result { white-space: pre-wrap; margin-top: 8px; font-size: 13.5px; }
+.ai-spin { width: 34px; height: 34px; border: 4px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: aispin 0.9s linear infinite; }
+@keyframes aispin { to { transform: rotate(360deg); } }
+.ai-bar { height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden; margin: 6px 0 8px; }
+.ai-bar > span { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.3s; }
