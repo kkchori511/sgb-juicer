@@ -348,7 +348,7 @@
         ? `${s.students}명 · 마감 ${s.closed}/${s.item_total}항목`
         : `${s.students}명 · 마감 ${s.closed}`;
       const pct = s.item_total ? Math.round((s.closed / s.item_total) * 100) : 0;
-      cards.appendChild(el('button', { type: 'button', class: 'gcard' + (g.id === dashSel ? ' active' : ''), onclick: () => { dashSel = g.id; renderDashboard(); } }, [
+      cards.appendChild(el('button', { type: 'button', class: 'gcard' + (g.id === dashSel ? ' active' : '') + (s.item_total && s.closed >= s.item_total ? ' is-closed' : ''), onclick: () => { dashSel = g.id; renderDashboard(); } }, [
         el('span', { class: 'g-kind', text: g.kind === 'homeroom' ? '담임반 · 연간' : g.kind === 'subject' ? `과목 세특 · ${g.semester}학기` : '동아리 · 연간' }),
         el('span', { class: 'g-name', text: g.kind === 'homeroom' ? g.name : g.name }),
         el('span', { class: 'g-sum', text: g.total ? sum : '명렬 미등록' }),
@@ -465,7 +465,7 @@
     tabs.innerHTML = '';
     if (!groups.find((g) => g.id === rosterSel)) rosterSel = groups.length ? groups[0].id : null;
     groups.forEach((g) => {
-      tabs.appendChild(el('button', { type: 'button', class: 'gtab' + (g.id === rosterSel ? ' active' : '') + (g.total ? '' : ' empty'), onclick: () => { rosterSel = g.id; renderRoster(); } }, [
+      tabs.appendChild(el('button', { type: 'button', class: 'gtab' + (g.id === rosterSel ? ' active' : '') + (g.total ? ' is-done' : ' empty'), title: g.total ? '명렬 등록됨' : '명렬 미등록', onclick: () => { rosterSel = g.id; renderRoster(); } }, [
         g.label, el('span', { class: 'cnt', text: g.total ? `${g.active}명` : '미등록' }),
       ]));
     });
@@ -2650,7 +2650,7 @@
     box.appendChild(el('button', { type: 'button', class: 'primary edit-only', style: 'width:100%;margin-bottom:10px', text: '+ 새 자료 묶음', onclick: newBatch }));
     const open = IB.list.filter((b) => b.stage !== 'sent');
     const sent = IB.list.filter((b) => b.stage === 'sent');
-    const item = (b) => el('button', { type: 'button', class: 'ib-item' + (b.id === IB.bid ? ' active' : ''), onclick: () => { IB.bid = b.id; IB.raw = null; IB.sel.clear(); renderInboxList(); loadBatch(); } }, [
+    const item = (b) => el('button', { type: 'button', class: 'ib-item' + (b.id === IB.bid ? ' active' : '') + (b.stage === 'sent' ? ' is-done' : ''), onclick: () => { IB.bid = b.id; IB.raw = null; IB.sel.clear(); renderInboxList(); loadBatch(); } }, [
       el('span', { class: 't', text: b.title }),
       el('span', { class: 's', text: slotLabel(b.group_id, b.item) }),
       el('span', { class: 's' }, [el('span', { class: 'stage-chip' + (b.stage === 'sent' ? ' sent' : ''), text: STAGE_NAME[b.stage] }),
@@ -3187,7 +3187,7 @@
       return;
     }
     if (!r.subjects.find((x) => x.id === SD.gid)) SD.gid = r.subjects[0].id;
-    r.subjects.forEach((x) => list.appendChild(el('button', { type: 'button', class: 'ib-item' + (x.id === SD.gid ? ' active' : ''), onclick: () => { SD.gid = x.id; renderStandards(); } }, [
+    r.subjects.forEach((x) => list.appendChild(el('button', { type: 'button', class: 'ib-item' + (x.id === SD.gid ? ' active' : '') + (x.has ? ' is-done' : ''), onclick: () => { SD.gid = x.id; renderStandards(); } }, [
       el('span', { class: 't', text: x.label }), el('span', { class: 's', text: x.has ? `✔ 입력됨 · ${x.updated_at.slice(0, 16)}` : '아직 없음' })])));
     list.appendChild(el('p', { class: 'hint', text: '모든 과목을 미리 넣을 필요는 없습니다. 세특에 성취기준을 쓸 과목만 넣으세요. 학년도마다 따로 저장됩니다.' }));
     const sreq = ++stdReq, gidAsk = SD.gid, yearAsk = ys.year;

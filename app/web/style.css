@@ -21,8 +21,9 @@
   --warn-border: #f0cf5a;
   --st-none: #98a4b3;
   --st-progress: #d99a00;
-  --st-final: #2563eb;
-  --st-closed: #1f9d55;
+  --st-final: #16a34a;   /* 입력 완료(최종안 있음): 초록 */
+  --st-closed: #2563eb;  /* 마감: 파랑 */
+  --ok: #16a34a;         /* 성공·통과 표시 */
   --radius: 14px;
   --radius-sm: 9px;
   --shadow: 0 1px 2px rgba(23, 32, 43, 0.06), 0 4px 12px rgba(23, 32, 43, 0.06);
@@ -142,7 +143,7 @@ select { height: 40px; }
 .inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .grow { flex: 1; min-width: 160px; }
 .check-result { display: inline-block; margin-top: 8px; font-weight: 700; }
-.check-result.ok { color: var(--st-closed); }
+.check-result.ok { color: var(--ok); }
 .check-result.err { color: var(--danger); }
 
 /* ---------- 버튼 ---------- */
@@ -365,7 +366,7 @@ textarea.tall { min-height: 300px; height: calc(100vh - 470px); resize: vertical
 .cand-body { white-space: pre-wrap; font-size: 14px; margin: 5px 0; max-height: 220px; overflow: auto; }
 .final-box { border: 2px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--input); padding: 10px 12px; margin-bottom: 12px; }
 .final-box.has { border-color: var(--st-final); }
-.final-box.closed { border-color: var(--st-closed); background: #f2fbf5; }
+.final-box.closed { border-color: var(--st-closed); background: #eff6ff; }
 .final-box textarea { min-height: 170px; font-size: 14.5px; }
 .final-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .stale { background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
@@ -428,7 +429,7 @@ textarea.tall { min-height: 300px; height: calc(100vh - 470px); resize: vertical
 .match-tbl td { vertical-align: top; }
 .match-tbl select { width: 170px; }
 .st-chip { font-weight: 800; white-space: nowrap; }
-.st-chip.confirmed { color: var(--st-closed); }
+.st-chip.confirmed { color: var(--ok); }
 .st-chip.suggested { color: var(--st-progress); }
 .st-chip.none { color: var(--danger); }
 .st-chip.excluded { color: var(--muted); }
@@ -455,7 +456,7 @@ tr.row-pending td { background: var(--warn-bg); }
 .batch-opts { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 8px 0; }
 .batch-opts label { margin: 0; display: flex; align-items: center; gap: 6px; }
 .batch-opts select { width: auto; height: 34px; padding: 3px 8px; }
-.res-ok { color: var(--st-closed); font-weight: 800; }
+.res-ok { color: var(--ok); font-weight: 800; }
 .res-fail { color: var(--danger); font-weight: 800; }
 .para-pick { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 6px; background: var(--input); display: flex; gap: 8px; align-items: flex-start; }
 .para-pick input { margin-top: 4px; width: 17px; height: 17px; accent-color: var(--accent); }
@@ -577,10 +578,10 @@ input.sec-in { width: 130px; height: 28px; padding: 2px 6px; font-size: 13px; di
 .stu-group:not(.folded) .stu-group-head { border-bottom: 1px solid color-mix(in srgb, var(--gc) 25%, white); }
 .stu-group .stu { border-radius: 0; }
 .stu-group .stu.active { background: color-mix(in srgb, var(--gc) 16%, white); color: inherit; box-shadow: inset 3px 0 0 var(--gc); }
-.stat-box { border: 2px solid var(--st-closed); background: #f0faf4; border-radius: var(--radius); padding: 8px 10px; margin-bottom: 8px; }
+.stat-box { border: 2px solid var(--st-closed); background: #eff6ff; border-radius: var(--radius); padding: 8px 10px; margin-bottom: 8px; }
 .stat-top { display: flex; align-items: baseline; gap: 2px; font-weight: 700; }
 .stat-big { font-size: 24px; color: var(--st-closed); line-height: 1.1; }
-.stat-bar { height: 8px; background: #d7eedf; border-radius: 999px; overflow: hidden; margin: 5px 0 6px; }
+.stat-bar { height: 8px; background: #dbe7fd; border-radius: 999px; overflow: hidden; margin: 5px 0 6px; }
 .stat-bar > span { display: block; height: 100%; background: var(--st-closed); }
 .stat-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .stat-chip { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 600; color: var(--text-2); }
@@ -588,6 +589,19 @@ input.sec-in { width: 130px; height: 28px; padding: 2px 6px; font-size: 13px; di
 .stat-chip b { color: var(--text); }
 /* v0.15: 성취기준 정리 비교 */
 .std-fmt-info > div { margin: 3px 0; font-size: 13.5px; }
-.ok-text { color: var(--st-closed); font-weight: 700; }
+.ok-text { color: var(--ok); font-weight: 700; }
 .warn-text { color: #a16207; font-weight: 700; cursor: pointer; }
 .cmp-text.tall { max-height: 52vh; min-height: 200px; }
+
+/* v0.15: 상태 색 규칙 — 미입력 회색 / 입력 완료 초록 / 마감 파랑 (앱 전체 같은 규칙) */
+.is-done { background: #ecfdf3 !important; border-color: #16a34a !important; }
+.is-done .t::before, .gtab.is-done::before { content: '✔ '; color: #16a34a; }
+.is-closed { background: #eff6ff !important; border-color: #2563eb !important; }
+.gcard.is-closed .g-kind::after { content: ' · ● 모두 마감'; color: #2563eb; }
+.gtab.is-done { color: #166534; }
+.gtab.active.is-done { background: #16a34a !important; border-color: #16a34a !important; color: #fff; }
+.ib-item.active.is-done { box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.3); }
+.gtab.active.is-done::before { color: #fff; }
+.steps-bar span.done { background: #ecfdf3; color: #166534; }
+.steps-bar span.done::before { content: '✔ '; }
+#wsteps li.done { color: #166534; }
