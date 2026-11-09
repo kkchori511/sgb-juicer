@@ -512,6 +512,19 @@ class Inbox:
             raise DbError("이미 보낸 묶음은 고칠 수 없습니다. 보낸 기록은 항목별 기록에서 고치세요.")
         return b
 
+    def reorder(self, bid, row_ids):
+        """인박스 행 순서를 화면에서 끈 순서로."""
+        ids = [int(x) for x in row_ids or []]
+        with self.d.tx() as c:
+            b = self.batch(bid)
+            if b["stage"] == "sent":
+                raise DbError("이미 보낸 묶음은 고칠 수 없습니다.")
+            have = {r[0] for r in c.execute("SELECT id FROM inbox_rows WHERE batch_id=?", (int(bid),))}
+            if set(ids) != have or len(ids) != len(have):
+                raise DbError("행 목록이 바뀌었습니다. 화면을 다시 열어 주세요.")
+            for i, rid in enumerate(ids):
+                c.execute("UPDATE inbox_rows SET ord=? WHERE id=?", (i + 1, rid))
+
     def add_cand(self, row_id, text, meta, cost):
         r = self._row(row_id)
         self._editable_batch(r["batch_id"])

@@ -345,7 +345,7 @@ textarea.tall { min-height: 300px; height: calc(100vh - 470px); resize: vertical
 .rcard { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--input); padding: 9px 11px; margin-bottom: 9px; }
 .rcard.sel { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12); }
 .rcard-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; }
-.rcard-head input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--accent); }
+
 .rcard-head .seq { font-weight: 800; }
 .rcard-body { white-space: pre-wrap; margin: 6px 0; font-size: 14.5px; line-height: 1.6; max-height: 260px; overflow: auto; }
 .rcard-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -484,3 +484,23 @@ tr.row-pending td { background: var(--warn-bg); }
   .rec-body.list-hidden .rec-final { grid-column: 1; }
 }
 .badge.src { color: var(--muted); }
+
+/* v0.12: 체크 칸 두 배(26px), 체크한 줄은 초록 */
+input[type=checkbox] { width: 26px; height: 26px; min-width: 26px; margin: 0 6px 0 0; accent-color: #16a34a; cursor: pointer; vertical-align: middle; }
+label.inline { display: inline-flex; align-items: center; gap: 4px; }
+.tbl td:has(> input[type=checkbox]:only-child), .tbl th:has(> input[type=checkbox]:only-child) { cursor: pointer; text-align: center; width: 48px; }
+.tbl tr:has(> td > input[type=checkbox]:checked) > td { background: #e3f6ea; }
+.tbl tr:has(> td > input[type=checkbox]:checked) > td:first-child { box-shadow: inset 4px 0 0 #16a34a; }
+.rcard.sel { background: #e3f6ea; border-color: #16a34a; box-shadow: inset 4px 0 0 #16a34a; }
+/* 줄 순서 바꾸기 */
+.sort-ctl { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.drag-handle { cursor: grab; font-size: 20px; line-height: 1; padding: 2px 4px; color: var(--muted); user-select: none; }
+.drag-handle.off { cursor: default; opacity: 0.35; }
+.drag-handle:active { cursor: grabbing; }
+button.mini { padding: 1px 6px; font-size: 11px; line-height: 1.4; min-width: 0; }
+.dragging { opacity: 0.45; }
+.drop-before > td, .rcard.drop-before { box-shadow: inset 0 3px 0 var(--accent) !important; }
+.drop-after > td, .rcard.drop-after { box-shadow: inset 0 -3px 0 var(--accent) !important; }
+textarea.cell-edit { min-height: 54px; font-size: 13px; width: 100%; }
+.rcard:has(> .rcard-head input[type=checkbox]:checked) { background: #e3f6ea; border-color: #16a34a; box-shadow: inset 4px 0 0 #16a34a; }
+#modal { z-index: 110; } /* 확인·오류 창은 늘 시트(입력 창) 위에 */

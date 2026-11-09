@@ -15,7 +15,7 @@ from functools import wraps
 
 import webview
 
-from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, export, ocr, openrouter, prompts, roster, scan, updater, weights
+from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, existing, export, ocr, openrouter, prompts, roster, scan, updater, weights
 from .records import Records, items_of
 from .inbox import Inbox
 from .standards import Standards, check_level, read_hwpx_text, read_pdf_text, standards_rule
@@ -675,6 +675,12 @@ class Api:
         return {}
 
     @safe
+    def reorder_records(self, gid, item, sno, ids):
+        self._editable()
+        self._rec().reorder(gid, item, sno, ids)
+        return {}
+
+    @safe
     def set_closed(self, gid, item, sno, closed):
         self._editable()
         self._rec().set_closed(gid, item, sno, bool(closed))
@@ -810,8 +816,8 @@ class Api:
         rec.require_open(gid, item, sno)
         rec.check_room(gid, item, sno)
         ids = [int(x) for x in record_ids or []]
-        recs = {r["id"]: r for r in rec.records(gid, item, sno)}
-        chosen = [recs[i] for i in ids if i in recs]
+        idset = set(ids)
+        chosen = [r for r in rec.records(gid, item, sno) if r["id"] in idset]  # 화면의 기록 순서대로
         if not chosen:
             raise weights.WeightError("종합할 기록을 고르세요.")
         wm = {int(k): v for k, v in (weights_map or {}).items()}
@@ -950,74 +956,61 @@ class Api:
     # ---------- 이미 쓴 생기부 일괄 넣기 ----------
     @safe
     def existing_parse(self, gid, item, text=None, from_xlsx=False):
+        """이미 쓴 생기부: 붙여넣은 글 또는 xlsx를 읽고 열을 알아본다(NEIS 업로드 형식 포함)."""
         d = self._db()
-        rec = Records(d)
-        rec.slot(gid, item)
+        Records(d).slot(gid, item)
         if from_xlsx:
             res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
             if not res:
                 return {"ok": False, "cancelled": True}
             path = res[0] if isinstance(res, (list, tuple)) else res
-            raw = roster.parse_xlsx(path)
+            try:
+                raw = roster.parse_xlsx(path)
+            except Exception:
+                raise db.DbError("xlsx 파일을 열지 못했습니다. Excel에서 열려 있으면 닫고 다시 시도해 주세요.")
         else:
             raw = roster.parse_text(text or "", delim="\t")
         if not raw:
-            raise db.DbError("내용이 없습니다. 엑셀에서 학번과 생기부 내용 칸을 복사해 주세요.")
-        det = roster.detect(raw)
-        cols = det["columns"]
-        # 내용 열: 학번·이름이 아닌 열 중 글이 가장 긴 열
-        body = raw[1:] if det["header"] else raw
-        cands = [i for i in range(len(raw[0])) if i not in (cols["student_no"], cols["name"])]
-        content_col = max(cands, key=lambda i: sum(len(r[i]) for r in body if i < len(r)), default=None)
-        return {"raw": raw, "header": det["header"], "no_col": cols["student_no"], "name_col": cols["name"], "content_col": content_col}
+            raise db.DbError("내용이 없습니다. 엑셀에서 이름과 생기부 내용 칸을 함께 복사해 주세요.")
+        return {"raw": raw, **existing.detect(raw)}
 
     @safe
-    def existing_build(self, gid, item, raw, header, no_col, name_col, content_col):
+    def existing_build(self, gid, item, raw, header, columns):
+        """이름을 기준으로 학생과 연결한다. 학번·반/번호는 확인용."""
+        d = self._db()
+        rec = Records(d)
+        rec.slot(gid, item)
+        members = d.members(gid)
+        rows = existing.build(raw, bool(header), columns or {}, members)
+        out_members = [{"student_no": m["student_no"], "name": m["name"], "grade": m["grade"], "class_no": m["class_no"],
+                        "number": m["number"], "active": bool(m["active"]), "closed": rec.is_closed(gid, item, m["student_no"])} for m in members]
+        return {"rows": rows, "members": out_members}
+
+    @safe
+    def existing_apply(self, gid, item, rows):
+        """rows: [{student_no, content}] — 화면에서 확정한 줄만."""
+        self._editable()
         d = self._db()
         rec = Records(d)
         rec.slot(gid, item)
         members = {m["student_no"]: m for m in d.members(gid)}
-        body = raw[1:] if header else raw
-        rows = []
-        seen = {}
-        for i, r in enumerate(body):
-            get = lambda c: (r[int(c)].strip() if c is not None and c != "" and int(c) < len(r) else "")
-            no = get(no_col).replace(" ", "")
-            rows.append({"row": i + 1, "student_no": no, "name": get(name_col), "content": get(content_col)})
-            seen[no] = seen.get(no, 0) + 1
-        for r in rows:
-            issues = []
-            m = members.get(r["student_no"])
-            if not r["student_no"]:
-                issues.append("학번 없음")
-            elif not m:
-                issues.append("이 담당 명렬에 없는 학번")
-            elif not m["active"]:
-                issues.append("비활성 학생")
-            elif rec.is_closed(gid, item, r["student_no"]):
-                issues.append("마감된 학생")
-            if seen.get(r["student_no"], 0) > 1 and r["student_no"]:
-                issues.append("학번 중복")
-            if not r["content"]:
-                issues.append("내용 없음")
-            notes = []
-            if m and r["name"] and r["name"] != m["name"]:
-                issues.append(f"이름 불일치(명렬: {m['name']})")
-            if m:
-                r["matched_name"] = m["name"]
-            r["issues"], r["notes"] = issues, notes
-        return {"rows": rows}
-
-    @safe
-    def existing_apply(self, gid, item, rows):
-        self._editable()
-        built = self.existing_build(gid, item, [["", "", ""]] + [[x.get("student_no", ""), x.get("name", ""), x.get("content", "")] for x in rows], True, 0, 1, 2)
-        if not built.get("ok"):
-            return built
-        bad = [r for r in built["rows"] if r["issues"]]
-        if bad:
-            raise db.DbError(f"확인이 필요한 행 {len(bad)}개를 고치거나 빼 주세요. 모든 행이 확실히 매칭되어야 넣을 수 있습니다.")
-        return {"count": self._rec().add_existing_bulk(gid, item, built["rows"])}
+        seen, clean = set(), []
+        for r in rows or []:
+            sno, content = str(r.get("student_no") or ""), (r.get("content") or "").strip()
+            m = members.get(sno)
+            if not m:
+                raise db.DbError(f"이 담당 명렬에 없는 학생이 있습니다({sno or '학생 없음'}).")
+            if not m["active"]:
+                raise db.DbError(f"{m['name']}: 비활성 학생에게는 넣을 수 없습니다.")
+            if not content:
+                raise db.DbError(f"{m['name']}: 내용이 비어 있습니다.")
+            if sno in seen:
+                raise db.DbError(f"{m['name']} 학생이 두 줄에 있습니다. 한 줄만 남겨 주세요.")
+            seen.add(sno)
+            clean.append({"student_no": sno, "content": content})
+        if not clean:
+            raise db.DbError("넣을 줄이 없습니다.")
+        return {"count": self._rec().add_existing_bulk(gid, item, clean)}
 
     # ---------- 자료 인박스 ----------
     def _ib(self) -> Inbox:
@@ -1212,6 +1205,12 @@ class Api:
             return {"id": cid, "cost": cost, "run_cost": self._run_cost}
         finally:
             self._release(key)
+
+    @safe
+    def inbox_reorder(self, bid, row_ids):
+        self._editable()
+        self._ib().reorder(bid, row_ids)
+        return {}
 
     @safe
     def inbox_use_cand(self, row_id, cand_id=None):

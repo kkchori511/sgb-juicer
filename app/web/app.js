@@ -1595,7 +1595,11 @@
       box.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '아직 기록이 없습니다.' }), R.slot.item === 'subject' ? el('button', { type: 'button', class: 'primary', disabled: locked, text: '기록 없이 성취기준만으로 생성', onclick: standardsOnlyDialog }) : null, el('p', { class: 'hint', text: '[+ 누가기록]으로 활동을 하나씩 쌓거나, 이미 쓴 생기부를 넣어 다듬을 수 있습니다. 여러 학생의 엑셀 자료는 자료 인박스에서 학생별로 나눠 한 번에 보낼 수 있습니다.' })]));
       return;
     }
-    v.records.forEach((r) => box.appendChild(recordCard(r, locked)));
+    // 기록 순서: ⠿ 끌기·▲▼ (종합할 때 AI에 보내는 순서)
+    const cards = v.records.map((r) => ({ id: r.id, el: recordCard(r, locked) }));
+    const ctx = { gid: R.slot.group_id, item: R.slot.item, sno: R.sno };
+    const handle = sortable(cards, async (ids) => { if (await mutate('reorder_records', ctx.gid, ctx.item, ctx.sno, ids)) loadStudent(true); }, locked || v.records.length < 2);
+    cards.forEach((c) => { c.el.querySelector('.rcard-head').prepend(handle(c.id)); box.appendChild(c.el); });
   }
   function sourceLabel(src) {
     src = src || '';
@@ -1879,12 +1883,59 @@
     ])));
   }
 
-  // 이미 쓴 생기부 일괄 넣기(여러 학생)
+  // 줄 순서 바꾸기: ⠿ 손잡이를 끌거나 ▲▼ 버튼. items: 화면 순서의 [{ id, el }].
+  // 돌려주는 함수로 줄마다 손잡이를 만든다. onSave(새 id 순서)
+  function sortable(items, onSave, disabled) {
+    const ids = items.map((x) => x.id);
+    let dragId = null;
+    const clear = () => items.forEach((x) => x.el.classList.remove('drop-before', 'drop-after', 'dragging'));
+    const move = (from, to) => { const n = ids.slice(); const [v] = n.splice(from, 1); n.splice(to, 0, v); return n; };
+    items.forEach((it, idx) => {
+      it.el.addEventListener('dragover', (e) => {
+        if (dragId === null) return;
+        e.preventDefault();
+        const r = it.el.getBoundingClientRect();
+        const before = e.clientY < r.top + r.height / 2;
+        items.forEach((x) => x.el.classList.remove('drop-before', 'drop-after'));
+        it.el.classList.add(before ? 'drop-before' : 'drop-after');
+      });
+      it.el.addEventListener('drop', (e) => {
+        if (dragId === null) return;
+        e.preventDefault();
+        const before = it.el.classList.contains('drop-before');
+        const from = ids.indexOf(dragId);
+        let to = idx + (before ? 0 : 1);
+        if (from < to) to -= 1;
+        dragId = null;
+        clear();
+        if (from !== to) onSave(move(from, to));
+      });
+    });
+    return (id) => {
+      const i = ids.indexOf(id);
+      const h = el('span', { class: 'drag-handle' + (disabled ? ' off' : ''), draggable: disabled ? null : 'true', title: disabled ? '' : '끌어서 순서 바꾸기', text: '⠿' });
+      h.addEventListener('dragstart', (e) => {
+        dragId = id;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(id));
+        items[i].el.classList.add('dragging');
+        try { e.dataTransfer.setDragImage(items[i].el, 12, 12); } catch (x) { /* 무시 */ }
+      });
+      h.addEventListener('dragend', () => { dragId = null; clear(); });
+      return el('span', { class: 'sort-ctl' }, [h,
+        el('button', { type: 'button', class: 'mini', disabled: disabled || i === 0, title: '한 칸 위로', text: '▲', onclick: () => onSave(move(i, i - 1)) }),
+        el('button', { type: 'button', class: 'mini', disabled: disabled || i === ids.length - 1, title: '한 칸 아래로', text: '▼', onclick: () => onSave(move(i, i + 1)) })]);
+    };
+  }
+
+  // 이미 쓴 생기부 일괄 넣기(여러 학생): 파일마다 다른 형식. 이름·내용만 있으면 이름으로 연결한다.
+  // NEIS 업로드 파일(반/번호·성명·내용)도 알아본다. 줄은 끌어서 순서를 바꾸고, 학생은 줄마다 고칠 수 있다.
   async function openExistingBulk() {
     const c = await api.read_clipboard();
     const text = c && c.ok ? c.text || '' : '';
     let parsed = null;
     if (text.includes('\t')) parsed = await call('existing_parse', R.slot.group_id, R.slot.item, text, false);
+    const gid = R.slot.group_id, item = R.slot.item;
     openSheet((box) => {
       const body = el('div', { class: 'sheet-body' });
       const foot = el('div', { class: 'sheet-foot' });
@@ -1892,51 +1943,103 @@
       const start = () => {
         body.innerHTML = '';
         foot.innerHTML = '';
-        const ta = el('textarea', { rows: 10, placeholder: '엑셀에서 학번(·이름)·내용 칸을 함께 복사해 여기에 붙여넣으세요.' });
-        body.append(el('p', { class: 'hint', text: '학번과 생기부 내용이 들어 있는 엑셀 칸을 복사해 붙여넣거나 xlsx를 불러오세요. 모든 행이 이 담당 명렬과 확실히 맞아야 넣을 수 있습니다.' }), ta);
+        const ta = el('textarea', { rows: 10, placeholder: '엑셀에서 이름·내용 칸(있으면 반/번호·학번도)을 함께 복사해 여기에 붙여넣으세요.' });
+        body.append(el('p', { class: 'hint', text: '이름과 생기부 내용만 있으면 됩니다. 반/번호(1/1)·학번이 있으면 확인용으로 씁니다. NEIS 업로드 파일(학년도·학기·…·반/번호·성명·학적변동 구분·내용)도 그대로 읽습니다.' }), ta);
         foot.append(el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }),
-          el('button', { type: 'button', text: '📂 xlsx 불러오기', onclick: async () => { const r = await call('existing_parse', R.slot.group_id, R.slot.item, null, true); if (r) preview(r); } }),
-          el('button', { type: 'button', class: 'primary', text: '읽기', onclick: async () => { const r = await call('existing_parse', R.slot.group_id, R.slot.item, ta.value, false); if (r) preview(r); } }));
+          el('button', { type: 'button', text: '📂 xlsx 불러오기', onclick: async () => { const r = await call('existing_parse', gid, item, null, true); if (r) preview(r); } }),
+          el('button', { type: 'button', class: 'primary', text: '읽기', onclick: async () => { const r = await call('existing_parse', gid, item, ta.value, false); if (r) preview(r); } }));
       };
       const preview = async (pz) => {
-        const st = { ...pz, rows: [] };
+        const st = { raw: pz.raw, header: pz.header, cols: { ...pz.columns }, rows: [], members: [], onlyBad: false };
         body.innerHTML = '';
         foot.innerHTML = '';
         const width = st.raw[0].length;
         const sample = (i) => ((st.raw[st.header ? 1 : 0] || [])[i] || '').slice(0, 10);
-        const mk = (key, label) => {
-          const s = el('select', { onchange: (e) => { st[key] = e.target.value === '' ? null : +e.target.value; build(); } }, [el('option', { value: '', text: '(없음)' }),
-            ...Array.from({ length: width }, (_, i) => el('option', { value: i, text: `${colName(i)}열: ${sample(i)}`, selected: st[key] === i }))]);
+        const clsRole = () => ['clsnum', 'gradecls', 'clsany'].find((k) => st.cols[k] !== null && st.cols[k] !== undefined);
+        const colSel = (label, get, set) => {
+          const s = el('select', { onchange: (e) => { set(e.target.value === '' ? null : +e.target.value); build(); } }, [el('option', { value: '', text: '(없음)' }),
+            ...Array.from({ length: width }, (_, i) => el('option', { value: i, text: `${colName(i)}열: ${sample(i)}`, selected: get() === i }))]);
           return el('label', {}, [label, s]);
         };
+        const role = (k) => [() => st.cols[k], (v) => { st.cols[k] = v; }];
+        const clsSel = colSel('반/번호(선택)', () => { const k = clsRole(); return k ? st.cols[k] : null; }, (v) => { st.cols.clsnum = null; st.cols.gradecls = null; st.cols.clsany = v; });
         const tableBox = el('div', {});
         const summary = el('span', {});
+        const confirmAll = el('button', { type: 'button', text: '추천 모두 확정' });
         const applyBtn = el('button', { type: 'button', class: 'primary', text: '넣기' });
-        body.append(el('div', { class: 'map-row' }, [el('label', {}, [el('input', { type: 'checkbox', checked: st.header, onchange: (e) => { st.header = e.target.checked; build(); } }), '첫 줄은 머리글']), mk('no_col', '학번'), mk('name_col', '이름'), mk('content_col', '내용')]), tableBox);
-        foot.append(summary, el('span', { class: 'spacer' }), el('button', { type: 'button', text: '다시 붙여넣기', onclick: start }), el('button', { type: 'button', text: '취소', onclick: closeSheet }), applyBtn);
+        body.append(
+          el('div', { class: 'map-row' }, [el('label', {}, [el('input', { type: 'checkbox', checked: st.header, onchange: (e) => { st.header = e.target.checked; build(); } }), '첫 줄은 머리글']),
+            colSel('이름', ...role('name')), colSel('내용', ...role('content')), clsSel, colSel('학번(선택)', ...role('student_no'))]),
+          el('div', { class: 'toolbar' }, [summary, el('span', { class: 'spacer' }),
+            el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'checkbox', onchange: (e) => { st.onlyBad = e.target.checked; draw(); } }), '확인 필요만 보기']), confirmAll]),
+          tableBox);
+        foot.append(el('span', { class: 'muted', text: '이름으로 연결합니다. 추천(노랑)은 확정해야 넣고, 확인 필요(빨강)는 학생을 고르거나 ✕로 빼세요.' }), el('span', { class: 'spacer' }),
+          el('button', { type: 'button', text: '다시 붙여넣기', onclick: start }), el('button', { type: 'button', text: '취소', onclick: closeSheet }), applyBtn);
+        const mOf = (sno) => st.members.find((m) => m.student_no === sno);
+        const issues = (r) => {
+          const out = [];
+          const m = mOf(r.student_no);
+          if (!r.student_no) out.push(r.note || '학생을 골라 주세요');
+          else if (!m) out.push('명렬에 없는 학생');
+          else if (!m.active) out.push('비활성 학생');
+          else if (m.closed) out.push('마감된 학생');
+          if (!(r.content || '').trim()) out.push('내용 없음');
+          if (r.student_no && st.rows.filter((x) => x.student_no === r.student_no).length > 1) out.push('같은 학생이 다른 줄에도 있음');
+          return out;
+        };
         const draw = () => {
           tableBox.innerHTML = '';
           const t = el('table', { class: 'tbl' });
-          t.appendChild(el('tr', {}, ['학번', '이름', '내용', '확인', ''].map((h) => el('th', { text: h }))));
-          st.rows.forEach((r, i) => t.appendChild(el('tr', { class: r.issues.length ? 'bad' : '' }, [el('td', { text: r.student_no }), el('td', { text: r.matched_name || r.name }),
-            el('td', {}, [el('div', { class: 'exp-text', text: r.content.slice(0, 160) + (r.content.length > 160 ? '…' : '') })]),
-            el('td', {}, r.issues.length ? r.issues.map((x) => el('div', { class: 'issue', text: '! ' + x })) : [el('span', { class: 'st st-closed', text: '✔ 매칭됨' })]),
-            el('td', {}, [el('button', { type: 'button', class: 'link', title: '이 행 빼기', text: '✕', onclick: () => { st.rows.splice(i, 1); draw(); } })])])));
+          t.appendChild(el('tr', {}, ['순서', '#', '원본 반/번호·이름', '연결할 학생', '상태', '내용', ''].map((h) => el('th', { text: h }))));
+          const items = [];
+          const holders = [];
+          st.rows.forEach((r, i) => {
+            const iss = issues(r);
+            r._bad = iss.length > 0;
+            if (st.onlyBad && !iss.length && r.state === 'confirmed') return;
+            const opts = [el('option', { value: '', text: '학생 고르기' }), ...st.members.map((m) => el('option', { value: m.student_no, text: `${m.grade}-${m.class_no}-${m.number} ${m.name}${m.closed ? ' (마감)' : ''}${m.active ? '' : ' (비활성)'}`, selected: m.student_no === r.student_no }))];
+            const sel = el('select', { onchange: (e) => { r.student_no = e.target.value || null; r.state = r.student_no ? 'confirmed' : 'none'; r.note = r.student_no ? '직접 고름' : ''; draw(); } }, opts);
+            const ta = el('textarea', { class: 'cell-edit', rows: 2, value: r.content, oninput: (e) => { r.content = e.target.value; } , onchange: () => draw() });
+            const holder = el('td', {});
+            const stateTd = el('td', {}, [
+              el('div', { class: `st-chip ${iss.length ? 'none' : r.state}`, text: iss.length ? '! 확인 필요' : ST_CHIP[r.state] }),
+              ...(iss.length ? iss : (r.note && r.state !== 'confirmed' ? [r.note] : [])).map((x) => el('div', { class: 'note', text: x })),
+              r.change ? el('div', { class: 'note', text: `학적변동: ${r.change}` }) : null,
+              r.state === 'suggested' && !iss.length ? el('button', { type: 'button', class: 'small', text: '확정', onclick: () => { r.state = 'confirmed'; draw(); } }) : null]);
+            const tr = el('tr', { class: iss.length ? 'row-pending bad' : r.state === 'suggested' ? 'row-pending' : '' }, [holder, el('td', { class: 'muted', text: String(i + 1) }),
+              el('td', { text: `${r.ext_cls || '-'} ${r.ext_name || ''}` }), el('td', {}, [sel]), stateTd, el('td', {}, [ta]),
+              el('td', {}, [el('button', { type: 'button', class: 'link', title: '이 줄 빼기', text: '✕', onclick: () => { st.rows.splice(i, 1); draw(); } })])]);
+            items.push({ id: i, el: tr });
+            holders.push([holder, i]);
+            t.appendChild(tr);
+          });
+          const handle = sortable(items, (order) => { st.rows = order.map((k) => st.rows[k]); draw(); }, st.onlyBad);
+          holders.forEach(([h, i]) => h.appendChild(handle(i)));
           tableBox.appendChild(t);
-          const bad = st.rows.filter((r) => r.issues.length).length;
+          const bad = st.rows.filter((r) => r._bad).length;
+          const sug = st.rows.filter((r) => !r._bad && r.state === 'suggested').length;
+          const conf = st.rows.length - bad - sug;
           summary.innerHTML = '';
-          summary.append(el('b', { text: `매칭 ${st.rows.length - bad}` }), ' / ', el('b', { class: bad ? 'danger-text' : '', text: `확인 필요 ${bad}` }), bad ? el('span', { class: 'muted', text: ' — 고칠 수 없는 행은 ✕로 빼세요' }) : '');
-          applyBtn.disabled = !!bad || !st.rows.length;
+          summary.append(el('b', { text: `확정 ${conf}` }), ' · ', el('b', { style: 'color:#a16207', text: `추천 ${sug}` }), ' · ', el('b', { class: bad ? 'danger-text' : '', text: `확인 필요 ${bad}` }));
+          confirmAll.disabled = !sug;
+          confirmAll.textContent = `추천 ${sug}건 모두 확정`;
+          applyBtn.disabled = !st.rows.length || bad > 0 || sug > 0;
           applyBtn.textContent = `${st.rows.length}명에게 넣기`;
         };
+        confirmAll.addEventListener('click', async () => {
+          if (!(await confirmBox('추천은 이름이 비슷하거나 반·번호가 달라 앱이 짐작한 연결입니다. 원본과 대조해 보셨나요? 추천 모두를 확정합니다.', '확정'))) return;
+          st.rows.forEach((r) => { if (!r._bad && r.state === 'suggested') r.state = 'confirmed'; });
+          draw();
+        });
         const build = async () => {
-          const r = await call('existing_build', R.slot.group_id, R.slot.item, st.raw, st.header, st.no_col, st.name_col, st.content_col);
+          const r = await call('existing_build', gid, item, st.raw, st.header, st.cols);
           if (!r) return;
           st.rows = r.rows;
+          st.members = r.members.slice().sort((a, b) => (a.grade - b.grade) || (a.class_no - b.class_no) || (a.number - b.number));
           draw();
         };
         applyBtn.addEventListener('click', async () => {
-          const r = await mutate('existing_apply', R.slot.group_id, R.slot.item, st.rows.map((x) => ({ student_no: x.student_no, name: x.matched_name || x.name, content: x.content })));
+          const r = await mutate('existing_apply', gid, item, st.rows.map((x) => ({ student_no: x.student_no, content: x.content })));
           if (!r) return;
           closeSheet();
           toast(`${r.count}명에게 '기존 완성문'으로 넣었습니다.`);
@@ -1947,6 +2050,7 @@
       if (parsed) preview(parsed); else start();
     });
   }
+
 
   // ---------- 검토·내보내기 ----------
   const E = { slotKey: null, rows: [] };
@@ -2297,7 +2401,8 @@
       el('button', { type: 'button', text: '다시 매칭', title: '확정·제외하지 않은 행을 명렬과 다시 맞춥니다', onclick: async () => { if (await mutate('inbox_rematch', b.id)) loadBatch(); } }),
     ]));
     const t = el('table', { class: 'tbl match-tbl' });
-    t.appendChild(el('tr', {}, ['원본 위치', '읽은 학번·이름', '연결할 학생', '상태', '내용', ''].map((h) => el('th', { text: h }))));
+    t.appendChild(el('tr', {}, ['순서', '원본 위치', '읽은 학번·이름', '연결할 학생', '상태', '내용', ''].map((h) => el('th', { text: h }))));
+    const sortItems = [];
     v.rows.filter((r) => !IB.onlyPending || r.state === 'none' || r.state === 'suggested').forEach((r) => {
       const sel = el('select', { disabled: r.state === 'excluded' || b.structure === 'single', onchange: async (e) => { if (await mutate('inbox_set_student', r.id, e.target.value)) loadBatch(); } },
         [el('option', { value: '', text: '학생 고르기' }), ...v.members.map((x) => el('option', { value: x.student_no, text: `${x.student_no} ${x.name}`, selected: x.student_no === r.student_no }))]);
@@ -2305,15 +2410,21 @@
         r.note && r.state !== 'confirmed' ? el('div', { class: 'note', text: r.note }) : null,
         r.dup ? el('div', { class: 'note', text: '같은 학생이 원본의 다른 줄에도 있음(중복 의심)' }) : null,
         r.state === 'suggested' ? el('button', { type: 'button', class: 'small', text: '확정', onclick: async () => { if (await mutate('inbox_confirm_suggested', b.id, [r.id])) loadBatch(); } }) : null]);
-      t.appendChild(el('tr', { class: r.state === 'excluded' ? 'row-excluded' : (r.state === 'none' || r.state === 'suggested') ? 'row-pending' : '' }, [
-        el('td', { text: r.source_ref }), el('td', { text: `${r.ext_no || '-'} ${r.ext_name || ''}` }), el('td', {}, [sel]), stateTd,
+      const holder = el('td', {});
+      const tr = el('tr', { class: r.state === 'excluded' ? 'row-excluded' : (r.state === 'none' || r.state === 'suggested') ? 'row-pending' : '' }, [
+        holder, el('td', { text: r.source_ref }), el('td', { text: `${r.ext_no || '-'} ${r.ext_name || ''}` }), el('td', {}, [sel]), stateTd,
         el('td', {}, [el('div', { class: 'snip', text: b.source === 'scan' ? r.content : `[${r.label}${r.date ? ' ' + r.date : ''}] ${r.content}` }),
           r.pages ? el('button', { type: 'button', class: 'small', text: '원본 보기', onclick: () => showOriginal(b.id, r.pages.split(',')) }) : null]),
         el('td', {}, [r.state === 'excluded'
           ? el('button', { type: 'button', class: 'small', text: '제외 취소', onclick: async () => { if (await mutate('inbox_exclude', [r.id], '', false)) loadBatch(); } })
           : el('button', { type: 'button', class: 'small', text: '제외', onclick: () => excludeRows([r.id]) })]),
-      ]));
+      ]);
+      sortItems.push({ id: r.id, el: tr, holder });
+      t.appendChild(tr);
     });
+    // 행 순서: ⠿ 끌기·▲▼ (확인 필요만 보기 중에는 끔)
+    const rowHandle = sortable(sortItems, async (ids) => { if (await mutate('inbox_reorder', b.id, ids)) loadBatch(); }, IB.onlyPending || sortItems.length < 2);
+    sortItems.forEach((x) => x.holder.appendChild(rowHandle(x.id)));
     body.appendChild(t);
     body.appendChild(el('p', { class: 'hint', text: '학번과 이름이 모두 명렬과 맞으면 자동 확정, 이름만 맞거나 비슷하면 "추천"입니다. 추천은 원본과 대조한 뒤 확정하세요. 백지·다른 반 자료처럼 보내지 않을 행은 [제외]하면 인박스에 남습니다.' }));
     body.appendChild(el('div', { class: 'sheet-foot' }, [
@@ -3018,6 +3129,13 @@
       if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); moveStudent(-1); }
     });
     $('helpBtn').addEventListener('click', () => openGuide(HELP[panel]));
+    // 표의 체크 칸: 체크 칸이 든 칸(td)을 눌러도 체크된다
+    document.addEventListener('click', (e) => {
+      const td = e.target.closest && e.target.closest('td, th');
+      if (!td || e.target !== td) return;
+      const boxes = td.querySelectorAll('input[type=checkbox]');
+      if (boxes.length === 1 && !boxes[0].disabled && td.children.length === 1) boxes[0].click();
+    });
     // 마우스 뒤로·앞으로 버튼(그리고 Alt+←/→): 메뉴 화면을 오간 순서대로 돌아간다
     history.replaceState({ panel }, '');
     window.addEventListener('popstate', (e) => {

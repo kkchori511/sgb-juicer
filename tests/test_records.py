@@ -82,12 +82,13 @@ def test_all():
     # 이미 쓴 생기부 일괄 넣기(탭 고정, 매칭 확실할 때만)
     text = "학번\t이름\t내용\n20302\t이영희\t수업 시간에 적극적, 질문이 많음\n20399\t없는\t내용\n20303\t박민순\t성실함"
     pz = ok(api.existing_parse(sub, "subject", text))
-    assert pz["content_col"] == 2 and pz["no_col"] == 0
-    b = ok(api.existing_build(sub, "subject", pz["raw"], pz["header"], pz["no_col"], pz["name_col"], pz["content_col"]))["rows"]
-    assert b[0]["issues"] == [] and "명렬에 없는" in b[1]["issues"][0] and "이름 불일치" in b[2]["issues"][0]
-    assert not api.existing_apply(sub, "subject", b)["ok"]
-    good = [b[0], dict(b[2], name="박민수")]
-    assert ok(api.existing_apply(sub, "subject", good))["count"] == 2
+    assert pz["columns"]["content"] == 2 and pz["columns"]["student_no"] == 0 and pz["columns"]["name"] == 1
+    b = ok(api.existing_build(sub, "subject", pz["raw"], pz["header"], pz["columns"]))["rows"]
+    assert [x["state"] for x in b] == ["confirmed", "none", "suggested"], b  # 박민순 → 비슷한 이름 박민수 추천
+    assert b[2]["student_no"] == "20303"
+    assert not api.existing_apply(sub, "subject", [{"student_no": "20399", "content": "x"}])["ok"]
+    assert not api.existing_apply(sub, "subject", [b[0], b[0]])["ok"]  # 같은 학생 두 줄
+    assert ok(api.existing_apply(sub, "subject", [b[0], b[2]]))["count"] == 2
     v = ok(api.student_view(sub, "subject", "20302")); assert v["records"][0]["kind"] == "existing"
     pol = ok(api.ai_record(v["records"][0]["id"])); assert SENT[-1][0].count("다듬") >= 1
     ok(api.adopt_record(v["records"][0]["id"]))

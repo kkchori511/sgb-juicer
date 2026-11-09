@@ -13,7 +13,7 @@ from contextlib import contextmanager
 
 from .paths import data_dir
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 KINDS = ("homeroom", "subject", "club")
 ROLES = ("homeroom", "subject")  # 담임 / 비담임
 
@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS records (
     source TEXT DEFAULT 'manual',
     weight REAL,                     -- 종합 비중(%) 직접 지정값
     created_at TEXT DEFAULT (datetime('now','localtime')),
-    updated_at TEXT DEFAULT (datetime('now','localtime'))
+    updated_at TEXT DEFAULT (datetime('now','localtime')),
+    pos INTEGER                      -- 화면에서 끌어 바꾼 순서(없으면 기본 순서)
 );
 CREATE INDEX IF NOT EXISTS ix_records_slot ON records(group_id, item, student_no);
 CREATE TABLE IF NOT EXISTS record_tags (
@@ -197,6 +198,9 @@ class YearDb:
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(inbox_rows)")}
         if "pages" not in cols:
             self._conn.execute("ALTER TABLE inbox_rows ADD COLUMN pages TEXT DEFAULT ''")
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(records)")}
+        if "pos" not in cols:
+            self._conn.execute("ALTER TABLE records ADD COLUMN pos INTEGER")
 
     def close(self):
         with self._lock:

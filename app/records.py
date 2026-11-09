@@ -164,7 +164,7 @@ class Records:
 
     def records(self, gid, item, sno):
         recs = self.d.q(
-            "SELECT * FROM records WHERE group_id=? AND item=? AND student_no=? ORDER BY kind='record', COALESCE(seq, 0), id",
+            "SELECT * FROM records WHERE group_id=? AND item=? AND student_no=? ORDER BY pos IS NULL, pos, kind='record', COALESCE(seq, 0), id",
             (int(gid), item, str(sno)),
         )
         if not recs:
@@ -220,6 +220,18 @@ class Records:
                 )
                 self._stale(c, gid, item, r["student_no"])
         return len(rows)
+
+    def reorder(self, gid, item, sno, ids):
+        """학생×항목의 기록 순서를 화면에서 끈 순서로(종합할 때 AI에 보내는 순서도 이 순서)."""
+        self.slot(gid, item)
+        ids = [int(x) for x in ids or []]
+        with self.d.tx() as c:
+            self.require_open(gid, item, sno)
+            have = {r[0] for r in c.execute("SELECT id FROM records WHERE group_id=? AND item=? AND student_no=?", (int(gid), item, str(sno)))}
+            if set(ids) != have or len(ids) != len(have):
+                raise DbError("기록 목록이 바뀌었습니다. 화면을 다시 열어 주세요.")
+            for i, rid in enumerate(ids):
+                c.execute("UPDATE records SET pos=? WHERE id=?", (i + 1, rid))
 
     def update_record(self, rid, data):
         r = self.record(rid)
