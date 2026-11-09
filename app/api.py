@@ -981,16 +981,20 @@ class Api:
         rec = Records(d)
         rec.slot(gid, item)
         members = d.members(gid)
-        rows = existing.build(raw, bool(header), columns or {}, members)
+        rows = existing.build(raw, bool(header), columns or {}, members, config.load()["current_year"])
         out_members = [{"student_no": m["student_no"], "name": m["name"], "grade": m["grade"], "class_no": m["class_no"],
                         "number": m["number"], "active": bool(m["active"]), "closed": rec.is_closed(gid, item, m["student_no"])} for m in members]
         return {"rows": rows, "members": out_members}
 
     @safe
-    def existing_apply(self, gid, item, rows, kind="existing"):
+    def existing_apply(self, gid, item, rows, kind="existing", req_id=None):
         """rows: [{student_no, content, title?, date?}] — 화면에서 확정한 줄만.
-        kind='existing': 학생당 한 줄. kind='record': 누가기록(한 학생 여러 줄 허용)."""
+        kind='existing': 학생당 한 줄. kind='record': 누가기록(한 학생 여러 줄 허용).
+        req_id: 같은 요청이 두 번 와도(연속 클릭) 한 번만 넣는다."""
         self._editable()
+        done = self._req_done(req_id)
+        if done:
+            return done
         kind = "record" if kind == "record" else "existing"
         d = self._db()
         rec = Records(d)
@@ -1013,7 +1017,25 @@ class Api:
                           "date": existing.norm_date(str(r.get("date") or ""))})
         if not clean:
             raise db.DbError("넣을 줄이 없습니다.")
-        return {"count": self._rec().add_existing_bulk(gid, item, clean, kind), "students": len(seen)}
+        return self._req_save(req_id, {"count": self._rec().add_existing_bulk(gid, item, clean, kind), "students": len(seen)})
+
+    def _req_done(self, req_id):
+        """이미 끝낸 요청이면 그 결과(같은 버튼을 두 번 눌러도 한 번만)."""
+        if not req_id:
+            return None
+        with self._ai_lock:
+            return dict(getattr(self, "_reqs", {}).get(str(req_id)) or {}) or None
+
+    def _req_save(self, req_id, result):
+        if req_id:
+            with self._ai_lock:
+                reqs = getattr(self, "_reqs", None)
+                if reqs is None:
+                    reqs = self._reqs = {}
+                reqs[str(req_id)] = {**result, "repeated": True}
+                while len(reqs) > 50:
+                    reqs.pop(next(iter(reqs)))
+        return result
 
     @safe
     def finals_bulk_view(self, gid, item):
@@ -1021,11 +1043,29 @@ class Api:
         return {"students": self._rec().finals_bulk_view(gid, item)}
 
     @safe
-    def finals_from_existing(self, gid, item, picks):
+    def finals_from_existing(self, gid, item, picks, req_id=None):
         self._editable()
+        done = self._req_done(req_id)
+        if done:
+            return done
         if not picks:
             raise db.DbError("보낼 학생이 없습니다.")
-        return {"count": self._rec().finals_from_existing(gid, item, picks)}
+        n, undo = self._rec().finals_from_existing(gid, item, picks)
+        self._finals_undo = {"year": config.load()["current_year"], "gid": gid, "item": item, "undo": undo}
+        return self._req_save(req_id, {"count": n})
+
+    @safe
+    def finals_bulk_undo(self):
+        """바로 앞의 '기존 완성문 → 최종안 일괄'을 되돌린다(그 뒤에 고치거나 마감한 학생은 그대로)."""
+        self._editable()
+        u = getattr(self, "_finals_undo", None)
+        if not u or u["year"] != config.load()["current_year"]:
+            raise db.DbError("되돌릴 일괄 보내기가 없습니다.")
+        try:
+            done, skipped = self._rec().undo_finals(u["gid"], u["item"], u["undo"])
+        finally:
+            self._finals_undo = None
+        return {"count": done, "skipped": len(skipped)}
 
     # ---------- 자료 인박스 ----------
     def _ib(self) -> Inbox:

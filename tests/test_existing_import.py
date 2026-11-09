@@ -133,7 +133,47 @@ def test_record_bulk_and_finals(hr):
     assert ok(api.student_view(hr, "autonomy", "20104"))["final"]["text"] == "최 옛 글"
 
 
+def test_ux_fixes(hr):
+    """Codex UX 검토(docs/review/codex_ux_v013.md) U02·U03·U04·U06·U11."""
+    # U02: 학번과 이름이 다른 학생을 가리키면 확정하지 않는다
+    rows = existing.build([["20102", "김철수", "내용"]], False, {"student_no": 0, "name": 1, "content": 2}, M)
+    assert rows[0]["state"] == "none" and rows[0]["student_no"] is None and "이영희" in rows[0]["note"], rows
+    rows = existing.build([["20199", "이영희", "내용"]], False, {"student_no": 0, "name": 1, "content": 2}, M)
+    assert rows[0]["state"] == "suggested" and "명렬에 없음" in rows[0]["note"], rows
+    rows = existing.build([["20101", "김철수", "2/9", "내용"]], False, {"student_no": 0, "name": 1, "clsnum": 2, "content": 3}, M)
+    assert rows[0]["state"] == "suggested" and "반·번호가 다름" in rows[0]["note"], rows
+    # U11: 연도 없는 날짜는 학년도로, 달력에 없는 날짜는 거부, 엑셀 일련번호
+    assert existing.norm_date("3/5", 2026) == "2026-03-05" and existing.norm_date("2월 3일", 2026) == "2027-02-03"
+    assert existing.norm_date("2026-02-31") == "" and existing.norm_date("46086") == "2026-03-05"
+    assert existing.norm_date("3/5") == ""  # 학년도를 모르면 못 읽음(화면에서 확인 필요)
+    b = ok(api_.existing_build(hr, "career", [["김철수", "3/5", "가"], ["김철수", "모름", "나"]], False, {"name": 0, "date": 1, "content": 2}))["rows"]
+    assert [(r["date"], r["date_raw"]) for r in b] == [("2026-03-05", "3/5"), ("", "모름")], b
+    # U04: 같은 요청 번호는 한 번만
+    n0 = len(ok(api_.student_view(hr, "career", "20102"))["records"])
+    rows = [{"student_no": "20102", "content": "한 번만"}]
+    r1 = ok(api_.existing_apply(hr, "career", rows, "record", "req-1"))
+    r2 = ok(api_.existing_apply(hr, "career", rows, "record", "req-1"))
+    assert r1["count"] == 1 and r2.get("repeated") and len(ok(api_.student_view(hr, "career", "20102"))["records"]) == n0 + 1
+    # U03: 최종안 일괄 되돌리기(그 뒤 고친 학생은 그대로)
+    ok(api_.existing_apply(hr, "career", [{"student_no": "20101", "content": "철수 완성문"}, {"student_no": "20102", "content": "영희 완성문"}]))
+    ok(api_.edit_final(hr, "career", "20101", "철수 직접 쓴 최종안"))
+    v = {x["student_no"]: x for x in ok(api_.finals_bulk_view(hr, "career"))["students"]}
+    assert v["20101"]["existing"][-1]["created_at"]  # U06: 추가 시각 표시용
+    picks = [{"student_no": s, "record_id": v[s]["existing"][-1]["id"]} for s in ("20101", "20102")]
+    assert ok(api_.finals_from_existing(hr, "career", picks, "req-2"))["count"] == 2
+    assert ok(api_.finals_from_existing(hr, "career", picks, "req-2")).get("repeated")
+    ok(api_.edit_final(hr, "career", "20102", "영희 그 뒤 고침"))
+    u = ok(api_.finals_bulk_undo())
+    assert (u["count"], u["skipped"]) == (1, 1), u
+    assert ok(api_.student_view(hr, "career", "20101"))["final"]["text"] == "철수 직접 쓴 최종안"
+    assert ok(api_.student_view(hr, "career", "20102"))["final"]["text"] == "영희 그 뒤 고침"
+    assert not api_.finals_bulk_undo()["ok"]
+
+
 if __name__ == "__main__":
     test_parse()
-    test_record_bulk_and_finals(test_api_and_reorder())
+    hr = test_api_and_reorder()
+    test_record_bulk_and_finals(hr)
+    api_ = Api(); api_.attach(W())
+    test_ux_fixes(hr)
     print("EXISTING IMPORT OK")

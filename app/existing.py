@@ -4,6 +4,7 @@
 - 꼭 필요한 칸은 이름과 내용. 학번·학년·반·번호·반/번호는 있으면 확인용으로 쓴다.
 - 반/번호: '1/1', '1반 1번'은 반·번호. '1-1'은 머리글이 없으면 반-번호와 학년-반 둘 다 명렬과 맞춰 본다.
 """
+import datetime as dt
 import re
 
 from .inbox import lev
@@ -127,18 +128,27 @@ def match_row(ext, members):
         opts.append((ext.get("grade"), ext.get("class_no"), ext.get("number")))
     fits_any = lambda m: any(_fits(m, o) for o in opts)
     no = ext.get("student_no", "")
+    cls = lambda m: f"{m['grade']}-{m['class_no']}-{m['number']}"
     if no and no in by_no:
         m = by_no[no]
         if name == m["name"]:
+            if opts and not fits_any(m):  # 학번·이름은 맞는데 반·번호가 다름
+                return m["student_no"], "suggested", f"학번·이름은 맞지만 반·번호가 다름(명렬 {cls(m)})"
             return m["student_no"], "confirmed", ""
         if not name:
             return m["student_no"], "suggested", f"이름 없음 — 학번으로 추천({m['name']})"
+        if len(name) >= 2 and lev(name, m["name"]) == 1 and not any(x["name"] == name for x in active):
+            return m["student_no"], "suggested", f"학번은 {m['name']}, 이름 한 글자 다름({name}) — 오타인지 확인"
+        # 학번과 이름이 서로 다른 학생을 가리킴: 짐작하지 않고 교사가 고르게
+        return None, "none", f"학번 {no}은 {m['name']}, 이름은 {name} — 학생을 골라 주세요"
     same = [m for m in active if name and m["name"] == name]
     if len(same) == 1:
         m = same[0]
+        if no:  # 학번을 적었는데 명렬에 없는 번호
+            return m["student_no"], "suggested", f"학번 {no}은 명렬에 없음 — 이름으로 추천({m['student_no']})"
         if not opts or fits_any(m):
             return m["student_no"], "confirmed", ""
-        return m["student_no"], "suggested", f"이름은 같지만 반·번호가 다름(명렬 {m['grade']}-{m['class_no']}-{m['number']})"
+        return m["student_no"], "suggested", f"이름은 같지만 반·번호가 다름(명렬 {cls(m)})"
     if len(same) > 1:
         narrowed = [m for m in same if opts and fits_any(m)]
         if len(narrowed) == 1:
@@ -154,21 +164,36 @@ def match_row(ext, members):
     return None, "none", "명렬에서 찾지 못함" if name else "이름 없음"
 
 
-DATE_RE = re.compile(r"^\s*(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})")
+DATE_RE = re.compile(r"^\s*(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})\s*일?")
+MD_RE = re.compile(r"^\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})\s*일?\.?\s*$")
 
 
-def norm_date(v):
-    """'2026.3.5', '2026-03-05 00:00:00', '2026년 3월 5일' → '2026-03-05'. 못 읽으면 ''."""
-    m = DATE_RE.match(v or "")
-    if not m:
+def norm_date(v, year=None):
+    """'2026.3.5', '2026-03-05 00:00:00', '2026년 3월 5일' → '2026-03-05'.
+    연도 없는 '3/5'·'3월 5일'은 학년도(year)로 채운다(1·2월은 다음 해). 엑셀 날짜 일련번호도 읽는다.
+    달력에 없는 날짜나 못 읽은 값은 ''."""
+    v = (v or "").strip()
+    if not v:
         return ""
-    y, mo, d = (int(x) for x in m.groups())
-    if not (1 <= mo <= 12 and 1 <= d <= 31):
+    m = DATE_RE.match(v)
+    if m:
+        y, mo, d = (int(x) for x in m.groups())
+    else:
+        m = MD_RE.match(v)
+        if m and year:
+            mo, d = int(m.group(1)), int(m.group(2))
+            y = int(year) + (1 if mo <= 2 else 0)
+        elif re.fullmatch(r"\d{5}(\.0+)?", v) and 30000 <= float(v) <= 60000:  # 엑셀 일련번호
+            return (dt.date(1899, 12, 30) + dt.timedelta(days=int(float(v)))).isoformat()
+        else:
+            return ""
+    try:
+        return dt.date(y, mo, d).isoformat()
+    except ValueError:
         return ""
-    return f"{y:04d}-{mo:02d}-{d:02d}"
 
 
-def build(raw, header, cols, members):
+def build(raw, header, cols, members, year=None):
     body = raw[1:] if header else raw
     kind, cls_col = None, cols.get("clsany")
     for role in ("clsnum", "gradecls"):
@@ -196,5 +221,5 @@ def build(raw, header, cols, members):
         sno, state, note = match_row(ext, members)
         out.append({"row": i + 1, "ext_no": ext["student_no"], "ext_name": name, "ext_cls": cls_val or "-".join(
             str(x) for x in (ext["grade"], ext["class_no"], ext["number"]) if x is not None),
-            "change": get("change"), "title": get("title"), "date": norm_date(get("date")), "content": content, "student_no": sno, "state": state, "note": note})
+            "change": get("change"), "title": get("title"), "date": norm_date(get("date"), year), "date_raw": get("date"), "content": content, "student_no": sno, "state": state, "note": note})
     return out

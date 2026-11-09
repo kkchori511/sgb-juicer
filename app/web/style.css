@@ -521,7 +521,25 @@ textarea.cell-edit { min-height: 54px; font-size: 13px; width: 100%; }
   .rec-main > .folded { width: auto; padding: 8px 12px; }
   .rec-main > .folded > .sec-title > .fold-btn { writing-mode: horizontal-tb; }
 }
-.res-sec.folded { margin-top: 4px; }
+.res-sec { margin-top: 4px; }
+/* 최종안·후보를 둘 다 접으면 칸 전체를 막대로(두 제목은 늘 보임) */
+.rec-main > .rec-final.folded-all { flex: 0 0 auto !important; min-height: 0 !important; overflow: hidden; width: 46px; padding: 10px 6px; display: flex; flex-direction: column; gap: 14px; }
+.rec-final.folded-all .sec-title > :not(.fold-btn) { display: none !important; }
+.rec-final.folded-all .fold-btn { writing-mode: vertical-rl; }
+@media (max-aspect-ratio: 1/1), (max-width: 1180px) {
+  .rec-main > .rec-final.folded-all { width: auto; padding: 8px 12px; flex-direction: row; }
+  .rec-final.folded-all .fold-btn { writing-mode: horizontal-tb; }
+}
+/* 일괄 입력 단계 표시·전문 비교 */
+.steps { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.steps span { padding: 3px 10px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 13px; font-weight: 700; }
+.steps span.on { background: var(--accent); color: #fff; }
+.cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.cmp-text { white-space: pre-wrap; font-size: 13.5px; line-height: 1.6; background: var(--input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; max-height: 300px; overflow: auto; }
+.final-bulk tr.cmp-row td { background: var(--surface-2); }
+.final-bulk .ver-sel { width: auto; max-width: 340px; height: 32px; padding: 2px 6px; margin-bottom: 4px; }
 .date-opt { display: inline-flex; align-items: center; gap: 4px; margin: 0; }
 .final-bulk td .clip { max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: var(--text-2); }
 .final-bulk tr.off td { color: var(--muted); }
+.final-bulk td:nth-child(2) { white-space: nowrap; }
+.final-bulk td:nth-child(3) { min-width: 120px; }
