@@ -2024,7 +2024,7 @@
           confirmAll.disabled = !sug;
           confirmAll.textContent = `추천 ${sug}건 모두 확정`;
           applyBtn.disabled = !st.rows.length || bad > 0 || sug > 0;
-          applyBtn.textContent = `${st.rows.length}명에게 넣기`;
+          applyBtn.textContent = `${st.rows.length}명 내용 입력`;
         };
         confirmAll.addEventListener('click', async () => {
           if (!(await confirmBox('추천은 이름이 비슷하거나 반·번호가 달라 앱이 짐작한 연결입니다. 원본과 대조해 보셨나요? 추천 모두를 확정합니다.', '확정'))) return;
