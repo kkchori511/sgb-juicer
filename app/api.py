@@ -15,7 +15,7 @@ from functools import wraps
 
 import webview
 
-from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, existing, export, ocr, openrouter, prompts, roster, scan, updater, weights
+from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, existing, export, ocr, openrouter, prompts, roster, scan, stdformat, updater, weights
 from .records import Records, items_of
 from .inbox import Inbox
 from .standards import Standards, check_level, read_hwpx_text, read_pdf_text, standards_rule
@@ -892,6 +892,38 @@ class Api:
     @safe
     def standards_overview(self):
         return {"subjects": Standards(self._db()).overview()}
+
+    @safe
+    def standards_format(self, gid, text, use_ai=False, model_index=None):
+        """성취기준 붙여넣기를 보기 좋게 정리(저장은 하지 않음). 원문 글자는 바꾸지 않고 줄 배치만 바꾼다.
+        규칙으로 판단이 안 되는 줄이 있을 때만, use_ai=True면 AI에 줄 역할만 묻는다(글은 쓰지 않게)."""
+        d = self._db()
+        g = d.group(gid)
+        if g["kind"] != "subject":
+            raise db.DbError("성취기준은 과목에서만 씁니다.")
+        lines = stdformat.split_lines(text)
+        if not any(x.strip() for x in lines):
+            raise db.DbError("정리할 내용이 없습니다. 성취기준을 먼저 붙여넣어 주세요.")
+        roles = stdformat.classify(lines)
+        unknown = roles.count("unknown")
+        ai_used, cost = False, 0.0
+        if unknown and use_ai:
+            self._editable()
+            cfg, model = self._model(model_index)
+            key = ("stdformat", int(gid))
+            self._guard(key)
+            try:
+                answer, cost = self._call_ai(cfg["openrouter_key"].strip(), model, stdformat.ai_prompt(), stdformat.ai_user(lines, roles), cfg["privacy_block"])
+            finally:
+                self._release(key)
+            roles = stdformat.apply_ai(roles, answer)
+            ai_used = True
+        out, three, headers, left = stdformat.build(lines, roles)
+        missing = stdformat.verify(lines, roles, out)
+        return {**(self._ai_out({"cost": cost}) if ai_used else {}), "text": out, "three_level": three,
+                "headers": [lines[i].strip() for i in headers], "unknown": unknown, "unknown_left": left, "ai_used": ai_used,
+                "missing": [lines[i].strip() for i in missing], "gaps": [ln for _, ln in stdformat.gaps(lines, roles)],
+                "content_lines": sum(1 for r in roles if r not in (None, "header", "label"))}
 
     @safe
     def standards_get(self, gid):

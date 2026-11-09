@@ -3224,6 +3224,52 @@
       toast(`${source}에서 읽어 넣었습니다. 필요 없는 부분은 지우세요.`);
       renderStandards();
     };
+    // 보기 좋게 정리: 원문 글자는 그대로, 줄 배치만 바꾼다. 규칙으로 안 되는 줄만 AI에 역할을 묻는다.
+    const formatStd = async () => {
+      const text = ta.value;
+      if (!text.trim()) { toast('먼저 성취기준을 붙여넣으세요.'); return; }
+      let r = await call('standards_format', gidNow, text, false);
+      if (!r) return;
+      if (r.unknown) {
+        const msel = el('select', {});
+        fillModelSelect(msel);
+        const out = await aiRun({
+          title: '성취기준 정리',
+          rows: [['과목', g ? g.label : ''], ['판단 못 한 줄', `${r.unknown}줄 (이 줄들의 역할만 AI에 묻습니다)`], ['모델', modelName(msel)]],
+          warn: 'AI는 글을 고치지 않고 줄의 역할(단원·성취기준·수준 설명 등)만 정합니다. 정리본은 원문 줄을 그대로 옮겨 만들고, 원문이 모두 들어 있는지 검사합니다.',
+          jobs: [{ run: () => api.standards_format(gidNow, text, true, msel.value) }],
+        });
+        if (!out || !out.done) return;
+        r = out.results[0];
+      }
+      const okv = !r.missing.length;
+      openSheet((box) => {
+        const info = el('div', { class: 'std-fmt-info' }, [
+          el('div', { class: okv ? 'ok-text' : 'danger-text', text: okv ? `✔ 원문 내용 ${r.content_lines}줄이 한 글자도 바뀌지 않고 모두 들어 있습니다.` : `✕ 원문 ${r.missing.length}줄이 정리본에서 확인되지 않아 적용할 수 없습니다.` }),
+          r.three_level.length ? el('div', { text: `3단계(A·C·E) 성취기준 ${r.three_level.length}개: ${r.three_level.join(', ')} — 학생 수준 B는 A 설명, D는 C 설명을 기준으로 씁니다.` }) : null,
+          r.headers.length ? el('div', { class: 'muted', text: `표 머리글 ${r.headers.length}줄을 뺐습니다(${[...new Set(r.headers)].join(', ')}).` }) : null,
+          r.ai_used ? el('div', { class: 'muted', text: `AI로 역할을 정한 줄 ${r.unknown}줄` }) : el('div', { class: 'muted', text: '규칙으로 모두 정리되어 AI를 쓰지 않았습니다(크레딧 없음).' }),
+          r.gaps.length ? el('details', {}, [el('summary', { class: 'warn-text', text: `수식이 빠진 듯한 곳 ${r.gaps.length}줄 — 원문을 복사할 때 수식이 빠졌을 수 있습니다. 필요하면 직접 채우세요.` }),
+            el('div', { class: 'cmp-text', text: r.gaps.join('\n') })]) : null,
+          !okv ? el('div', { class: 'cmp-text danger-text', text: r.missing.join('\n') }) : null,
+        ].filter(Boolean));
+        const applyBtn = el('button', { type: 'button', class: 'primary', disabled: !okv, text: '정리본으로 바꾸기' });
+        applyBtn.addEventListener('click', async () => {
+          if (ta.value !== text) { alertBox('정리하는 사이에 성취기준 글이 바뀌었습니다. 다시 정리해 주세요.'); return; }
+          ta.value = r.text;
+          dropPending(skey);
+          if (!(await mutate('standards_save', gidNow, r.text, null, yearNow))) return;
+          closeSheet();
+          toast('정리본으로 바꿨습니다. 원문 내용은 그대로입니다.');
+          if (SD.gid === gidNow && ys.year === yearNow) renderStandards();
+        });
+        box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: '성취기준 정리 — 바꾸기 전 확인' }), el('span', { class: 'muted', text: g ? g.label : '' })]),
+          el('div', { class: 'sheet-body' }, [info, el('div', { class: 'cmp', style: 'margin-top:10px' }, [
+            el('div', {}, [el('div', { class: 'col-label', text: '지금(원문)' }), el('div', { class: 'cmp-text tall', text: text })]),
+            el('div', {}, [el('div', { class: 'col-label', text: '정리본' }), el('div', { class: 'cmp-text tall', text: r.text })])])]),
+          el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }), applyBtn]));
+      });
+    };
     const lv = Object.entries(d.levels).map(([k, n]) => `${k} ${n}명`).join(' · ');
     m.append(
       el('div', { class: 'card-head' }, [el('h2', { text: `성취기준 · ${g ? g.label : ''}` }), el('span', { class: 'tag', text: `성취수준 ${d.level_scale}단계` }),
@@ -3233,6 +3279,7 @@
         el('button', { type: 'button', text: '📋 붙여넣기(클립보드)', onclick: async () => { const c = await api.read_clipboard(); const t = c && c.ok ? (c.text || '').trim() : ''; if (!t) { toast('클립보드가 비어 있습니다. 칸에 직접 붙여넣어도 됩니다.'); return; } put(t, '붙여넣기'); } }),
         el('button', { type: 'button', text: '📄 PDF 불러오기', title: '글자가 있는 교육과정 PDF', onclick: async () => { const r2 = await call('standards_read_file', 'pdf'); if (r2) put(r2.text, r2.file); } }),
         el('button', { type: 'button', text: '📝 한글(hwpx) 불러오기', onclick: async () => { const r2 = await call('standards_read_file', 'hwpx'); if (r2) put(r2.text, r2.file); } }),
+        el('button', { type: 'button', class: 'primary', title: '단원·성취기준·수준(A~E)별로 줄을 맞춰 보기 좋게 정리합니다. 원문 글자는 바꾸지 않습니다.', text: '✨ 보기 좋게 정리', onclick: formatStd }),
         el('span', { class: 'spacer' }), state,
       ]),
       ta,

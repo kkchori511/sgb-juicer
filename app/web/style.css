@@ -586,3 +586,8 @@ input.sec-in { width: 130px; height: 28px; padding: 2px 6px; font-size: 13px; di
 .stat-chip { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 600; color: var(--text-2); }
 .stat-chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-hover); }
 .stat-chip b { color: var(--text); }
+/* v0.15: 성취기준 정리 비교 */
+.std-fmt-info > div { margin: 3px 0; font-size: 13.5px; }
+.ok-text { color: var(--st-closed); font-weight: 700; }
+.warn-text { color: #a16207; font-weight: 700; cursor: pointer; }
+.cmp-text.tall { max-height: 52vh; min-height: 200px; }

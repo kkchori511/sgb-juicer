@@ -39,6 +39,7 @@ jobs:
           python tests/test_roster_input.py
           python tests/test_existing_import.py
           python tests/test_pair_subject.py
+          python tests/test_stdformat.py
 
       - name: Version info
         shell: pwsh
