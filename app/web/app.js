@@ -130,21 +130,26 @@
     if (!b) return;
     const busy = saveInflight > 0 || pendingSaves.size > 0 || Object.keys(cfgPending).length > 0 || draftDirty();
     const st = saveFailed ? 'fail' : busy ? 'busy' : 'ok';
-    if (b.dataset.st === st) return;
+    const text = st === 'fail' ? `저장 안 됨${lastSaved ? ` · 마지막 ${clock(lastSaved)}` : ''}` : st === 'busy' ? '저장 중…' : `저장됨${lastSaved ? ` ${dayTime(lastSaved)}` : ''}`;
+    if (b.textContent === text && b.dataset.st === st) return;
     b.dataset.st = st;
     b.className = `save-state ${st}`;
-    b.textContent = st === 'fail' ? '저장 안 됨' : st === 'busy' ? '저장 중…' : '저장됨';
+    b.textContent = text;
   }
-  function fullTime(d) {
-    const p = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 (${'일월화수목금토'[d.getDay()]}) ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const clock = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  const dayTime = (d) => `${d.getMonth() + 1}월 ${d.getDate()}일(${'일월화수목금토'[d.getDay()]}) ${clock(d)}`;
+  // 수동 저장: 남은 저장(최종안·성취기준·프롬프트·설정)을 마치고 자료 파일에 기록한다
+  async function manualSave() {
+    saveInflight += 1;
+    refreshSaveState();
+    try {
+      const okAll = await saveAllPending();
+      const r = okAll && await call('save_now');
+      if (r) { markSaved(); toast('저장했습니다.'); } else markSaveFailed();
+    } finally { saveInflight -= 1; refreshSaveState(); }
   }
-  function showSaveInfo() {
-    const last = lastSaved ? `마지막 저장: <b>${fullTime(lastSaved)}</b>` : '이번 실행에서는 아직 저장한 내용이 없습니다.';
-    const note = saveFailed ? '<br><span class="danger-text">저장하지 못한 내용이 있습니다. 해당 화면에서 다시 시도하거나 내용을 복사해 두세요.</span>'
-      : $('savedAt').dataset.st === 'busy' ? '<br><span class="muted">지금 저장하는 중입니다.</span>' : '';
-    modal(last + note, false, true);
-  }
+
   function toast(msg, ms) {
     const t = $('toast');
     t.textContent = msg;
@@ -170,12 +175,13 @@
   }
 
   // ---------- 확인 창 ----------
-  function modal(message, withCancel, html, okText) {
+  function modal(message, withCancel, html, okText, cancelText) {
     return new Promise((resolve) => {
       if (html) $('modalMsg').innerHTML = message;
       else $('modalMsg').textContent = message;
       $('modalCancel').hidden = !withCancel;
       $('modalOk').textContent = okText || '확인';
+      $('modalCancel').textContent = cancelText || '취소';
       $('modal').hidden = false;
       const done = (v) => {
         $('modal').hidden = true;
@@ -531,6 +537,7 @@
     toolbar.append(
       el('button', { type: 'button', class: 'primary edit-only', text: '📋 클립보드에서 추가', onclick: () => importFromClipboard(g) }),
       el('button', { type: 'button', class: 'edit-only', text: '📂 파일 추가(여러 개)', onclick: () => importFromXlsx(g) }),
+      el('button', { type: 'button', class: 'edit-only', text: '👥 다른 담당 명렬 가져오기', onclick: () => openRosterInput(g, null, 'copy') }),
       el('button', { type: 'button', class: 'edit-only', text: '+ 학생 한 명 추가(전입)', onclick: () => openRosterInput(g, null, 'line') }),
     );
     if (!members.length) {
@@ -556,11 +563,11 @@
     const wrap = el('div', { class: 'tbl-wrap' });
     const t = el('table', { class: 'tbl' });
     const checkAll = el('input', { type: 'checkbox', onchange: (e) => t.querySelectorAll('.rowcheck').forEach((c) => { c.checked = e.target.checked; }) });
-    t.appendChild(el('tr', {}, [el('th', {}, [checkAll]), el('th', { text: '학번' }), el('th', { text: '이름' }), el('th', { text: '학년-반' }), el('th', { text: '상태' })]));
+    t.appendChild(el('tr', {}, [el('th', {}, [checkAll]), ...['학년', '반', '번호', '이름', '학번', '상태'].map((h) => el('th', { text: h }))]));
     list.forEach((m) => {
       const tr = el('tr', { class: m.active ? '' : 'inactive' });
       tr.appendChild(el('td', {}, [el('input', { type: 'checkbox', class: 'rowcheck', 'data-no': m.student_no })]));
-      tr.append(el('td', { text: m.student_no }), el('td', { text: m.name }), el('td', { text: `${m.grade}-${m.class_no}` }),
+      tr.append(el('td', { text: m.grade ?? '' }), el('td', { text: m.class_no ?? '' }), el('td', { text: m.number ?? '' }), el('td', { text: m.name }), el('td', { class: 'muted', text: m.student_no }),
         el('td', {}, [m.active ? '활성' : el('span', { class: 'inactive-badge', text: '비활성' })]));
       t.appendChild(tr);
     });
@@ -619,7 +626,7 @@
   function importFromXlsx(g, onDone) { openRosterInput(g, onDone, 'file'); }
   function openRosterInput(g, onDone, first) {
     const st = { rows: [], batches: [], seq: 0, onlyBad: false, pendingMap: null };
-    const roles = [['student_no', '학번'], ['name', '이름'], ['grade', '학년'], ['class_no', '반'], ['number', '번호']];
+    const roles = [['grade', '학년'], ['class_no', '반'], ['number', '번호'], ['name', '이름'], ['student_no', '학번']];
     let tableBox, summary, applyBtn, undoBtn, mapBox, logBox;
 
     openSheet((box) => {
@@ -633,10 +640,11 @@
       const onlyBad = el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'checkbox', onchange: (e) => { st.onlyBad = e.target.checked; renderRows(); } }), '확인 필요만 보기']);
       box.append(
         el('div', { class: 'sheet-head' }, [el('h2', { text: `명렬 입력 · ${g.label}` })]),
-        el('div', { class: 'hint', text: '엑셀에서 칸을 드래그해 복사한 뒤 [클립보드에서 추가]를 누르세요(이 창에서 Ctrl+V도 됩니다). 다른 범위를 복사해 또 누르면 아래에 이어 붙습니다. 파일은 여러 개를 한꺼번에 고를 수 있고, 붙여넣기와 섞어 써도 계속 이어집니다. 학번이 없으면 학년·반·번호로 학번(5자리)을 만듭니다.' }),
+        el('div', { class: 'hint', text: '엑셀에서 학년·반·번호·이름(또는 학번·이름) 칸을 드래그해 복사한 뒤 [클립보드에서 추가]를 누르세요(이 창에서 Ctrl+V도 됩니다). 다른 범위를 복사해 또 누르면 아래에 이어 붙습니다. 파일 여러 개, 다른 담당의 명렬도 섞어 계속 이어서 넣을 수 있습니다.' }),
         el('div', { class: 'toolbar' }, [
           el('button', { type: 'button', class: 'primary', text: '📋 클립보드에서 추가', onclick: addClip }),
           el('button', { type: 'button', text: '📂 파일 추가(여러 개)', onclick: addFiles }),
+          el('button', { type: 'button', text: '👥 다른 담당 명렬 가져오기', onclick: addCopy }),
           el('button', { type: 'button', text: '+ 한 줄 추가', onclick: () => addLine() }),
           undoBtn, el('span', { class: 'spacer' }), logBox]),
         mapBox,
@@ -656,6 +664,7 @@
     if (first === 'clip') addClip();
     else if (first === 'file') addFiles();
     else if (first === 'line') addLine();
+    else if (first === 'copy') addCopy();
 
     function plainRow(r) { return { student_no: r.student_no, name: r.name, grade: r.grade, class_no: r.class_no, number: r.number, level: '', rename_ok: !!r.rename_ok }; }
     function log() {
@@ -671,38 +680,122 @@
     }
     async function addText(text, label) {
       const r = await call('roster_from_text', text);
-      if (r) await addParsed([{ ...r, file: label }], label);
+      if (r) await addParsed([{ ...r, file: label }], label, true);
     }
     async function addFiles() {
       const r = await call('roster_from_xlsx');
       if (!r) return;
       if (r.errors && r.errors.length) alertBox('읽지 못한 파일이 있습니다.\n' + r.errors.join('\n'));
-      await addParsed(r.files, r.files.length === 1 ? r.files[0].file : `파일 ${r.files.length}개`);
+      await addParsed(r.files, r.files.length === 1 ? r.files[0].file : `파일 ${r.files.length}개`, false);
     }
-    function usable(cols) { return cols.name !== null && cols.name !== undefined && (cols.student_no !== null && cols.student_no !== undefined || ['grade', 'class_no', 'number'].every((k) => cols[k] !== null && cols[k] !== undefined)); }
-    // 여러 원본을 한 묶음으로 추가. 열을 못 알아본 원본은 열 연결을 물어본다.
-    async function addParsed(list, label) {
+    // 다른 담당의 명렬(활성 학생만, 전출 등 비활성 학생은 빼고)을 한 묶음으로
+    async function addCopy() {
+      const others = (ys.groups || []).filter((x) => x.id !== g.id && x.total);
+      if (!others.length) { toast('명렬이 있는 다른 담당이 없습니다.'); return; }
+      const sel = el('select', {}, others.map((x) => el('option', { value: x.id, text: `${x.label} (${x.active}명)` })));
+      const gid = await new Promise((resolve) => {
+        const done = (v) => { mapBox.innerHTML = ''; resolve(v); };
+        mapBox.innerHTML = '';
+        mapBox.appendChild(el('div', { class: 'map-ask' }, [
+          el('b', { text: '어느 담당의 명렬을 가져올까요? 비활성(전출) 학생은 빼고 가져옵니다.' }),
+          el('div', { class: 'toolbar' }, [sel, el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: () => done(null) }),
+            el('button', { type: 'button', class: 'primary', text: '가져오기', onclick: () => done(+sel.value) })]),
+        ]));
+      });
+      if (!gid) return;
+      const r = await call('roster_copy_source', gid);
+      if (!r) return;
+      if (!r.rows.length) { toast('가져올 활성 학생이 없습니다.'); return; }
+      pushBatch(r.rows.map((x) => ({ ...x, issues: [], notes: [] })), `${r.label} 명렬`);
+    }
+    function pushBatch(rows, label) {
       const id = ++st.seq;
-      let count = 0;
-      for (const src of list) {
-        let cols = { ...src.columns, level: null };
-        let header = src.header;
-        if (!usable(cols)) {
-          const m = await askMapping(src, cols, header);
-          if (!m) continue;
-          cols = m.columns; header = m.header;
-        }
-        const r = await call('roster_build', g.id, src.raw, header, cols, true);
-        if (!r) continue;
-        r.rows.forEach((row) => { row._batch = id; st.rows.push(row); });
-        count += r.rows.length;
-      }
-      if (!count) return;
-      st.batches.push({ id, label, count });
+      rows.forEach((row) => { row._batch = id; st.rows.push(row); });
+      st.batches.push({ id, label, count: rows.length });
       log();
       renderRows();
       revalidate();
-      toast(`${label}에서 ${count}명을 추가했습니다.`);
+      toast(`${label}에서 ${rows.length}명을 추가했습니다.`);
+    }
+    const has = (v) => v !== null && v !== undefined && v !== '';
+    function usable(cols) { return has(cols.name) && (has(cols.student_no) || (has(cols.class_no) && has(cols.number) && (has(cols.grade) || has(cols.grade_value)))); }
+    // 여러 원본을 한 묶음으로 추가. 붙여넣기는 형태를 먼저 묻고, 파일은 머리글로 알아보면 바로 넣는다.
+    async function addParsed(list, label, isPaste) {
+      const all = [];
+      for (const src of list) {
+        const cols = { ...src.columns, level: null };
+        const pick = (!isPaste && src.header && usable(cols)) ? { columns: cols, header: true } : await askFormat(src);
+        if (!pick) continue;
+        const r = await call('roster_build', g.id, src.raw, pick.header, pick.columns, true);
+        if (r) all.push(...r.rows);
+      }
+      if (all.length) pushBatch(all, label);
+    }
+    // 명렬 형태 묻기: 학년·반·번호·이름(3열이면 반·번호·이름) / 학번·이름
+    function askFormat(src) {
+      return new Promise((resolve) => {
+        const done = (v) => { mapBox.innerHTML = ''; resolve(v); };
+        const width = src.raw[0].length;
+        const digit = (v) => /^\d+$/.test((v || '').trim());
+        const header = src.header || !src.raw[0].some(digit); // 첫 줄에 숫자 칸이 없으면 머리글
+        const body = src.raw.slice(header ? 1 : 0);
+        const title = `${src.file || '붙여넣은 내용'}(${body.length}줄)`;
+        const ask = (content) => { mapBox.innerHTML = ''; mapBox.appendChild(el('div', { class: 'map-ask' }, content)); };
+        const skip = () => el('button', { type: 'button', text: '이 원본 빼기', onclick: () => done(null) });
+        const gradeBox = () => {
+          if (g.kind === 'homeroom') return { el: el('div', { class: 'muted', text: `학년 열이 없으면 담임반 학년(${g.grade}학년)으로 넣습니다.` }), value: () => g.grade };
+          const inp = el('input', { type: 'number', class: 'num', min: 1, max: 6, placeholder: '학년' });
+          return { el: el('label', { class: 'inline' }, ['학년 열이 없습니다. 학년: ', inp]), value: () => inp.value };
+        };
+        const preview = (cols, gb) => {
+          const t = el('table', { class: 'tbl mini' });
+          t.appendChild(el('tr', {}, ['학년', '반', '번호', '이름'].map((h) => el('th', { text: h }))));
+          body.slice(0, 3).forEach((r) => t.appendChild(el('tr', {}, [
+            el('td', { text: has(cols.grade) ? r[cols.grade] || '' : '(입력한 학년)' }), el('td', { text: r[cols.class_no] || '' }),
+            el('td', { text: r[cols.number] || '' }), el('td', { text: r[cols.name] || '' })])));
+          return t;
+        };
+        const pickColumns = (list, c0, gb) => {
+          const c = { ...c0 };
+          const row = el('div', { class: 'map-row' });
+          list.forEach(([key, label]) => {
+            const sel = el('select', { onchange: (e) => { c[key] = e.target.value === '' ? null : +e.target.value; } },
+              [el('option', { value: '', text: '(없음)' }), ...Array.from({ length: width }, (_, i) => el('option', { value: i, text: `${colName(i)}열: ${((body[0] || [])[i] || '').slice(0, 8)}`, selected: c[key] === i }))]);
+            row.appendChild(el('label', {}, [label, sel]));
+          });
+          ask([el('b', { text: `${title}: 각 칸이 몇 번째 열인지 골라 주세요.` }), row, gb ? gb.el : null,
+            el('div', { class: 'toolbar' }, [el('span', { class: 'spacer' }), skip(),
+              el('button', { type: 'button', class: 'primary', text: '이대로 추가', onclick: () => {
+                if (gb && !has(c.grade) && !has(c.student_no)) { if (!gb.value()) { toast('학년 열을 고르거나 학년을 넣어 주세요.'); return; } c.grade_value = gb.value(); }
+                if (!usable(c)) { toast('이름 열과, 학번 열(또는 반·번호 열)을 골라 주세요.'); return; }
+                done({ columns: c, header });
+              } })])]);
+        };
+        const byNo = () => {
+          const c = { student_no: src.columns.student_no, name: src.columns.name };
+          if (has(c.student_no) && has(c.name)) done({ columns: c, header });
+          else pickColumns([['student_no', '학번'], ['name', '이름']], c, null);
+        };
+        const byClass = () => {
+          let c, gb = null;
+          if (width >= 4) c = { grade: 0, class_no: 1, number: 2, name: 3 };
+          else if (width === 3) { c = { class_no: 0, number: 1, name: 2 }; gb = gradeBox(); }
+          else { pickColumns(roles.slice(0, 4), {}, gradeBox()); return; }
+          ask([el('b', { text: `${title}: 이 순서가 맞나요?` }), preview(c, gb), gb ? gb.el : null,
+            el('div', { class: 'toolbar' }, [el('span', { class: 'spacer' }), skip(),
+              el('button', { type: 'button', text: '아니요, 열 직접 고르기', onclick: () => pickColumns(roles.slice(0, 4), c, gb || gradeBox()) }),
+              el('button', { type: 'button', class: 'primary', text: '맞음', onclick: () => {
+                if (gb) { if (!gb.value()) { toast('학년을 넣어 주세요.'); return; } c.grade_value = gb.value(); }
+                done({ columns: c, header });
+              } })])]);
+        };
+        ask([el('b', { text: `${title}: 복사한 명렬은 어떤 형태인가요?` }),
+          el('div', { class: 'toolbar' }, [
+            el('button', { type: 'button', class: 'primary', text: '학년 · 반 · 번호 · 이름', onclick: byClass }),
+            el('button', { type: 'button', class: 'primary', text: '학번(5자리) · 이름', onclick: byNo }),
+            el('span', { class: 'spacer' }), skip()]),
+          el('div', { class: 'hint', text: '학년 칸이 없는 명렬(반·번호·이름)도 [학년 · 반 · 번호 · 이름]을 고르세요.' })]);
+      });
     }
     function addLine() {
       const id = ++st.seq;
@@ -710,7 +803,7 @@
       st.batches.push({ id, label: '한 줄', count: 1 });
       log();
       renderRows();
-      const inp = tableBox.querySelector('tr:last-child input[data-k="student_no"]');
+      const inp = tableBox.querySelector('tr:last-child input[data-k="grade"]');
       if (inp) inp.focus();
     }
     function undoLast() {
@@ -722,36 +815,6 @@
       revalidate();
       toast(`${b.label}에서 추가한 ${b.count}명을 뺐습니다.`);
     }
-    // 열 연결 묻기(머리글이 없거나 열을 알아보지 못했을 때)
-    function askMapping(src, cols, header) {
-      return new Promise((resolve) => {
-        const c = { ...cols };
-        let h = header;
-        const width = src.raw[0].length;
-        const sample = (i) => { const r = src.raw[h ? 1 : 0] || []; return (r[i] || '').slice(0, 8); };
-        const row = el('div', { class: 'map-row' });
-        const selects = {};
-        const fill = () => roles.forEach(([key]) => {
-          const s = selects[key];
-          s.innerHTML = '';
-          s.appendChild(el('option', { value: '', text: '(없음)' }));
-          for (let i = 0; i < width; i++) s.appendChild(el('option', { value: i, text: `${colName(i)}열: ${sample(i)}`, selected: c[key] === i }));
-        });
-        row.appendChild(el('label', {}, [el('input', { type: 'checkbox', checked: h, onchange: (e) => { h = e.target.checked; fill(); } }), '첫 줄은 머리글']));
-        roles.forEach(([key, label]) => {
-          selects[key] = el('select', { onchange: (e) => { c[key] = e.target.value === '' ? null : +e.target.value; } });
-          row.appendChild(el('label', {}, [label, selects[key]]));
-        });
-        fill();
-        const done = (v) => { mapBox.innerHTML = ''; resolve(v); };
-        mapBox.innerHTML = '';
-        mapBox.appendChild(el('div', { class: 'map-ask' }, [
-          el('b', { text: `${src.file || '붙여넣은 내용'}: 어느 열이 학번·이름인지 골라 주세요.` }), row,
-          el('div', { class: 'toolbar' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '이 원본 빼기', onclick: () => done(null) }),
-            el('button', { type: 'button', class: 'primary', text: '이대로 추가', onclick: () => { if (!usable(c)) { toast('이름 열과, 학번 열(또는 학년·반·번호 열)을 골라 주세요.'); return; } done({ columns: c, header: h }); } })]),
-        ]));
-      });
-    }
     const revalidate = debounce(async () => {
       if (!st.rows.length) { updateSummary(); return; }
       const r = await call('roster_validate', g.id, st.rows.map(plainRow), true);
@@ -760,7 +823,7 @@
         const row = st.rows[i];
         if (!row) return;
         row.issues = nr.issues; row.notes = nr.notes; row.rename = !!nr.rename;
-        ['grade', 'class_no', 'number'].forEach((k) => { if (!row[k] && nr[k]) { row[k] = nr[k]; const inp = row._tr && row._tr.querySelector(`[data-k="${k}"]`); if (inp) inp.value = nr[k]; } });
+        ['grade', 'class_no', 'number', 'student_no'].forEach((k) => { if (!row[k] && nr[k]) { row[k] = nr[k]; const inp = row._tr && row._tr.querySelector(`[data-k="${k}"]`); if (inp) inp.value = nr[k]; } });
       });
       st.rows.forEach((row) => updateCheck(row));
       updateSummary();
@@ -790,12 +853,12 @@
         return;
       }
       const t = el('table', { class: 'tbl' });
-      t.appendChild(el('tr', {}, ['#', '학번', '이름', '학년', '반', '번호', '확인', ''].map((h) => el('th', { text: h }))));
+      t.appendChild(el('tr', {}, ['#', '학년', '반', '번호', '이름', '학번', '확인', ''].map((h) => el('th', { text: h }))));
       st.rows.forEach((row, idx) => {
         if (st.onlyBad && !(row.issues && row.issues.length)) return;
         const tr = el('tr', {});
         const inp = (key, cls) => el('td', {}, [el('input', { type: 'text', class: cls || '', 'data-k': key, value: row[key] || '', oninput: (e) => { row[key] = e.target.value.trim(); revalidate(); } })]);
-        tr.append(el('td', { class: 'muted', text: String(idx + 1) }), inp('student_no'), inp('name'), inp('grade', 'narrow'), inp('class_no', 'narrow'), inp('number', 'narrow'));
+        tr.append(el('td', { class: 'muted', text: String(idx + 1) }), inp('grade', 'narrow'), inp('class_no', 'narrow'), inp('number', 'narrow'), inp('name'), inp('student_no'));
         row._check = el('td', {});
         tr.appendChild(row._check);
         tr.appendChild(el('td', {}, [el('button', { type: 'button', class: 'link', title: '행 빼기', text: '✕', onclick: () => { st.rows.splice(idx, 1); renderRows(); revalidate(); } })]));
@@ -1091,6 +1154,17 @@
 
   // ---------- 업데이트 ----------
   let updateInfo = null;
+  // 새 버전 exe로 바꿔 두었다. 학교 보안 프로그램 때문에 자동으로 켜지 않고 다시 시작을 안내한다.
+  async function updateReady(version) {
+    $('updateBar').hidden = false;
+    $('updateText').textContent = `v${version}로 바꿔 두었습니다. 앱을 종료한 뒤 다시 시작하면 새 버전이 적용됩니다.`;
+    $('updateNowBtn').hidden = true;
+    $('updateNotesBtn').hidden = true;
+    $('updateLaterBtn').textContent = '닫기';
+    const quit = await modal(`<b>새 버전(v${version})으로 바꿨습니다.</b><br>앱을 종료한 뒤 다시 시작해 주세요.<br><br>` +
+      `<span class="muted">학교 보안 프로그램이 새 파일 실행을 막으면, 보안 프로그램에서 <b>생기부착즙기.exe</b>를 예외(허용)로 등록해 주세요.</span>`, true, true, '지금 종료', '나중에');
+    if (quit) window.__beforeClose();
+  }
   function showUpdate(ev) {
     updateInfo = ev;
     $('updateText').textContent = `새 버전 v${ev.version}이(가) 있습니다.`;
@@ -1895,10 +1969,10 @@
     const empty = r.rows.filter((x) => !x.text).length;
     $('expSummary').textContent = `${r.rows.length}명 · 마감 ${closed} · 미마감 ${r.rows.length - closed} · 최종안 없음 ${empty}(빈칸) · 비활성 학생 제외`;
     const t = el('table', { class: 'tbl' });
-    t.appendChild(el('tr', {}, ['학번', '이름', '상태', '최종안', '바이트'].map((h) => el('th', { text: h }))));
-    r.rows.forEach((x) => t.appendChild(el('tr', { class: x.closed ? '' : 'bad' }, [el('td', { text: x.student_no }), el('td', { text: x.name }),
+    t.appendChild(el('tr', {}, ['학년', '반', '번호', '이름', '상태', '최종안', '바이트'].map((h) => el('th', { text: h }))));
+    r.rows.forEach((x) => t.appendChild(el('tr', { class: x.closed ? '' : 'bad' }, [el('td', { text: x.grade ?? '' }), el('td', { text: x.class_no ?? '' }), el('td', { text: x.number ?? '' }), el('td', { text: x.name }),
       el('td', { text: x.closed ? '● 마감' : '미마감' }), el('td', {}, [el('div', { class: 'exp-text', text: x.text || '' })]), el('td', {}, [x.text ? bytesEl(x.bytes, r.target) : el('span', { class: 'muted', text: '-' })])])));
-    if (!r.rows.length) t.appendChild(el('tr', {}, [el('td', { colspan: 5, class: 'muted', text: '내보낼 학생이 없습니다.' })]));
+    if (!r.rows.length) t.appendChild(el('tr', {}, [el('td', { colspan: 7, class: 'muted', text: '내보낼 학생이 없습니다.' })]));
     box.appendChild(t);
     $('expCopyBtn').textContent = `클립보드 복사: ${r.rows.length}명`;
     $('expXlsxBtn').textContent = `xlsx 저장: ${r.rows.length}명`;
@@ -2766,13 +2840,13 @@
     if (!BT.touched) can.forEach((x) => BT.sel.add(x.student_no));
     const t = el('table', { class: 'tbl' });
     const all = el('input', { type: 'checkbox', checked: can.length && can.every((x) => BT.sel.has(x.student_no)), onchange: (e) => { BT.touched = true; can.forEach((x) => (e.target.checked ? BT.sel.add(x.student_no) : BT.sel.delete(x.student_no))); renderBatchPanel(); } });
-    t.appendChild(el('tr', {}, [el('th', {}, [all]), ...['학번', '이름', '기록', '성취수준', '처리', '결과'].map((h) => el('th', { text: h }))]));
+    t.appendChild(el('tr', {}, [el('th', {}, [all]), ...['학년', '반', '번호', '이름', '기록', '성취수준', '처리', '결과'].map((h) => el('th', { text: h }))]));
     list.forEach((x) => {
       const [ok, reason] = why(x);
       const res = BT.results[x.student_no];
       t.appendChild(el('tr', { class: x.active ? '' : 'inactive' }, [
         el('td', {}, [el('input', { type: 'checkbox', disabled: ok !== '가능', checked: ok === '가능' && BT.sel.has(x.student_no), onchange: (e) => { BT.touched = true; if (e.target.checked) BT.sel.add(x.student_no); else BT.sel.delete(x.student_no); renderBatchPanel(); } })]),
-        el('td', { text: x.student_no }), el('td', { text: x.name }), el('td', { text: x.records ? `${x.records}건 · ${x.bytes}B` : '-' }), el('td', {}, [levelCell(x)]),
+        el('td', { text: x.grade ?? '' }), el('td', { text: x.class_no ?? '' }), el('td', { text: x.number ?? '' }), el('td', { text: x.name }), el('td', { text: x.records ? `${x.records}건 · ${x.bytes}B` : '-' }), el('td', {}, [levelCell(x)]),
         el('td', { class: ok === '가능' ? '' : 'muted', text: reason }),
         el('td', {}, [res ? el('span', { class: res.ok ? 'res-ok' : 'res-fail', title: res.error || '', text: res.ok ? '✔ 후보 생성' : `✕ ${res.error || '실패'}` }) : null,
           res && res.ok ? el('button', { type: 'button', class: 'small link', text: '보기', onclick: () => openRecords(s.group_id, s.item, x.student_no) }) : null]),
@@ -2836,7 +2910,9 @@
       case 'update_progress':
         if (ev.stage === 'backup') $('updateText').textContent = '자료를 백업하는 중…';
         else if (ev.stage === 'download') $('updateText').textContent = `내려받는 중… ${Math.round((ev.done / ev.total) * 100)}%`;
-        else $('updateText').textContent = '곧 다시 시작합니다…';
+        break;
+      case 'update_ready':
+        updateReady(ev.version);
         break;
       case 'ocr_progress':
       case 'ocr_done':
@@ -2860,7 +2936,7 @@
       saveCfg({ menu_collapsed: v });
     });
     $('verBtn').addEventListener('click', showAbout);
-    $('savedAt').addEventListener('click', showSaveInfo);
+    $('savedAt').addEventListener('click', manualSave);
     setInterval(refreshSaveState, 300);
     $('yearSelect').addEventListener('change', async (e) => {
       const want = +e.target.value;

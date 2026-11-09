@@ -128,7 +128,12 @@ def _clean_env():
     return env
 
 
-def swap_and_launch(new_path: str, args=(), before_launch=None):
+def swap_only(new_path: str):
+    """exe만 새 버전으로 바꿔 둔다(실행은 사용자가 다시 켤 때). 보안 프로그램이 자동 실행을 막는 학교 PC용."""
+    swap_and_launch(new_path, launch=False)
+
+
+def swap_and_launch(new_path: str, args=(), before_launch=None, launch=True):
     """exe 교체 후 새 exe를 띄운다. 실패하면 원래대로 되돌리고 UpdateError.
     before_launch: 새 exe를 띄우기 바로 전에 부른다(실행 잠금 넘겨주기). 이름 바꾸기가 실패하면 부르지 않는다."""
     if not can_apply():
@@ -159,6 +164,9 @@ def swap_and_launch(new_path: str, args=(), before_launch=None):
     flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     if not args:
         args = ["--after-update"]  # 새 앱은 이 앱이 잠금을 풀 때까지 기다린다
+    if not launch:
+        log("교체 완료, 다시 시작하면 새 버전 실행")
+        return
     if before_launch:
         before_launch()
     try:

@@ -75,4 +75,20 @@ if __name__ == "__main__":
     # 4) 바꾸기 모드는 그대로(첫 등록 마법사 등)
     res = add(api, hr, "20315\t전입생", mode="replace")
     assert res["count"] == 1
+    # 5) v0.11: 반·번호·이름(학년 열 없음) + 정해 준 학년, 한 줄 입력의 학번 자동, 다른 담당 명렬 복사(활성만)
+    rows = ok(api.roster_build(sub, [["5", "3", "홍길동"]], False, {"class_no": 0, "number": 1, "name": 2, "grade_value": "2"}, True))["rows"]
+    assert rows[0]["student_no"] == "20503" and not rows[0]["issues"], rows
+    v = ok(api.roster_validate(sub, [{"grade": "2", "class_no": "5", "number": "4", "name": "임꺽정"}], True))["rows"][0]
+    assert v["student_no"] == "20504" and not v["issues"], v
+    club = ok(api.add_group({"kind": "club", "name": "과학반"}))["id"]
+    src = ok(api.roster_copy_source(sub))
+    assert "20302" not in [r["student_no"] for r in src["rows"]] and src["label"] == "수학", src  # 20302는 비활성
+    ok(api.roster_apply(club, src["rows"], "add"))
+    assert len(ok(api.members(club))["members"]) == len(src["rows"])
+    # 6) 내보내기 칸: 학년·반·번호·이름·상태·최종안·바이트
+    from app import export
+    assert [c[1] for c in export.columns("full")] == ["학년", "반", "번호", "이름", "상태", "최종안", "바이트"]
+    ex = ok(api.export_preview(club, "club"))["rows"][0]
+    assert ex["number"] is not None and ex["grade"] is not None, ex
+    ok(api.save_now())
     print("ROSTER INPUT OK")

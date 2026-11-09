@@ -164,30 +164,30 @@ def test_n07_exclusion(api, hr):
 
 
 def test_n08_update_lock(api):
+    """v0.11: 업데이트는 exe만 바꿔 두고 자동 실행하지 않는다. 이 앱은 잠금을 쥔 채 계속 쓴다."""
     assert single.acquire()
-    api._update_info = {"sha256": "x", "url": "u"}
-    real = (updater.can_apply, updater.download, updater.swap_and_launch)
+    api._update_info = {"sha256": "x", "url": "u", "version": "9.9.9"}
+    real = (updater.can_apply, updater.download, updater.swap_only)
+    calls = []
     updater.can_apply = lambda: True
     updater.download = lambda info, prog=None: "new.exe"
-
-    def bad_swap(path, args=(), before_launch=None):
-        before_launch()
-        raise updater.UpdateError("실행 실패(주입)")
-    updater.swap_and_launch = bad_swap
+    updater.swap_only = lambda path: calls.append(path)
     try:
         ok(api.update_apply())
         for _ in range(100):
             if not api._maint:
                 break
             time.sleep(0.05)
-        assert not api._maint and not api._halted
+        assert not api._maint and not api._halted and calls == ["new.exe"]
+        assert api.update_state()["ready"] == "9.9.9"
+        e = api.update_apply(); assert not e["ok"] and "다시 시작" in e["error"], e
     finally:
-        updater.can_apply, updater.download, updater.swap_and_launch = real
+        updater.can_apply, updater.download, updater.swap_only = real
     import subprocess
     r = subprocess.run([sys.executable, "-c", "import sys;sys.path.insert(0,'.');from app import single;print(single.acquire())"],
                        capture_output=True, text=True, env=os.environ, cwd=os.path.dirname(os.path.abspath(HERE)))
     assert r.stdout.strip() == "False", r.stdout + r.stderr
-    ok(api.add_record(*api._t, {"content": "업데이트 실패 뒤에도 쓰기"}))
+    ok(api.add_record(*api._t, {"content": "업데이트 뒤에도 계속 쓰기"}))
 
 
 def test_close_hook():

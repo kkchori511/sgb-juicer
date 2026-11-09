@@ -219,6 +219,11 @@ class YearDb:
         with self._lock:
             return [dict(r) for r in self._conn.execute(sql, args).fetchall()]
 
+    def checkpoint(self):
+        """수동 저장: 쓰기 기록(WAL)을 자료 파일에 반영한다."""
+        with self._lock:
+            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
     def backup_to(self, dest_path):
         with self._lock:
             dst = sqlite3.connect(dest_path)

@@ -10,16 +10,17 @@ HEAD = PatternFill("solid", fgColor="E3ECFD")
 
 
 def columns(scope: str):
-    """scope: full(학번·이름·상태·최종안) / text(최종안만)"""
+    """scope: full(학년·반·번호·이름·상태·최종안·바이트) / text(최종안만)"""
     if scope == "text":
         return [("text", "최종안")]
-    return [("student_no", "학번"), ("name", "이름"), ("state", "상태"), ("text", "최종안"), ("bytes", "바이트")]
+    return [("grade", "학년"), ("class_no", "반"), ("number", "번호"), ("name", "이름"), ("state", "상태"), ("text", "최종안"), ("bytes", "바이트")]
 
 
 def _value(row, key):
     if key == "state":
         return "마감" if row["closed"] else "미마감"
-    return row.get(key, "")
+    v = row.get(key, "")
+    return "" if v is None else v
 
 
 def write_xlsx(path: str, rows: list[dict], scope: str, sheet_title: str):
@@ -43,7 +44,7 @@ def write_xlsx(path: str, rows: list[dict], scope: str, sheet_title: str):
         if not r["closed"]:
             for c in ws[ws.max_row]:
                 c.fill = YELLOW
-    widths = {"student_no": 10, "name": 10, "state": 8, "text": 90, "bytes": 8}
+    widths = {"grade": 6, "class_no": 6, "number": 6, "name": 10, "state": 8, "text": 90, "bytes": 8}
     for i, (k, _) in enumerate(cols, 1):
         ws.column_dimensions[ws.cell(1, i).column_letter].width = widths.get(k, 12)
     for row in ws.iter_rows(min_row=2):

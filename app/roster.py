@@ -142,6 +142,8 @@ def build_rows(rows, header, columns) -> list[dict]:
 
         no = re.sub(r"\s", "", get("student_no"))
         grade, class_no, number = get("grade"), get("class_no"), get("number")
+        if not grade and columns.get("grade_value"):  # 학년 열이 없는 명렬(반·번호·이름): 정해 준 학년
+            grade = str(columns["grade_value"])
         if not no and grade.isdigit() and class_no.isdigit() and number.isdigit():
             no = f"{int(grade)}{int(class_no):02d}{int(number):02d}"
         parts = split_student_no(no) if no else None

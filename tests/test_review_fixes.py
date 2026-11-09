@@ -129,7 +129,7 @@ def test_h13_m06_l02():
     p = os.path.join(os.environ["SGB_DATA_DIR"], "f.xlsx")
     export.write_xlsx(p, [{"student_no": "1", "name": "가", "closed": True, "text": "=1+1", "bytes": 4}], "full", "t")
     from openpyxl import load_workbook
-    assert load_workbook(p).active["D2"].data_type == "s"
+    c = load_workbook(p).active["F2"]; assert c.value == "=1+1" and c.data_type == "s", (c.value, c.data_type)
     try:
         export.write_xlsx(p, [{"student_no": "1", "name": "가", "closed": True, "text": "가" * 33000, "bytes": 1}], "full", "t"); raise AssertionError
     except ValueError:

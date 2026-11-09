@@ -95,13 +95,14 @@ def test_all():
     # 내보내기
     rows = ok(api.export_preview(sub, "subject"))["rows"]
     assert [r["student_no"] for r in rows] == ["20301", "20302", "20303"] and rows[1]["text"].startswith("수업")
-    tsv = export.to_tsv([{"student_no": "1", "name": "가", "closed": False, "text": 'a\n"b"', "bytes": 3}], "full", True)
-    assert tsv.split("\r\n")[1] == '1\t가\t미마감\t"a\n""b"""\t3'
+    tsv = export.to_tsv([{"student_no": "20301", "grade": 2, "class_no": 3, "number": 1, "name": "가", "closed": False, "text": 'a\n"b"', "bytes": 3}], "full", True)
+    assert tsv.split("\r\n")[0] == "학년\t반\t번호\t이름\t상태\t최종안\t바이트"
+    assert tsv.split("\r\n")[1] == '2\t3\t1\t가\t미마감\t"a\n""b"""\t3'
     p = os.path.join(os.environ["SGB_DATA_DIR"], "t.xlsx")
     export.write_xlsx(p, rows, "full", "공통수학1")
     from openpyxl import load_workbook
     ws = load_workbook(p).active
-    assert ws.max_row == 4 and ws["C2"].value == "미마감" and not ws.merged_cells.ranges
+    assert ws.max_row == 4 and ws["E2"].value == "미마감" and ws["A1"].value == "학년" and not ws.merged_cells.ranges
     ok(api.export_copy(sub, "subject", False, "no", "text", False))
 
     # 명렬 다시 넣기: 기록 있는 학생은 비활성화, 없는 학생은 빠짐

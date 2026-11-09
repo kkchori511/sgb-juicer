@@ -406,6 +406,8 @@ class Api:
             for k in ("grade", "class_no", "number"):
                 r[k] = roster._digits(r.get(k))
             r["level"] = str(r.get("level") or "").strip().upper()
+            if not r["student_no"] and r["grade"] and r["class_no"] and r["number"]:  # 학년·반·번호로 학번 만들기
+                r["student_no"] = f"{int(r['grade'])}{int(r['class_no']):02d}{int(r['number']):02d}"
             if r["student_no"] and not (r["grade"] and r["class_no"]):
                 parts = roster.split_student_no(r["student_no"])
                 if parts:
@@ -438,6 +440,14 @@ class Api:
         d = self._db()
         n = d.set_active(gid, student_nos, bool(active), bool(all_groups))
         return {"changed": n, "groups": d.groups()}
+
+    @safe
+    def roster_copy_source(self, src_gid):
+        """다른 담당의 명렬(활성 학생만)을 명렬 입력에 넣을 행으로."""
+        d = self._db()
+        rows = [{"student_no": m["student_no"], "name": m["name"], "grade": str(m["grade"] or ""), "class_no": str(m["class_no"] or ""),
+                 "number": str(m["number"] or ""), "level": ""} for m in d.members(src_gid) if m["active"]]
+        return {"rows": rows, "label": d.group(src_gid)["name"]}
 
     @safe
     def member_impact(self, gid, student_nos, all_groups=False):
@@ -1251,6 +1261,14 @@ class Api:
 
     # ---------- 백업·자료 ----------
     @safe
+    def save_now(self):
+        """수동 저장: 화면의 남은 저장은 화면이 먼저 마치고, 여기서는 자료 파일에 확실히 기록한다."""
+        year = config.load()["current_year"]
+        if year and db.year_path(year).exists():
+            db.open_year(year).checkpoint()
+        return {}
+
+    @safe
     def backup_now(self):
         name = backup.make("수동")
         if not name:
@@ -1311,36 +1329,23 @@ class Api:
             raise updater.UpdateError("Windows exe에서만 자동 업데이트할 수 있습니다.")
         if not info.get("sha256"):
             raise updater.UpdateError("이 릴리스에는 검증값(SHA-256)이 없어 자동 업데이트하지 않습니다. 릴리스 페이지에서 직접 내려받아 주세요.")
+        if getattr(self, "_update_ready", ""):
+            raise updater.UpdateError(f"이미 v{self._update_ready}로 바꿔 두었습니다. 앱을 종료한 뒤 다시 시작해 주세요.")
         self._maint_begin("업데이트", take_busy=True)
 
         def run():
-            from . import single
-
-            released = []
-
-            def hand_over():  # 새 앱을 띄우기 바로 전에 잠금을 넘겨준다
-                db.close_all()
-                single.release()
-                released.append(True)
-
             try:
                 self._emit({"type": "update_progress", "stage": "backup"})
                 backup.make("업데이트전")
                 path = updater.download(info, lambda d, t: self._emit({"type": "update_progress", "stage": "download", "done": d, "total": t}))
-                self._emit({"type": "update_progress", "stage": "restart"})
-                updater.swap_and_launch(path, before_launch=hand_over)
-                self._close_ok = True
-                if self._window:
-                    self._window.destroy()
-                return  # 창이 닫힌다. 관리 작업 표시는 그대로 둔다
+                # 새 버전을 자동으로 켜지 않는다(학교 보안 프로그램이 막을 수 있음). exe만 바꿔 두고 다시 시작을 안내한다.
+                # 이 앱은 실행 잠금을 그대로 쥐고 계속 쓸 수 있다.
+                updater.swap_only(path)
+                self._update_ready = info.get("version", "")
+                self._emit({"type": "update_ready", "version": self._update_ready})
             except Exception as e:
                 updater.log(f"업데이트 실패: {e}")
-                msg = str(e)
-                if released and not single.acquire(3):
-                    self._halted = "업데이트에 실패했고 다른 창이 이미 자료를 쓰고 있습니다. 이 창을 닫아 주세요."
-                    msg += " " + self._halted
-                    updater.log("업데이트 실패 뒤 실행 잠금을 되찾지 못해 이 창의 쓰기를 막음")
-                self._emit({"type": "update_error", "message": msg})
+                self._emit({"type": "update_error", "message": str(e)})
             self._maint_end(take_busy=True)
 
         threading.Thread(target=run, daemon=True).start()
@@ -1363,6 +1368,9 @@ class Api:
         threading.Thread(target=lambda: w.evaluate_js(
             "setTimeout(function(){ if (window.__beforeClose) window.__beforeClose(); else window.pywebview.api.close_app(); }, 0); 0"), daemon=True).start()
         return False
+
+    def update_state(self):
+        return {"ok": True, "ready": getattr(self, "_update_ready", "")}
 
     def close_app(self):
         self._close_ok = True

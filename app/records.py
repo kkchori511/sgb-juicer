@@ -421,7 +421,7 @@ class Records:
             slot_res = self._scope_rows(gid, item, m["student_no"], None)
             f = self.final(gid, item, m["student_no"])
             out.append({
-                "student_no": m["student_no"], "name": m["name"], "grade": m["grade"], "class_no": m["class_no"],
+                "student_no": m["student_no"], "name": m["name"], "grade": m["grade"], "class_no": m["class_no"], "number": m["number"],
                 "active": bool(m["active"]), "level": m["level"] or "",
                 "record_ids": [r["id"] for r in recs], "records": len(recs),
                 "bytes": sum(count_bytes(r["content"]) for r in recs),
@@ -549,7 +549,7 @@ class Records:
             if only_closed and not closed:
                 continue
             text = f["text"] if f else ""
-            rows.append({"student_no": m["student_no"], "name": m["name"], "grade": m["grade"], "class_no": m["class_no"],
+            rows.append({"student_no": m["student_no"], "name": m["name"], "grade": m["grade"], "class_no": m["class_no"], "number": m["number"],
                          "closed": closed, "text": text, "bytes": count_bytes(text) if text else 0})
         if order == "name":
             rows.sort(key=lambda r: (r["name"], r["student_no"]))
