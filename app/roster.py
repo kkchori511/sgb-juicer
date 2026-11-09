@@ -166,9 +166,10 @@ def _digits(v):
     return str(int(v)) if v else ""
 
 
-def validate(rows: list[dict], group: dict, known: dict) -> list[dict]:
+def validate(rows: list[dict], group: dict, known: dict, members=None) -> list[dict]:
     """행마다 issues(막는 문제)와 notes(알림)를 붙인다.
-    known: {학번: 이미 저장된 이름}"""
+    known: {학번: 이미 저장된 이름}, members: 이 담당에 이미 있는 학번(추가 입력일 때 알림)"""
+    members = members or {}
     counts = {}
     for r in rows:
         if r["student_no"]:
@@ -198,6 +199,8 @@ def validate(rows: list[dict], group: dict, known: dict) -> list[dict]:
                 issues.append(f"다른 반({r['grade']}-{r['class_no']})")
         if group["kind"] == "subject" and r["level"] and r["level"] not in LEVELS[scale]:
             notes.append(f"{scale}단계 범위 밖 수준")
+        if no in members:
+            notes.append("이미 명렬에 있음(정보만 갱신)" + ("" if members[no] else " · 비활성 학생"))
         if group["kind"] in ("homeroom", "club") and r["grade"] == "3":
             notes.append("3학년: 1학기 마감 대상")
         r["issues"], r["notes"] = issues, notes

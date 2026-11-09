@@ -11,7 +11,7 @@
   let dashSel = null;
   let semester = 1;
   let rosterSel = null;
-  let showInactive = false;
+  let showInactive = true;
   let runCost = 0;
 
   const PANEL_TITLES = {
@@ -199,16 +199,21 @@
   function closeSheet() { $('sheet').hidden = true; $('sheetBox').innerHTML = ''; }
 
   // ---------- 상단 바·메뉴 ----------
-  function showPanel(name) {
+  // fromHistory: 마우스 뒤로·앞으로 버튼으로 온 경우(화면 기록을 새로 쌓지 않음)
+  function showPanel(name, fromHistory) {
     if (draftDirty() || pendingSaves.size) {
-      saveAllPending().then((ok) => { if (ok) showPanelNow(name); else toast(SAVE_FAIL_MSG, 5000); });
+      saveAllPending().then((ok) => {
+        if (ok) showPanelNow(name, fromHistory);
+        else { toast(SAVE_FAIL_MSG, 5000); if (fromHistory) history.pushState({ panel }, ''); }
+      });
       return;
     }
     flushCfg();
-    showPanelNow(name);
+    showPanelNow(name, fromHistory);
   }
-  function showPanelNow(name) {
+  function showPanelNow(name, fromHistory) {
     $('actionToast').hidden = true;
+    if (!fromHistory && name !== panel) history.pushState({ panel: name }, '');
     panel = name;
     document.querySelectorAll('.nav').forEach((b) => b.classList.toggle('active', b.dataset.panel === name));
     document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.dataset.panelContent === name));
@@ -524,14 +529,15 @@
     const members = r.members;
     const toolbar = el('div', { class: 'toolbar' });
     toolbar.append(
-      el('button', { type: 'button', class: 'primary edit-only', text: '📋 엑셀 붙여넣기', onclick: () => importFromClipboard(g) }),
-      el('button', { type: 'button', class: 'edit-only', text: '📂 xlsx 불러오기', onclick: () => importFromXlsx(g) }),
+      el('button', { type: 'button', class: 'primary edit-only', text: '📋 클립보드에서 추가', onclick: () => importFromClipboard(g) }),
+      el('button', { type: 'button', class: 'edit-only', text: '📂 파일 추가(여러 개)', onclick: () => importFromXlsx(g) }),
+      el('button', { type: 'button', class: 'edit-only', text: '+ 학생 한 명 추가(전입)', onclick: () => openRosterInput(g, null, 'line') }),
     );
     if (!members.length) {
       body.appendChild(toolbar);
       body.appendChild(el('div', { class: 'empty-state' }, [
         el('p', { text: '명렬이 비어 있습니다.' }),
-        el('p', { class: 'hint', text: '엑셀에서 학번·이름 칸(또는 학년·반·번호·이름 칸)을 드래그해 복사한 뒤 [엑셀 붙여넣기]를 누르세요. 과목은 성취수준 칸도 함께 넣을 수 있습니다.' }),
+        el('p', { class: 'hint', text: '엑셀에서 학번·이름 칸(또는 학년·반·번호·이름 칸)을 드래그해 복사한 뒤 [클립보드에서 추가]를 누르세요. 반마다 파일이 따로 있으면 [파일 추가]에서 여러 개를 한꺼번에 고르면 됩니다. 붙여넣기와 파일을 섞어 계속 이어서 넣을 수 있습니다.' }),
       ]));
       return;
     }
@@ -540,9 +546,8 @@
       el('span', { class: 'spacer' }),
       el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'checkbox', checked: showInactive, onchange: (e) => { showInactive = e.target.checked; renderRoster(); } }), '비활성 학생 보기']),
       el('span', { class: 'edit-only muted', text: '|' }),
-      el('button', { type: 'button', class: 'edit-only', text: '선택 학생 비활성화', onclick: () => changeActive(false, allAct.checked) }),
-      el('label', { class: 'inline edit-only', style: 'margin:0' }, [allAct, '모든 소속에서(전출)']),
-      el('button', { type: 'button', class: 'edit-only', text: '다시 활성화', onclick: () => changeActive(true, allAct.checked) }),
+      el('button', { type: 'button', class: 'edit-only', text: '선택 학생 전출·빼기', onclick: () => transferOut() }),
+      el('button', { type: 'button', class: 'edit-only', text: '다시 활성화', onclick: () => changeActive(true, false) }),
     );
     body.appendChild(toolbar);
     const list = members.filter((m) => showInactive || m.active);
@@ -551,29 +556,49 @@
     const wrap = el('div', { class: 'tbl-wrap' });
     const t = el('table', { class: 'tbl' });
     const checkAll = el('input', { type: 'checkbox', onchange: (e) => t.querySelectorAll('.rowcheck').forEach((c) => { c.checked = e.target.checked; }) });
-    const heads = [el('th', {}, [checkAll]), el('th', { text: '학번' }), el('th', { text: '이름' }), el('th', { text: '학년-반' })];
-    if (g.kind === 'subject') heads.push(el('th', { text: `성취수준(${g.level_scale}단계)` }));
-    heads.push(el('th', { text: '상태' }));
-    t.appendChild(el('tr', {}, heads));
-    const letters = g.level_scale === 3 ? 'ABC' : 'ABCDE';
+    t.appendChild(el('tr', {}, [el('th', {}, [checkAll]), el('th', { text: '학번' }), el('th', { text: '이름' }), el('th', { text: '학년-반' }), el('th', { text: '상태' })]));
     list.forEach((m) => {
       const tr = el('tr', { class: m.active ? '' : 'inactive' });
       tr.appendChild(el('td', {}, [el('input', { type: 'checkbox', class: 'rowcheck', 'data-no': m.student_no })]));
-      tr.append(el('td', { text: m.student_no }), el('td', { text: m.name }), el('td', { text: `${m.grade}-${m.class_no}` }));
-      if (g.kind === 'subject') {
-        const opts = ['', ...letters.split('')];
-        if (m.level && !letters.includes(m.level)) opts.push(m.level);
-        const s = el('select', { class: 'narrow', disabled: !!ys.archived, onchange: async (e) => { if (await mutate('set_level', g.id, m.student_no, e.target.value)) m.level = e.target.value; } },
-          opts.map((v) => el('option', { value: v, text: v || '-', selected: v === (m.level || '') })));
-        if (m.level && !letters.includes(m.level)) s.style.background = 'var(--warn-bg)';
-        tr.appendChild(el('td', {}, [s]));
-      }
-      tr.appendChild(el('td', { text: m.active ? '활성' : '비활성' }));
+      tr.append(el('td', { text: m.student_no }), el('td', { text: m.name }), el('td', { text: `${m.grade}-${m.class_no}` }),
+        el('td', {}, [m.active ? '활성' : el('span', { class: 'inactive-badge', text: '비활성' })]));
       t.appendChild(tr);
     });
     wrap.appendChild(t);
     body.appendChild(wrap);
 
+    // 전출·빼기: 비활성화(기록 보존) 또는 삭제(기록도 지움, 먼저 백업)
+    async function transferOut() {
+      const nos = [...t.querySelectorAll('.rowcheck:checked')].map((c) => c.dataset.no);
+      if (!nos.length) { toast('학생을 먼저 체크하세요.'); return; }
+      const names = members.filter((m) => nos.includes(m.student_no)).map((m) => `${m.student_no} ${m.name}`);
+      const choice = await new Promise((resolve) => openSheet((box) => {
+        box.style.height = 'auto'; box.style.width = 'min(560px, 92vw)';
+        const all = el('input', { type: 'checkbox', checked: g.kind === 'homeroom' });
+        box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `${nos.length}명 전출·빼기` })]),
+          el('p', { text: names.slice(0, 8).join(', ') + (names.length > 8 ? ` 외 ${names.length - 8}명` : '') }),
+          el('label', { class: 'inline' }, [all, '이 학년도의 모든 소속(담임반·과목·동아리)에서 함께 처리(전출)']),
+          el('div', { class: 'two-col', style: 'margin-top:10px' }, [
+            el('div', { class: 'choice-card' }, [el('b', { text: '비활성화' }), el('p', { class: 'hint', text: '명렬에 남기되 붉은 글씨로 표시합니다. 기록·최종안은 그대로 두고, 매칭·일괄 처리·내보내기에서만 빠집니다. 나중에 다시 활성화할 수 있습니다.' }),
+              el('button', { type: 'button', class: 'primary', text: '비활성화', onclick: () => { closeSheet(); resolve({ how: 'deactivate', all: all.checked }); } })]),
+            el('div', { class: 'choice-card' }, [el('b', { class: 'danger-text', text: '삭제' }), el('p', { class: 'hint', text: '명렬에서 지우고 그 소속의 누가기록·후보·최종안도 함께 지웁니다. 지우기 전에 자동으로 백업합니다.' }),
+              el('button', { type: 'button', class: 'btn-danger', text: '삭제', onclick: () => { closeSheet(); resolve({ how: 'delete', all: all.checked }); } })]),
+          ]),
+          el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: () => { closeSheet(); resolve(null); } })]));
+      }));
+      if (!choice) return;
+      if (choice.how === 'deactivate') {
+        const r = await mutate('set_active', g.id, nos, false, choice.all);
+        if (r) { ys.groups = r.groups; toast(`${nos.length}명을 비활성화했습니다.`); renderRoster(); }
+        return;
+      }
+      const im = await call('member_impact', g.id, nos, choice.all);
+      if (!im) return;
+      const parts = [im.records && `누가기록 ${im.records}건`, im.finals && `최종안 ${im.finals}건`, im.results && `AI 후보 ${im.results}건`, im.inbox && `인박스 연결 ${im.inbox}건(연결만 풂)`].filter(Boolean).join(', ');
+      if (!(await confirmBox(`${nos.length}명을 ${choice.all ? '모든 소속' : `'${g.label}'`}에서 지웁니다.${parts ? `\n함께 지워지는 자료: ${parts}` : '\n함께 지워지는 기록은 없습니다.'}\n\n지우기 전에 자동으로 백업합니다. 계속할까요?`, '삭제'))) return;
+      const r = await mutate('remove_members', g.id, nos, choice.all);
+      if (r) { ys.groups = r.groups; toast(`${nos.length}명을 지웠습니다. 백업: ${r.backup}`); renderRoster(); }
+    }
     async function changeActive(active, all) {
       const nos = [...t.querySelectorAll('.rowcheck:checked')].map((c) => c.dataset.no);
       if (!nos.length) { toast('학생을 먼저 체크하세요.'); return; }
@@ -588,82 +613,148 @@
     }
   }
 
-  // 명렬 불러오기
-  async function importFromClipboard(g, onDone) {
-    const c = await api.read_clipboard();
-    const text = c && c.ok ? (c.text || '') : '';
-    if (text.trim()) {
-      const r = await call('roster_from_text', text);
-      if (r) openImport(g, r, '클립보드', onDone);
-      return;
-    }
-    // 클립보드를 못 읽으면 직접 붙여넣는 칸
-    openSheet((box) => {
-      box.style.height = 'auto';
-      const ta = el('textarea', { rows: 12, placeholder: '여기를 누르고 Ctrl+V로 붙여넣으세요.' });
-      box.append(
-        el('div', { class: 'sheet-head' }, [el('h2', { text: `명렬 붙여넣기 · ${g.label}` })]),
-        el('p', { class: 'hint', text: '클립보드가 비어 있습니다. 엑셀에서 학번·이름 칸을 복사한 뒤 아래에 붙여넣으세요.' }),
-        ta,
-        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }),
-          el('button', { type: 'button', class: 'primary', text: '읽기', onclick: async () => { const r = await call('roster_from_text', ta.value); if (r) openImport(g, r, '붙여넣기', onDone); } })]),
-      );
-      setTimeout(() => ta.focus(), 50);
-    });
-  }
-  async function importFromXlsx(g, onDone) {
-    const r = await call('roster_from_xlsx');
-    if (r) openImport(g, r, r.file || 'xlsx', onDone);
-  }
-  function openImport(g, parsed, source, onDone) {
-    const st = { raw: parsed.raw, header: parsed.header, columns: Object.assign({}, parsed.columns), rows: [], onlyBad: false };
+  // 명렬 입력: 클립보드·파일(여러 개)·한 줄 입력을 섞어 계속 쌓은 뒤 한 번에 명렬에 더한다.
+  // 추가할 때마다 한 묶음으로 기억해 [마지막 추가 취소]로 그 묶음만 뺄 수 있다.
+  function importFromClipboard(g, onDone) { openRosterInput(g, onDone, 'clip'); }
+  function importFromXlsx(g, onDone) { openRosterInput(g, onDone, 'file'); }
+  function openRosterInput(g, onDone, first) {
+    const st = { rows: [], batches: [], seq: 0, onlyBad: false, pendingMap: null };
     const roles = [['student_no', '학번'], ['name', '이름'], ['grade', '학년'], ['class_no', '반'], ['number', '번호']];
-    if (g.kind === 'subject') roles.push(['level', '성취수준']);
-    let tableBox, summary, applyBtn, removedNote;
+    let tableBox, summary, applyBtn, undoBtn, mapBox, logBox;
 
     openSheet((box) => {
       box.style.height = '';
-      const headerChk = el('input', { type: 'checkbox', checked: st.header, onchange: (e) => { st.header = e.target.checked; rebuild(); } });
-      const mapRow = el('div', { class: 'map-row' }, [el('label', {}, [headerChk, '첫 줄은 머리글'])]);
-      const width = st.raw[0].length;
-      const sample = (i) => { const r = st.raw[st.header ? 1 : 0] || []; return (r[i] || '').slice(0, 8); };
-      const selects = {};
-      roles.forEach(([key, label]) => {
-        const s = el('select', { onchange: (e) => { st.columns[key] = e.target.value === '' ? null : +e.target.value; rebuild(); } });
-        selects[key] = s;
-        mapRow.appendChild(el('label', {}, [label, s]));
-      });
-      const fillSelects = () => roles.forEach(([key]) => {
-        const s = selects[key];
-        s.innerHTML = '';
-        s.appendChild(el('option', { value: '', text: '(없음)' }));
-        for (let i = 0; i < width; i++) s.appendChild(el('option', { value: i, text: `${colName(i)}열: ${sample(i)}`, selected: st.columns[key] === i }));
-      });
-      fillSelects();
-      headerChk.addEventListener('change', fillSelects);
       tableBox = el('div', { class: 'sheet-body' });
+      mapBox = el('div', {});
+      logBox = el('div', { class: 'muted roster-log' });
       summary = el('span', {});
-      removedNote = el('span', { class: 'muted' });
-      applyBtn = el('button', { type: 'button', class: 'primary', text: '명렬 반영', onclick: apply });
+      applyBtn = el('button', { type: 'button', class: 'primary', text: '명렬에 추가', onclick: apply });
+      undoBtn = el('button', { type: 'button', text: '↶ 마지막 추가 취소', disabled: true, onclick: undoLast });
       const onlyBad = el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'checkbox', onchange: (e) => { st.onlyBad = e.target.checked; renderRows(); } }), '확인 필요만 보기']);
       box.append(
-        el('div', { class: 'sheet-head' }, [el('h2', { text: `명렬 불러오기 · ${g.label}` }), el('span', { class: 'muted', text: `(${source})` })]),
-        el('div', { class: 'hint', text: '열 연결을 확인하세요. 학번이 없으면 학년·반·번호로 학번(5자리)을 만들고, 학번이 있으면 학년·반을 계산합니다. 칸을 눌러 직접 고칠 수 있습니다.' }),
-        mapRow,
+        el('div', { class: 'sheet-head' }, [el('h2', { text: `명렬 입력 · ${g.label}` })]),
+        el('div', { class: 'hint', text: '엑셀에서 칸을 드래그해 복사한 뒤 [클립보드에서 추가]를 누르세요(이 창에서 Ctrl+V도 됩니다). 다른 범위를 복사해 또 누르면 아래에 이어 붙습니다. 파일은 여러 개를 한꺼번에 고를 수 있고, 붙여넣기와 섞어 써도 계속 이어집니다. 학번이 없으면 학년·반·번호로 학번(5자리)을 만듭니다.' }),
+        el('div', { class: 'toolbar' }, [
+          el('button', { type: 'button', class: 'primary', text: '📋 클립보드에서 추가', onclick: addClip }),
+          el('button', { type: 'button', text: '📂 파일 추가(여러 개)', onclick: addFiles }),
+          el('button', { type: 'button', text: '+ 한 줄 추가', onclick: () => addLine() }),
+          undoBtn, el('span', { class: 'spacer' }), logBox]),
+        mapBox,
         tableBox,
-        el('div', { class: 'sheet-foot' }, [summary, onlyBad, el('span', { class: 'spacer' }), removedNote, el('button', { type: 'button', text: '취소', onclick: closeSheet }), applyBtn]),
+        el('div', { class: 'sheet-foot' }, [summary, onlyBad, el('span', { class: 'spacer' }), el('button', { type: 'button', text: '닫기', onclick: closeAsk }), applyBtn]),
       );
+      // 창 안에서 Ctrl+V: 입력칸 밖이면 클립보드 내용을 추가
+      box.addEventListener('paste', (e) => {
+        if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+        const text = e.clipboardData && e.clipboardData.getData('text');
+        if (text && text.trim()) { e.preventDefault(); addText(text, '붙여넣기'); }
+      });
+      box.tabIndex = -1;
+      setTimeout(() => box.focus(), 50);
     });
+    renderRows();
+    if (first === 'clip') addClip();
+    else if (first === 'file') addFiles();
+    else if (first === 'line') addLine();
 
-    function plainRow(r) { return { student_no: r.student_no, name: r.name, grade: r.grade, class_no: r.class_no, number: r.number, level: r.level, rename_ok: !!r.rename_ok }; }
-    async function rebuild() {
-      const r = await call('roster_build', g.id, st.raw, st.header, st.columns);
+    function plainRow(r) { return { student_no: r.student_no, name: r.name, grade: r.grade, class_no: r.class_no, number: r.number, level: '', rename_ok: !!r.rename_ok }; }
+    function log() {
+      logBox.textContent = st.batches.length ? `추가 ${st.batches.length}번: ` + st.batches.map((b) => `${b.label} ${b.count}명`).join(' · ') : '';
+      undoBtn.disabled = !st.batches.length;
+      undoBtn.textContent = st.batches.length ? `↶ 마지막 추가 취소(${st.batches[st.batches.length - 1].label})` : '↶ 마지막 추가 취소';
+    }
+    async function addClip() {
+      const c = await api.read_clipboard();
+      const text = c && c.ok ? (c.text || '') : '';
+      if (!text.trim()) { toast('클립보드가 비어 있습니다. 엑셀에서 칸을 복사한 뒤 다시 누르세요.', 4000); return; }
+      addText(text, '클립보드');
+    }
+    async function addText(text, label) {
+      const r = await call('roster_from_text', text);
+      if (r) await addParsed([{ ...r, file: label }], label);
+    }
+    async function addFiles() {
+      const r = await call('roster_from_xlsx');
       if (!r) return;
-      st.rows = r.rows;
+      if (r.errors && r.errors.length) alertBox('읽지 못한 파일이 있습니다.\n' + r.errors.join('\n'));
+      await addParsed(r.files, r.files.length === 1 ? r.files[0].file : `파일 ${r.files.length}개`);
+    }
+    function usable(cols) { return cols.name !== null && cols.name !== undefined && (cols.student_no !== null && cols.student_no !== undefined || ['grade', 'class_no', 'number'].every((k) => cols[k] !== null && cols[k] !== undefined)); }
+    // 여러 원본을 한 묶음으로 추가. 열을 못 알아본 원본은 열 연결을 물어본다.
+    async function addParsed(list, label) {
+      const id = ++st.seq;
+      let count = 0;
+      for (const src of list) {
+        let cols = { ...src.columns, level: null };
+        let header = src.header;
+        if (!usable(cols)) {
+          const m = await askMapping(src, cols, header);
+          if (!m) continue;
+          cols = m.columns; header = m.header;
+        }
+        const r = await call('roster_build', g.id, src.raw, header, cols, true);
+        if (!r) continue;
+        r.rows.forEach((row) => { row._batch = id; st.rows.push(row); });
+        count += r.rows.length;
+      }
+      if (!count) return;
+      st.batches.push({ id, label, count });
+      log();
       renderRows();
+      revalidate();
+      toast(`${label}에서 ${count}명을 추가했습니다.`);
+    }
+    function addLine() {
+      const id = ++st.seq;
+      st.rows.push({ _batch: id, student_no: '', name: '', grade: '', class_no: '', number: '', issues: ['학번 없음', '이름 없음'], notes: [] });
+      st.batches.push({ id, label: '한 줄', count: 1 });
+      log();
+      renderRows();
+      const inp = tableBox.querySelector('tr:last-child input[data-k="student_no"]');
+      if (inp) inp.focus();
+    }
+    function undoLast() {
+      const b = st.batches.pop();
+      if (!b) return;
+      st.rows = st.rows.filter((r) => r._batch !== b.id);
+      log();
+      renderRows();
+      revalidate();
+      toast(`${b.label}에서 추가한 ${b.count}명을 뺐습니다.`);
+    }
+    // 열 연결 묻기(머리글이 없거나 열을 알아보지 못했을 때)
+    function askMapping(src, cols, header) {
+      return new Promise((resolve) => {
+        const c = { ...cols };
+        let h = header;
+        const width = src.raw[0].length;
+        const sample = (i) => { const r = src.raw[h ? 1 : 0] || []; return (r[i] || '').slice(0, 8); };
+        const row = el('div', { class: 'map-row' });
+        const selects = {};
+        const fill = () => roles.forEach(([key]) => {
+          const s = selects[key];
+          s.innerHTML = '';
+          s.appendChild(el('option', { value: '', text: '(없음)' }));
+          for (let i = 0; i < width; i++) s.appendChild(el('option', { value: i, text: `${colName(i)}열: ${sample(i)}`, selected: c[key] === i }));
+        });
+        row.appendChild(el('label', {}, [el('input', { type: 'checkbox', checked: h, onchange: (e) => { h = e.target.checked; fill(); } }), '첫 줄은 머리글']));
+        roles.forEach(([key, label]) => {
+          selects[key] = el('select', { onchange: (e) => { c[key] = e.target.value === '' ? null : +e.target.value; } });
+          row.appendChild(el('label', {}, [label, selects[key]]));
+        });
+        fill();
+        const done = (v) => { mapBox.innerHTML = ''; resolve(v); };
+        mapBox.innerHTML = '';
+        mapBox.appendChild(el('div', { class: 'map-ask' }, [
+          el('b', { text: `${src.file || '붙여넣은 내용'}: 어느 열이 학번·이름인지 골라 주세요.` }), row,
+          el('div', { class: 'toolbar' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '이 원본 빼기', onclick: () => done(null) }),
+            el('button', { type: 'button', class: 'primary', text: '이대로 추가', onclick: () => { if (!usable(c)) { toast('이름 열과, 학번 열(또는 학년·반·번호 열)을 골라 주세요.'); return; } done({ columns: c, header: h }); } })]),
+        ]));
+      });
     }
     const revalidate = debounce(async () => {
-      const r = await call('roster_validate', g.id, st.rows.map(plainRow));
+      if (!st.rows.length) { updateSummary(); return; }
+      const r = await call('roster_validate', g.id, st.rows.map(plainRow), true);
       if (!r) return;
       r.rows.forEach((nr, i) => {
         const row = st.rows[i];
@@ -687,32 +778,24 @@
     function updateSummary() {
       const bad = st.rows.filter((r) => r.issues && r.issues.length).length;
       summary.innerHTML = '';
-      summary.append(el('b', { text: `정상 ${st.rows.length - bad}` }), ' / ', el('b', { class: bad ? 'danger-text' : '', text: `확인 필요 ${bad}` }));
+      summary.append(el('b', { text: `추가할 학생 ${st.rows.length}명` }), ' · ', el('b', { text: `정상 ${st.rows.length - bad}` }), ' / ', el('b', { class: bad ? 'danger-text' : '', text: `확인 필요 ${bad}` }));
       applyBtn.disabled = bad > 0 || !st.rows.length;
-      applyBtn.textContent = `명렬 반영 (${st.rows.length}명)`;
-      const nos = new Set(st.rows.map((r) => r.student_no));
-      const gNow = (ys.groups || []).find((x) => x.id === g.id) || g;
-      if (gNow.total) {
-        api.members(g.id).then((m) => {
-          if (!m || !m.ok) return;
-          const removed = m.members.filter((x) => !nos.has(x.student_no)).length;
-          removedNote.textContent = `기존 ${m.members.length}명을 이 명렬로 바꿉니다${removed ? ` · 새 명렬에 없는 ${removed}명은 이 담당에서 빠집니다` : ''}.`;
-        });
-      }
+      applyBtn.textContent = `명렬에 추가 (${st.rows.length}명)`;
     }
     function renderRows() {
       tableBox.innerHTML = '';
+      if (!st.rows.length) {
+        tableBox.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '아직 추가한 학생이 없습니다. 위 버튼으로 클립보드·파일·한 줄 입력을 섞어서 넣을 수 있습니다.' })]));
+        updateSummary();
+        return;
+      }
       const t = el('table', { class: 'tbl' });
-      const hs = ['#', '학번', '이름', '학년', '반', '번호'];
-      if (g.kind === 'subject') hs.push('성취수준');
-      hs.push('확인', '');
-      t.appendChild(el('tr', {}, hs.map((h) => el('th', { text: h }))));
+      t.appendChild(el('tr', {}, ['#', '학번', '이름', '학년', '반', '번호', '확인', ''].map((h) => el('th', { text: h }))));
       st.rows.forEach((row, idx) => {
         if (st.onlyBad && !(row.issues && row.issues.length)) return;
         const tr = el('tr', {});
         const inp = (key, cls) => el('td', {}, [el('input', { type: 'text', class: cls || '', 'data-k': key, value: row[key] || '', oninput: (e) => { row[key] = e.target.value.trim(); revalidate(); } })]);
         tr.append(el('td', { class: 'muted', text: String(idx + 1) }), inp('student_no'), inp('name'), inp('grade', 'narrow'), inp('class_no', 'narrow'), inp('number', 'narrow'));
-        if (g.kind === 'subject') tr.appendChild(inp('level', 'narrow'));
         row._check = el('td', {});
         tr.appendChild(row._check);
         tr.appendChild(el('td', {}, [el('button', { type: 'button', class: 'link', title: '행 빼기', text: '✕', onclick: () => { st.rows.splice(idx, 1); renderRows(); revalidate(); } })]));
@@ -723,17 +806,19 @@
       tableBox.appendChild(t);
       updateSummary();
     }
+    async function closeAsk() {
+      if (st.rows.length && !(await confirmBox(`명렬에 아직 넣지 않은 ${st.rows.length}명이 있습니다. 닫으면 버립니다.`, '닫기'))) return;
+      closeSheet();
+    }
     async function apply() {
-      const clean = st.rows.map(plainRow);
-      const r = await mutate('roster_apply', g.id, clean);
+      const r = await mutate('roster_apply', g.id, st.rows.map(plainRow), 'add');
       if (!r) return;
       closeSheet();
       ys.groups = r.groups;
-      toast(`${r.count}명을 반영했습니다.${r.removed ? ` (${r.removed}명 빠짐)` : ''}`);
+      toast(`${r.count}명을 명렬에 넣었습니다.`);
       if (onDone) onDone();
       else renderRoster();
     }
-    rebuild();
   }
 
   function openGroupForm(onDone) {
@@ -1123,8 +1208,8 @@
     groups.forEach((g) => t.appendChild(el('tr', {}, [el('td', { text: g.label }),
       el('td', {}, [g.total ? el('span', { class: 'st st-closed', text: `✔ ${g.active}명 등록됨` }) : el('span', { class: 'muted', text: '미등록' })]),
       el('td', {}, [el('div', { class: 'inline' }, [
-        el('button', { type: 'button', class: g.total ? '' : 'primary', text: '📋 엑셀 붙여넣기', onclick: () => importFromClipboard(g, wizardAfterRoster) }),
-        el('button', { type: 'button', text: '📂 xlsx', onclick: () => importFromXlsx(g, wizardAfterRoster) }),
+        el('button', { type: 'button', class: g.total ? '' : 'primary', text: '📋 클립보드에서 추가', onclick: () => importFromClipboard(g, wizardAfterRoster) }),
+        el('button', { type: 'button', text: '📂 파일 추가', onclick: () => importFromXlsx(g, wizardAfterRoster) }),
       ])])])));
     body.appendChild(t);
   }
@@ -2533,6 +2618,7 @@
       const run = el('button', { type: 'button', class: 'primary', text: '성취기준만으로 생성' });
       run.addEventListener('click', async () => {
         if (!lvl.value) { toast('성취수준을 골라 주세요.'); lvl.focus(); return; }
+        if (lvl.value !== (v.student.level || '')) await call('set_level', R.slot.group_id, R.sno, lvl.value);
         const res = await busyRun(run, `synth${R.sno}`, () => call('ai_standards_only', R.slot.group_id, R.slot.item, R.sno, { text: ta.value, level: lvl.value }, model.value));
         if (!res) return;
         setCredits(res);
@@ -2641,10 +2727,18 @@
       if (st.closed) return ['제외', '마감'];
       if (st.all_locked) return ['제외', '후보 3개 모두 잠김'];
       if (!st.records) {
-        if (isSub && BT.useStd) return st.level ? ['가능', `성취기준만으로 생성(수준 ${st.level})`] : ['제외', '성취수준 없음(명렬에 입력)'];
+        if (isSub && BT.useStd) return st.level ? ['가능', `성취기준만으로 생성(수준 ${st.level})`] : ['제외', '기록 없음: 성취수준을 고르면 성취기준으로 생성'];
         return ['제외', '기록 없음'];
       }
       return ['가능', `기록 ${st.records}건${isSub && BT.useStd ? ' + 성취기준' : ''}`];
+    };
+    // 기록이 없는 학생만 성취수준을 받는다(성취기준만으로 생성할 때). 명렬에서는 받지 않는다.
+    const levelCell = (x) => {
+      if (!(isSub && BT.useStd && !x.records && x.active && !x.closed)) return x.level || '-';
+      const sel = levelSelect(info.group.level_scale || 5, x.level);
+      sel.disabled = !!ys.archived;
+      sel.addEventListener('change', async () => { if (await mutate('set_level', s.group_id, x.student_no, sel.value)) { x.level = sel.value; if (sel.value) BT.sel.add(x.student_no); else BT.sel.delete(x.student_no); renderBatchPanel(); } });
+      return sel;
     };
     const head = el('div', { class: 'card-head' }, [el('h2', { text: '일괄 종합' }), slotSelect(BT.slotKey)]);
     head.querySelector('select').addEventListener('change', (e) => { BT.slotKey = e.target.value; BT.sel.clear(); BT.results = {}; renderBatchPanel(); });
@@ -2678,7 +2772,7 @@
       const res = BT.results[x.student_no];
       t.appendChild(el('tr', { class: x.active ? '' : 'inactive' }, [
         el('td', {}, [el('input', { type: 'checkbox', disabled: ok !== '가능', checked: ok === '가능' && BT.sel.has(x.student_no), onchange: (e) => { BT.touched = true; if (e.target.checked) BT.sel.add(x.student_no); else BT.sel.delete(x.student_no); renderBatchPanel(); } })]),
-        el('td', { text: x.student_no }), el('td', { text: x.name }), el('td', { text: x.records ? `${x.records}건 · ${x.bytes}B` : '-' }), el('td', { text: x.level || '-' }),
+        el('td', { text: x.student_no }), el('td', { text: x.name }), el('td', { text: x.records ? `${x.records}건 · ${x.bytes}B` : '-' }), el('td', {}, [levelCell(x)]),
         el('td', { class: ok === '가능' ? '' : 'muted', text: reason }),
         el('td', {}, [res ? el('span', { class: res.ok ? 'res-ok' : 'res-fail', title: res.error || '', text: res.ok ? '✔ 후보 생성' : `✕ ${res.error || '실패'}` }) : null,
           res && res.ok ? el('button', { type: 'button', class: 'small link', text: '보기', onclick: () => openRecords(s.group_id, s.item, x.student_no) }) : null]),
@@ -2848,6 +2942,21 @@
       if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); moveStudent(-1); }
     });
     $('helpBtn').addEventListener('click', () => openGuide(HELP[panel]));
+    // 마우스 뒤로·앞으로 버튼(그리고 Alt+←/→): 메뉴 화면을 오간 순서대로 돌아간다
+    history.replaceState({ panel }, '');
+    window.addEventListener('popstate', (e) => {
+      const want = e.state && e.state.panel;
+      if (!want) return;
+      if (!$('sheet').hidden || !$('modal').hidden || !$('wizard').hidden) { history.pushState({ panel }, ''); return; } // 창이 열려 있으면 그대로
+      if (want !== panel) showPanel(want, true);
+    });
+    const mouseNav = (e) => {
+      if (e.button !== 3 && e.button !== 4) return;
+      e.preventDefault();
+      if (e.type === 'mouseup') { if (e.button === 3) history.back(); else history.forward(); }
+    };
+    window.addEventListener('mousedown', mouseNav);
+    window.addEventListener('mouseup', mouseNav);
     // 창을 닫을 때: 남은 저장을 마치고 닫는다(파이썬이 닫기를 잠시 멈추고 이 함수를 부름)
     window.__beforeClose = async () => {
       const okSave = await saveAllPending();

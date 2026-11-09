@@ -370,9 +370,10 @@ class YearDb:
         marks = ",".join("?" * len(student_nos))
         return {r["student_no"]: r["name"] for r in self.q(f"SELECT student_no,name FROM students WHERE student_no IN ({marks})", tuple(student_nos))}
 
-    def apply_roster(self, gid, rows):
+    def apply_roster(self, gid, rows, replace=True):
         """rows: [{student_no, name, grade, class_no, number, level}] — 검사를 통과한 행.
-        새 명렬에 없는 기존 학생은 기록이 있으면 비활성화하고, 없으면 소속에서 뺀다."""
+        replace=True: 새 명렬에 없는 기존 학생은 기록이 있으면 비활성화하고, 없으면 소속에서 뺀다.
+        replace=False(추가): 기존 학생은 그대로 두고 새 학생만 더하거나 정보를 고친다."""
         g = self.group(gid)
         nos = [r["student_no"] for r in rows]
         if len(set(nos)) != len(nos):
@@ -387,9 +388,12 @@ class YearDb:
                 )
                 c.execute(
                     """INSERT INTO memberships(group_id,student_no,active,level) VALUES(?,?,1,?)
-                       ON CONFLICT(group_id,student_no) DO UPDATE SET level=excluded.level""",
+                       ON CONFLICT(group_id,student_no) DO UPDATE SET
+                           level=CASE WHEN excluded.level<>'' THEN excluded.level ELSE memberships.level END""",
                     (g["id"], r["student_no"], (r.get("level") or "").strip().upper()),
                 )
+            if not replace:
+                return {"count": len(rows), "removed": 0, "deactivated": 0}
             # 새 명렬에 없는 학생: 기록이 있으면 비활성화(자료 보존), 없으면 소속에서 뺀다.
             existing = [r["student_no"] for r in c.execute("SELECT student_no FROM memberships WHERE group_id=?", (g["id"],))]
             missing = [n for n in existing if n not in set(nos)]
@@ -425,6 +429,45 @@ class YearDb:
                     (1 if active else 0, int(gid), *nos),
                 )
             return cur.rowcount
+
+    def _member_scope(self, c, gid, nos, all_groups):
+        if all_groups:
+            marks = ",".join("?" * len(nos))
+            return [(r[0], r[1]) for r in c.execute(f"SELECT group_id, student_no FROM memberships WHERE student_no IN ({marks})", nos)]
+        return [(int(gid), n) for n in nos]
+
+    def member_impact(self, gid, student_nos, all_groups=False):
+        """학생을 지울 때 함께 지워지는 자료 수."""
+        nos = [str(n) for n in student_nos or []]
+        out = {"records": 0, "finals": 0, "results": 0, "inbox": 0}
+        with self._lock:
+            c = self._conn
+            for g, n in self._member_scope(c, gid, nos, all_groups):
+                out["records"] += c.execute("SELECT COUNT(*) FROM records WHERE group_id=? AND student_no=?", (g, n)).fetchone()[0]
+                out["finals"] += c.execute("SELECT COUNT(*) FROM finals WHERE group_id=? AND student_no=? AND text<>''", (g, n)).fetchone()[0]
+                out["results"] += c.execute("SELECT COUNT(*) FROM results WHERE group_id=? AND student_no=?", (g, n)).fetchone()[0]
+                out["inbox"] += c.execute("""SELECT COUNT(*) FROM inbox_rows r JOIN inbox_batches b ON b.id=r.batch_id
+                                             WHERE b.group_id=? AND r.student_no=? AND b.stage<>'sent'""", (g, n)).fetchone()[0]
+        return out
+
+    def remove_members(self, gid, student_nos, all_groups=False):
+        """학생을 소속에서 지운다(전출 삭제). 그 소속의 기록·후보·최종안도 지우고,
+        보내지 않은 인박스 행은 학생 연결만 푼다. all_groups=True면 이 학년도의 모든 소속에서."""
+        nos = [str(n) for n in student_nos or []]
+        if not nos:
+            return 0
+        with self.tx() as c:
+            scope = self._member_scope(c, gid, nos, all_groups)
+            for g, n in scope:
+                c.execute("DELETE FROM record_tags WHERE record_id IN (SELECT id FROM records WHERE group_id=? AND student_no=?)", (g, n))
+                c.execute("DELETE FROM results WHERE group_id=? AND student_no=?", (g, n))
+                c.execute("DELETE FROM records WHERE group_id=? AND student_no=?", (g, n))
+                c.execute("DELETE FROM finals WHERE group_id=? AND student_no=?", (g, n))
+                c.execute("""UPDATE inbox_rows SET student_no=NULL, state='none', note='학생이 명렬에서 삭제됨'
+                             WHERE student_no=? AND batch_id IN (SELECT id FROM inbox_batches WHERE group_id=? AND stage<>'sent')""", (n, g))
+                c.execute("DELETE FROM memberships WHERE group_id=? AND student_no=?", (g, n))
+            c.execute("DELETE FROM students WHERE student_no NOT IN (SELECT student_no FROM memberships)")
+            return len(scope)
 
     def set_level(self, gid, student_no, level):
         with self.tx() as c:

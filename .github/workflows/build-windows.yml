@@ -36,6 +36,7 @@ jobs:
           python tests/test_move_batch.py
           python tests/test_review_fixes.py
           python tests/test_recheck_fixes.py
+          python tests/test_roster_input.py
 
       - name: Version info
         shell: pwsh

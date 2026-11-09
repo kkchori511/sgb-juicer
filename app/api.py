@@ -353,26 +353,52 @@ class Api:
 
     @safe
     def roster_from_xlsx(self):
-        result = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
+        """명렬 파일을 여러 개 한꺼번에 고를 수 있다(xlsx·csv). 파일마다 읽은 결과와 오류를 돌려준다."""
+        result = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True,
+                                                 file_types=("명렬 파일 (*.xlsx;*.csv)", "Excel 파일 (*.xlsx)", "CSV 파일 (*.csv)"))
         if not result:
             return {"ok": False, "cancelled": True}
-        path = result[0] if isinstance(result, (list, tuple)) else result
-        try:
-            rows = roster.parse_xlsx(path)
-        except Exception:
-            raise db.DbError("xlsx 파일을 열지 못했습니다. Excel에서 열려 있으면 닫고 다시 시도해 주세요.")
-        if not rows:
-            raise db.DbError("첫 번째 시트에 내용이 없습니다.")
-        return {"raw": rows, "file": os.path.basename(path), **roster.detect(rows)}
+        paths = list(result) if isinstance(result, (list, tuple)) else [result]
+        files, errors = [], []
+        for path in paths:
+            name = os.path.basename(path)
+            try:
+                if path.lower().endswith(".csv"):
+                    raw = open(path, "rb").read()
+                    for enc in ("utf-8-sig", "cp949"):
+                        try:
+                            text = raw.decode(enc)
+                            break
+                        except UnicodeDecodeError:
+                            text = None
+                    if text is None:
+                        raise ValueError
+                    rows = roster.parse_text(text)
+                else:
+                    rows = roster.parse_xlsx(path)
+            except Exception:
+                errors.append(f"{name}: 열지 못했습니다(Excel에서 열려 있으면 닫고 다시 시도)")
+                continue
+            if not rows:
+                errors.append(f"{name}: 첫 번째 시트에 내용이 없습니다")
+                continue
+            files.append({"raw": rows, "file": name, **roster.detect(rows)})
+        if not files:
+            raise db.DbError("읽은 명렬이 없습니다.\n" + "\n".join(errors))
+        return {"files": files, "errors": errors}
+
+    def _members_map(self, d, gid):
+        return {m["student_no"]: bool(m["active"]) for m in d.members(gid)}
 
     @safe
-    def roster_build(self, gid, raw, header, columns):
+    def roster_build(self, gid, raw, header, columns, add=False):
         d = self._db()
         rows = roster.build_rows(raw, bool(header), columns or {})
-        return {"rows": roster.validate(rows, d.group(gid), d.known_names([r["student_no"] for r in rows if r["student_no"]]))}
+        return {"rows": roster.validate(rows, d.group(gid), d.known_names([r["student_no"] for r in rows if r["student_no"]]),
+                                        self._members_map(d, gid) if add else None)}
 
     @safe
-    def roster_validate(self, gid, rows):
+    def roster_validate(self, gid, rows, add=False):
         d = self._db()
         for r in rows:
             r["student_no"] = str(r.get("student_no") or "").strip()
@@ -384,19 +410,22 @@ class Api:
                 parts = roster.split_student_no(r["student_no"])
                 if parts:
                     r["grade"], r["class_no"], r["number"] = (str(x) for x in parts)
-        return {"rows": roster.validate(rows, d.group(gid), d.known_names([r["student_no"] for r in rows if r["student_no"]]))}
+        return {"rows": roster.validate(rows, d.group(gid), d.known_names([r["student_no"] for r in rows if r["student_no"]]),
+                                        self._members_map(d, gid) if add else None)}
 
     @safe
-    def roster_apply(self, gid, rows):
+    def roster_apply(self, gid, rows, mode="replace"):
+        """mode: replace(이 명렬로 바꾸기) / add(지금 명렬에 더하기)"""
         self._editable()
         d = self._db()
-        checked = self.roster_validate(gid, rows)
+        add = mode == "add"
+        checked = self.roster_validate(gid, rows, add)
         if not checked.get("ok"):
             return checked
         bad = [r for r in checked["rows"] if r["issues"]]
         if bad:
             raise db.DbError(f"확인이 필요한 행 {len(bad)}개를 먼저 고쳐 주세요.")
-        result = d.apply_roster(gid, checked["rows"])
+        result = d.apply_roster(gid, checked["rows"], replace=not add)
         return {**result, "groups": d.groups()}
 
     @safe
@@ -409,6 +438,21 @@ class Api:
         d = self._db()
         n = d.set_active(gid, student_nos, bool(active), bool(all_groups))
         return {"changed": n, "groups": d.groups()}
+
+    @safe
+    def member_impact(self, gid, student_nos, all_groups=False):
+        return self._db().member_impact(gid, student_nos, bool(all_groups))
+
+    @safe
+    def remove_members(self, gid, student_nos, all_groups=False):
+        """전출 학생 삭제: 먼저 백업하고 지운다."""
+        self._editable()
+        with self._maintenance("학생 삭제"):
+            d = self._db()
+            name = backup.make("학생삭제전")
+            n = d.remove_members(gid, student_nos, bool(all_groups))
+            self._last_undo = None
+        return {"removed": n, "backup": name, "groups": d.groups()}
 
     @safe
     def set_level(self, gid, student_no, level):
