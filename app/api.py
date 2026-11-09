@@ -613,7 +613,8 @@ class Api:
     def student_view(self, gid, item, sno):
         d = self._db()
         rec = Records(d)
-        g, target = rec.slot(gid, item)
+        g, _ = rec.slot(gid, item)
+        target, pair = rec.target_for(gid, item, sno)
         m = next((x for x in d.members(gid) if x["student_no"] == str(sno)), None)
         if not m:
             raise db.DbError("학생을 찾지 못했습니다.")
@@ -625,7 +626,7 @@ class Api:
         if g["kind"] == "subject":
             st = Standards(d).get(gid)
             std = {"text": st["text"], "level_scale": g["level_scale"] or 5}
-        return {"student": m, "target": target, "records": rec.records(gid, item, sno),
+        return {"student": m, "target": target, "pair": pair, "records": rec.records(gid, item, sno),
                 "results": rec.slot_results(gid, item, sno), "final": final, "tags": rec.tags(),
                 "weight_sum_check": config.load()["weight_sum_check"], "standards": std}
 
@@ -801,8 +802,8 @@ class Api:
         cfg, model = self._model(model_index)
         op = "polish" if r["kind"] == "existing" else "refine"
         pr = prompts.merged(cfg["prompts"])[r["item"]][op]
-        _, target = rec.slot(r["group_id"], r["item"])
-        system = prompts.build_system(pr["prompt"], pr["example"], target if op == "polish" else 0)
+        target = rec.ai_target(r["group_id"], r["item"], r["student_no"]) if op == "polish" else 0
+        system = prompts.build_system(pr["prompt"], pr["example"], target)
         key = ("record", r["id"])
         self._guard(key)
         try:
@@ -819,9 +820,10 @@ class Api:
         std(세특만): {"text": 이번에 쓸 성취기준, "level": 성취수준} — 있으면 성취기준 관점·수준 반영."""
         self._editable()
         rec = self._rec()
-        g, target = rec.slot(gid, item)
+        g, _ = rec.slot(gid, item)
         std_rule, std_meta = self._std_rule(g, item, std, only=False)
         rec.require_open(gid, item, sno)
+        target = rec.ai_target(gid, item, sno)
         rec.check_room(gid, item, sno)
         ids = [int(x) for x in record_ids or []]
         idset = set(ids)
@@ -868,9 +870,10 @@ class Api:
         """기록이 없는 학생: 성취기준(과 성취수준)만으로 세특 후보를 만든다. 학번·이름은 보내지 않는다."""
         self._editable()
         rec = self._rec()
-        g, target = rec.slot(gid, item)
+        g, _ = rec.slot(gid, item)
         rec.require_open(gid, item, sno)
         rec.check_room(gid, item, sno)
+        target = rec.ai_target(gid, item, sno)
         rule, meta = self._std_rule(g, item, std, only=True)
         cfg, model = self._model(model_index)
         pr = prompts.merged(cfg["prompts"])[item]["synth"]
@@ -916,8 +919,9 @@ class Api:
         """최종안(또는 직접 쓴 글)을 다듬어 학생×항목 후보로."""
         self._editable()
         rec = self._rec()
-        _, target = rec.slot(gid, item)
+        rec.slot(gid, item)
         rec.require_open(gid, item, sno)
+        target = rec.ai_target(gid, item, sno)
         f = rec.final(gid, item, sno)
         if not (f and f["text"].strip()):
             raise db.DbError("다듬을 최종안이 없습니다.")

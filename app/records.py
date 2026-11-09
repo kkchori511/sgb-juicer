@@ -46,6 +46,49 @@ class Records:
         target = targets[item] if g["kind"] == "homeroom" else (g["target_bytes"] or targets[item])
         return g, target
 
+    # ---------- 1·2학기 합산 과목 ----------
+    def pair_info(self, gid, item, sno):
+        """세특 바이트를 1·2학기가 함께 쓰는 과목이면 그 정보.
+        2학기: 1학기 최종안 바이트와 남은 바이트(= 이 학생의 목표). 1학기 최종안이 아직 없으면 합산의 절반.
+        1학기: 짝인 2학기 과목과 합산 목표."""
+        g = self.d.group(gid)
+        if g["kind"] != "subject":
+            return None
+        if g.get("pair_id") and g.get("pair_total"):
+            try:
+                p = self.d.group(g["pair_id"])
+            except DbError:
+                return None
+            f = self.final(p["id"], "subject", sno)
+            member = bool(self.d.q("SELECT 1 FROM memberships WHERE group_id=? AND student_no=?", (p["id"], str(sno))))
+            first = count_bytes(f["text"]) if f and f["text"] else None
+            total = int(g["pair_total"])
+            remain = (total - first) if first is not None else None
+            return {"role": "second", "other_id": p["id"], "other": p["label"], "total": total, "member": member,
+                    "first_bytes": first, "first_text": (f["text"] if f else "") or "", "first_closed": bool(f and f["closed"]),
+                    "remain": remain, "target": max(remain, 0) if remain is not None else total // 2}
+        for s2 in self.d.groups():
+            if s2.get("pair_id") == g["id"] and s2.get("pair_total"):
+                f2 = self.final(s2["id"], "subject", sno)
+                return {"role": "first", "other_id": s2["id"], "other": s2["label"], "total": int(s2["pair_total"]),
+                        "second_bytes": count_bytes(f2["text"]) if f2 and f2["text"] else None}
+        return None
+
+    def target_for(self, gid, item, sno):
+        """학생별 목표 바이트: 2학기 합산 과목이면 '합산 − 1학기 최종안', 아니면 담당 목표."""
+        g, target = self.slot(gid, item)
+        pi = self.pair_info(gid, item, sno)
+        if pi and pi["role"] == "second":
+            return pi["target"], pi
+        return target, pi
+
+    def ai_target(self, gid, item, sno):
+        """AI에 줄 목표. 1학기가 합산을 이미 다 쓰면 막는다."""
+        t, pi = self.target_for(gid, item, sno)
+        if pi and pi["role"] == "second" and t <= 0:
+            raise DbError(f"1학기({pi['other']}) 최종안이 {pi['first_bytes']}B로 합산 {pi['total']}B를 이미 채웠습니다. 1학기 최종안을 줄이거나 합산 목표를 바꿔 주세요.")
+        return t
+
     def _member(self, gid, sno):
         rows = self.d.q("SELECT active FROM memberships WHERE group_id=? AND student_no=?", (int(gid), str(sno)))
         if not rows:
@@ -493,12 +536,19 @@ class Records:
                 self._stale(c, gid, item, sno)
 
     # ---------- 일괄 종합 준비 ----------
+    def _pair_cols(self, gid, item, sno, target):
+        """표에 붙일 합산 칸: target(이 학생 목표), first_bytes(1학기), pair_total."""
+        pi = self.pair_info(gid, item, sno)
+        if pi and pi["role"] == "second":
+            return {"target": pi["target"], "first_bytes": pi["first_bytes"], "pair_total": pi["total"]}
+        return {"target": target}
+
     def batch_info(self, gid, item):
         """학생마다 일괄 종합 가능 여부."""
         g, target = self.slot(gid, item)
         out = []
         for m in self.d.members(gid):
-            recs = self.d.q("SELECT id, kind, content, weight FROM records WHERE group_id=? AND item=? AND student_no=? ORDER BY kind='record', COALESCE(seq,0), id",
+            recs = self.d.q("SELECT id, kind, content, weight FROM records WHERE group_id=? AND item=? AND student_no=? ORDER BY pos IS NULL, pos, kind='record', COALESCE(seq,0), id",
                             (int(gid), item, m["student_no"]))
             slot_res = self._scope_rows(gid, item, m["student_no"], None)
             f = self.final(gid, item, m["student_no"])
@@ -509,6 +559,7 @@ class Records:
                 "bytes": sum(count_bytes(r["content"]) for r in recs),
                 "closed": bool(f and f["closed"]), "has_final": bool(f and f["text"]),
                 "all_locked": len(slot_res) >= MAX_RESULTS and all(r["locked"] for r in slot_res),
+                **self._pair_cols(gid, item, m["student_no"], target),
             })
         return {"group": g, "target": target, "students": out}
 
@@ -621,7 +672,7 @@ class Records:
 
     # ---------- 내보내기 ----------
     def export_rows(self, gid, item, only_closed=False, order="no"):
-        self.slot(gid, item)
+        _, target = self.slot(gid, item)
         members = [m for m in self.d.members(gid) if m["active"]]
         finals = {f["student_no"]: f for f in self.d.q("SELECT * FROM finals WHERE group_id=? AND item=?", (int(gid), item))}
         rows = []
@@ -632,7 +683,8 @@ class Records:
                 continue
             text = f["text"] if f else ""
             rows.append({"student_no": m["student_no"], "name": m["name"], "grade": m["grade"], "class_no": m["class_no"], "number": m["number"],
-                         "closed": closed, "text": text, "bytes": count_bytes(text) if text else 0})
+                         "closed": closed, "text": text, "bytes": count_bytes(text) if text else 0,
+                         **self._pair_cols(gid, item, m["student_no"], target)})
         if order == "name":
             rows.sort(key=lambda r: (r["name"], r["student_no"]))
         else:

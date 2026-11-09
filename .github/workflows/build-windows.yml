@@ -38,6 +38,7 @@ jobs:
           python tests/test_recheck_fixes.py
           python tests/test_roster_input.py
           python tests/test_existing_import.py
+          python tests/test_pair_subject.py
 
       - name: Version info
         shell: pwsh

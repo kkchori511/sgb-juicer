@@ -5,6 +5,7 @@ v2: 태그·누가기록·AI 결과 후보·최종안(마감). 기록 다루는 
 v3: 자료 인박스(묶음·행·정제 후보). 다루는 함수는 inbox.py.
 v4: 인박스 행에 원본 페이지 번호(pages) — 스캔 PDF 원본 보기용.
 v5: 과목별 성취기준(standards).
+v6: 기록 순서(records.pos). v7: 선택과목 수업(memberships.section). v8: 1·2학기 합산 과목(groups.pair_id·pair_total).
 """
 import re
 import sqlite3
@@ -13,7 +14,7 @@ from contextlib import contextmanager
 
 from .paths import data_dir
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 KINDS = ("homeroom", "subject", "club")
 ROLES = ("homeroom", "subject")  # 담임 / 비담임
 
@@ -31,6 +32,8 @@ CREATE TABLE IF NOT EXISTS groups (
     class_no INTEGER,            -- 학급: 반
     level_scale INTEGER DEFAULT 5, -- 과목만: 성취수준 3 또는 5단계
     target_bytes INTEGER,        -- 과목·동아리 목표 분량(없으면 기본값)
+    pair_id INTEGER,             -- 2학기 과목: 세특 바이트를 함께 쓰는 1학기 과목
+    pair_total INTEGER,          -- 그 합산 목표(예: 1500)
     sort_order INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS students (
@@ -202,6 +205,10 @@ class YearDb:
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(records)")}
         if "pos" not in cols:
             self._conn.execute("ALTER TABLE records ADD COLUMN pos INTEGER")
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(groups)")}
+        if "pair_id" not in cols:
+            self._conn.execute("ALTER TABLE groups ADD COLUMN pair_id INTEGER")
+            self._conn.execute("ALTER TABLE groups ADD COLUMN pair_total INTEGER")
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(memberships)")}
         if "section" not in cols:
             self._conn.execute("ALTER TABLE memberships ADD COLUMN section TEXT DEFAULT ''")
@@ -268,6 +275,12 @@ class YearDb:
         )
         for g in rows:
             g["label"] = group_label(g)
+        # 2학기 과목: 이름 끝 숫자만 다른 1학기 과목을 합산 짝으로 추천(공통수학2 → 공통수학1)
+        firsts = {_stem(g["name"]): g["id"] for g in rows if g["kind"] == "subject" and g["semester"] == 1 and _stem(g["name"]) != g["name"]}
+        for g in rows:
+            g["pair_suggest"] = None
+            if g["kind"] == "subject" and g["semester"] == 2 and not g.get("pair_id") and _stem(g["name"]) != g["name"]:
+                g["pair_suggest"] = firsts.get(_stem(g["name"]))
         return rows
 
     def group(self, gid):
@@ -332,6 +345,20 @@ class YearDb:
         if "target_bytes" in fields and g["kind"] != "homeroom":
             t = _int(fields["target_bytes"])
             allowed["target_bytes"] = t if t and t > 0 else None
+        if "pair_id" in fields and g["kind"] == "subject":
+            pid = _int(fields["pair_id"])
+            if not pid:
+                allowed.update(pair_id=None, pair_total=None)
+            else:
+                p = self.group(pid)
+                if p["id"] == g["id"] or p["kind"] != "subject":
+                    raise DbError("합산할 과목을 다시 골라 주세요.")
+                if g["semester"] != 2 or p["semester"] != 1:
+                    raise DbError("합산은 2학기 과목에서 1학기 과목을 골라 연결합니다.")
+                total = _int(fields.get("pair_total"))
+                if not total or total <= 0:
+                    raise DbError("합산 목표 바이트를 넣어 주세요(예: 1500).")
+                allowed.update(pair_id=p["id"], pair_total=total)
         if g["kind"] == "homeroom" and ("grade" in fields or "class_no" in fields):
             gr = _int(fields.get("grade", g["grade"]))
             cl = _int(fields.get("class_no", g["class_no"]))
@@ -366,6 +393,7 @@ class YearDb:
             c.execute("DELETE FROM records WHERE group_id=?", (int(gid),))
             c.execute("DELETE FROM standards WHERE group_id=?", (int(gid),))
             c.execute("DELETE FROM groups WHERE id=?", (int(gid),))
+            c.execute("UPDATE groups SET pair_id=NULL, pair_total=NULL WHERE pair_id=?", (int(gid),))
             c.execute("DELETE FROM students WHERE student_no NOT IN (SELECT student_no FROM memberships)")
 
     # ---------- 명렬 ----------
@@ -552,6 +580,11 @@ def group_label(g: dict) -> str:
     if g["kind"] == "subject":
         return f"{g['name']}·{g['semester']}학기"
     return f"{g['name']}·연간"
+
+
+def _stem(name):
+    """과목 이름 끝의 학기 표시(1·2, Ⅰ·Ⅱ, I·II)를 뗀다."""
+    return re.sub(r"\s*(?:[12]|Ⅰ|Ⅱ|II|I)\s*$", "", name or "")
 
 
 def _int(v):

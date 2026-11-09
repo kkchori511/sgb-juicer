@@ -563,3 +563,26 @@ input.sec-in { width: 130px; height: 28px; padding: 2px 6px; font-size: 13px; di
 @keyframes aispin { to { transform: rotate(360deg); } }
 .ai-bar { height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden; margin: 6px 0 8px; }
 .ai-bar > span { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.3s; }
+/* v0.15: 1·2학기 합산 */
+.pair-row { border-top: 1px dashed var(--border); margin-top: 8px; padding-top: 8px; }
+.pair-suggest { background: var(--warn-bg); padding: 4px 8px; border-radius: var(--radius-sm); }
+.pair-box { border: 1px solid #c7d7fe; background: #eef4ff; border-radius: var(--radius-sm); padding: 7px 10px; margin-bottom: 8px; font-size: 13.5px; }
+.pair-box.over { border-color: #fca5a5; background: #fef2f2; }
+.pair-box details { margin-top: 4px; }
+.pair-box .cmp-text { margin-top: 4px; }
+/* v0.15: 학생 목록 묶음 상자(색 띠)·맨 위 마감 통계 */
+.stu-group { --gc: #2563eb; border: 1px solid var(--border); border-left: 5px solid var(--gc); border-radius: var(--radius-sm); margin-bottom: 8px; overflow: hidden; background: var(--surface); }
+.stu-group .stu-group-head { border-radius: 0; background: color-mix(in srgb, var(--gc) 12%, white); color: color-mix(in srgb, var(--gc) 75%, black); padding: 6px 8px; }
+.stu-group .stu-group-head:hover { background: color-mix(in srgb, var(--gc) 20%, white); }
+.stu-group:not(.folded) .stu-group-head { border-bottom: 1px solid color-mix(in srgb, var(--gc) 25%, white); }
+.stu-group .stu { border-radius: 0; }
+.stu-group .stu.active { background: color-mix(in srgb, var(--gc) 16%, white); color: inherit; box-shadow: inset 3px 0 0 var(--gc); }
+.stat-box { border: 2px solid var(--st-closed); background: #f0faf4; border-radius: var(--radius); padding: 8px 10px; margin-bottom: 8px; }
+.stat-top { display: flex; align-items: baseline; gap: 2px; font-weight: 700; }
+.stat-big { font-size: 24px; color: var(--st-closed); line-height: 1.1; }
+.stat-bar { height: 8px; background: #d7eedf; border-radius: 999px; overflow: hidden; margin: 5px 0 6px; }
+.stat-bar > span { display: block; height: 100%; background: var(--st-closed); }
+.stat-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.stat-chip { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.stat-chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-hover); }
+.stat-chip b { color: var(--text); }

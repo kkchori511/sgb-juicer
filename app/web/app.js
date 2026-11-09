@@ -527,7 +527,32 @@
       if (r) { ys.groups = r.groups; rosterSel = null; renderRoster(); toast(`지웠습니다. 백업: ${r.backup}`); }
     } }));
     box.appendChild(row);
+    if (g.kind === 'subject') box.appendChild(pairEditor(g, save));
     return box;
+  }
+  // 1·2학기 합산 과목: 2학기 과목에서 1학기 과목과 합산 목표를 고른다. 2학기 목표 = 합산 − 1학기 최종안(학생별)
+  function pairEditor(g, save) {
+    const row = el('div', { class: 'map-row pair-row' });
+    const firsts = (ys.groups || []).filter((x) => x.kind === 'subject' && x.semester === 1);
+    const partnerOf = (ys.groups || []).find((x) => x.pair_id === g.id);
+    if (g.semester !== 2) {
+      row.append(el('b', { text: '1·2학기 합산' }), partnerOf
+        ? el('span', {}, [`2학기 ${partnerOf.label}와 세특 합산 ${partnerOf.pair_total}B. 1학기를 먼저 쓰면 2학기에 남은 바이트가 학생별로 자동 계산됩니다.`])
+        : el('span', { class: 'muted', text: '1학기와 2학기가 세특 바이트를 함께 쓰는 과목이면, 2학기 과목 설정에서 이 과목을 고르세요.' }));
+      return row;
+    }
+    const sel = el('select', {}, [el('option', { value: '', text: '(합산 안 함)' }), ...firsts.map((x) => el('option', { value: x.id, text: x.label, selected: x.id === g.pair_id }))]);
+    const tot = el('input', { type: 'number', class: 'num', min: 1, value: g.pair_total || 1500 });
+    row.append(el('b', { text: '1·2학기 합산' }), el('label', {}, ['1학기 과목', sel]), el('label', {}, ['합산', tot, 'B']),
+      el('button', { type: 'button', text: g.pair_id ? '바꾸기' : '연결', onclick: () => save({ pair_id: sel.value || null, pair_total: tot.value }) }));
+    if (g.pair_id) row.appendChild(el('button', { type: 'button', class: 'link', text: '연결 풀기', onclick: () => save({ pair_id: null }) }));
+    const sug = !g.pair_id && g.pair_suggest && firsts.find((x) => x.id === g.pair_suggest);
+    if (sug) row.appendChild(el('span', { class: 'pair-suggest' }, [`${sug.label}과 세특 바이트를 합산하나요? `,
+      el('button', { type: 'button', class: 'small primary', text: `${sug.name}와 합산 연결`, onclick: () => save({ pair_id: sug.id, pair_total: tot.value }) })]));
+    row.appendChild(el('div', { class: 'hint', style: 'margin:4px 0 0;flex-basis:100%', text: g.pair_id
+      ? '이 과목 목표 = 합산 − 1학기 최종안 바이트(학생별). 1학기 최종안이 아직 없으면 합산의 절반을 씁니다. AI 종합도 이 목표에 맞춰 씁니다.'
+      : '1학기와 세특 바이트를 함께 쓰는 과목이면 1학기 과목과 합산 바이트를 골라 연결하세요.' }));
+    return row;
   }
   async function loadMembers(g, body) {
     const r = await call('members', g.id);
@@ -1605,7 +1630,7 @@
       ...Object.entries(STATUS).map(([k, v]) => el('option', { value: k, text: `${v.icon} ${v.text}`, selected: R.filter === k })),
       el('option', { value: 'stale', text: '! 채택 후 기록 변경', selected: R.filter === 'stale' }),
     ]);
-    box.append(search, filter);
+    box.append(statBox(), search, filter);
     const list = filteredStudents();
     // 묶음마다 제목(접기). 검색·필터 중에는 맞는 학생이 있는 묶음을 펼쳐 보인다.
     const narrowing = !!(R.search.trim() || R.filter);
@@ -1618,12 +1643,12 @@
     });
     groups.forEach((gr) => {
       const fk = `stu:${R.slot.group_id}:${gr.key}`;
+      const folded = !narrowing && !!fold[fk];
       const all = R.students.filter((s) => groupOf(s).key === gr.key && s.active);
       const done = all.filter((s) => s.status === 'closed').length;
-      const holder = el('div', { class: 'stu-group' });
-      const folded = !narrowing && !!fold[fk];
+      const holder = el('div', { class: 'stu-group' + (folded ? ' folded' : ''), style: `--gc:${groupColor(gr.key)}` });
       const head = el('button', { type: 'button', class: 'stu-group-head', 'aria-expanded': folded ? 'false' : 'true', title: folded ? '펼치기' : '접기',
-        onclick: () => { setFold(fk, !folded); renderStudentList(); } }, [`${folded ? '▸' : '▾'} ${gr.label}`, el('span', { class: 'cnt', text: `마감 ${done}/${all.length}` })]);
+        onclick: () => { setFold(fk, !folded); renderStudentList(); } }, [`${folded ? '▸' : '▾'} ${gr.label}`, el('span', { class: 'cnt', text: `${all.length}명 · 마감 ${done}` })]);
       holder.appendChild(head);
       box.appendChild(holder);
       if (folded) return;
@@ -1637,8 +1662,24 @@
       ]));
     }
     if (!list.length) box.appendChild(el('p', { class: 'muted', text: '조건에 맞는 학생이 없습니다.' }));
-    const done = R.students.filter((s) => s.active && s.status === 'closed').length;
-    box.appendChild(el('p', { class: 'hint', text: `마감 ${done}/${R.students.filter((s) => s.active).length}명` }));
+  }
+  // 묶음 색: 반·수업 이름으로 정해 화면이 바뀌어도 같은 색
+  const GROUP_COLORS = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0891b2', '#db2777'];
+  function groupColor(key) { let h = 0; for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return GROUP_COLORS[h % GROUP_COLORS.length]; }
+  // 맨 위 통계 상자: 담당 전체(검색·필터와 관계없이). 숫자를 누르면 그 상태로 거른다.
+  function statBox() {
+    const act = R.students.filter((s) => s.active);
+    const n = (k) => act.filter((s) => s.status === k).length;
+    const done = n('closed');
+    const pct = act.length ? Math.round((done / act.length) * 100) : 0;
+    const chip = (k, label) => el('button', { type: 'button', class: `stat-chip ${STATUS[k].cls}${R.filter === k ? ' on' : ''}`, title: `${label}만 보기`,
+      onclick: () => { R.filter = R.filter === k ? '' : k; renderStudentList(); } }, [`${STATUS[k].icon} ${label} `, el('b', { text: String(n(k)) })]);
+    return el('div', { class: 'stat-box' }, [
+      el('div', { class: 'stat-top' }, [el('span', { text: '마감 ' }), el('b', { class: 'stat-big', text: `${done}` }), el('span', { text: ` / ${act.length}명` }), el('span', { class: 'spacer' }), el('b', { text: `${pct}%` })]),
+      el('div', { class: 'stat-bar' }, [el('span', { style: `width:${pct}%` })]),
+      el('div', { class: 'stat-chips' }, [chip('final', '최종안'), chip('progress', '입력 중'), chip('none', '기록 없음')]),
+      R.students.length > act.length ? el('div', { class: 'muted', style: 'font-size:12px;margin-top:2px', text: `비활성 ${R.students.length - act.length}명 제외` }) : null,
+    ]);
   }
   async function moveStudent(step) {
     const list = filteredStudents();
@@ -1662,6 +1703,7 @@
     if (!r || req !== studentReq || ctx.year !== ys.year || !R.slot || ctx.gid !== R.slot.group_id || ctx.item !== R.slot.item || ctx.sno !== R.sno) return;
     R.view = r;
     R.viewCtx = ctx;
+    R.target = r.target; // 1·2학기 합산 과목은 학생마다 목표가 다르다
     const st = R.students.find((s) => s.student_no === R.sno);
     const stInfo = STATUS[(r.final && r.final.closed) ? 'closed' : r.final ? 'final' : (r.records.length || r.results.length) ? 'progress' : 'none'];
     if (st) st.status = (r.final && r.final.closed) ? 'closed' : r.final ? 'final' : (r.records.length || r.results.length) ? 'progress' : 'none';
@@ -2028,6 +2070,8 @@
     const finSec = el('div', { class: 'final-sec' });
     box.appendChild(finSec);
     finSec.appendChild(el('div', { class: 'sec-title' }, [foldBtn('final', finSec, '최종안'), el('span', { class: 'muted', text: `목표 ${R.target}B` }), stdBadge(fmeta)]));
+    const pairBox = pairInfo(v.pair);
+    if (pairBox) finSec.appendChild(pairBox);
     const fb = el('div', { class: 'final-box' + (f ? ' has' : '') + (closed ? ' closed' : '') });
     if (f && f.stale && !closed) fb.appendChild(el('div', { class: 'stale', text: '! 최종안을 채택한 뒤 기록이 바뀌었습니다. 다시 종합하거나 내용을 확인하세요.' }));
     const ta = el('textarea', { value: f ? f.text : '', placeholder: '아직 최종안이 없습니다. 아래 종합 후보에서 [최종안으로 채택]을 누르거나 여기에 직접 쓰세요.', disabled: ro });
@@ -2088,6 +2132,29 @@
       } }),
       el('button', { type: 'button', class: 'small', text: '정보', onclick: () => candInfo(cd) }),
     ])));
+  }
+
+  // 1·2학기 합산 안내(최종안 칸 위)
+  function pairInfo(p) {
+    if (!p) return null;
+    if (p.role === 'first') {
+      return el('div', { class: 'pair-box' }, [el('b', { text: `1·2학기 합산 ${p.total}B` }),
+        ` · 2학기 ${p.other}${p.second_bytes !== null && p.second_bytes !== undefined ? ` 최종안 ${p.second_bytes}B` : ''}`,
+        el('div', { class: 'muted', text: '여기(1학기)에서 쓴 바이트만큼 2학기 목표가 줄어듭니다.' })]);
+    }
+    const over = p.remain !== null && p.remain !== undefined && p.remain <= 0;
+    const box = el('div', { class: 'pair-box' + (over ? ' over' : '') });
+    const add = (...xs) => box.append(...xs.filter((x) => x !== null && x !== undefined));
+    if (p.first_bytes === null || p.first_bytes === undefined) {
+      add(el('b', { text: `1학기 ${p.other} 최종안 없음` }), ` · 합산 ${p.total}B → 우선 절반 `, el('b', { text: `${p.target}B` }), '를 목표로 씁니다.',
+        p.member ? null : el('div', { class: 'muted', text: '이 학생은 1학기 명렬에 없습니다.' }));
+      return box;
+    }
+    add(el('b', { text: `1학기 ${p.other} 최종안 ${p.first_bytes}B${p.first_closed ? ' (마감)' : ''}` }), ` · 합산 ${p.total}B → 이번 학기 남은 `,
+      el('b', { class: over ? 'danger-text' : '', text: `${p.remain}B` }),
+      over ? el('div', { class: 'danger-text', text: '1학기가 합산을 이미 채워 AI 종합·다듬기를 할 수 없습니다. 1학기 최종안을 줄이거나 합산 목표를 바꾸세요.' }) : null,
+      el('details', {}, [el('summary', { text: '1학기 최종안 보기' }), el('div', { class: 'cmp-text', text: p.first_text })]));
+    return box;
   }
 
   // 줄 순서 바꾸기: ⠿ 손잡이를 끌거나 ▲▼ 버튼. items: 화면 순서의 [{ id, el }].
@@ -2476,9 +2543,11 @@
     const empty = r.rows.filter((x) => !x.text).length;
     $('expSummary').textContent = `${r.rows.length}명 · 마감 ${closed} · 미마감 ${r.rows.length - closed} · 최종안 없음 ${empty}(빈칸) · 비활성 학생 제외`;
     const t = el('table', { class: 'tbl' });
-    t.appendChild(el('tr', {}, ['학년', '반', '번호', '이름', '상태', '최종안', '바이트'].map((h) => el('th', { text: h }))));
+    const paired = r.rows.some((x) => x.pair_total);
+    t.appendChild(el('tr', {}, ['학년', '반', '번호', '이름', '상태', '최종안', '바이트', ...(paired ? ['1학기 · 합계'] : [])].map((h) => el('th', { text: h }))));
     r.rows.forEach((x) => t.appendChild(el('tr', { class: x.closed ? '' : 'bad' }, [el('td', { text: x.grade ?? '' }), el('td', { text: x.class_no ?? '' }), el('td', { text: x.number ?? '' }), el('td', { text: x.name }),
-      el('td', { text: x.closed ? '● 마감' : '미마감' }), el('td', {}, [el('div', { class: 'exp-text', text: x.text || '' })]), el('td', {}, [x.text ? bytesEl(x.bytes, r.target) : el('span', { class: 'muted', text: '-' })])])));
+      el('td', { text: x.closed ? '● 마감' : '미마감' }), el('td', {}, [el('div', { class: 'exp-text', text: x.text || '' })]), el('td', {}, [x.text ? bytesEl(x.bytes, x.target || r.target) : el('span', { class: 'muted', text: '-' })]),
+      ...(paired ? [el('td', { class: (x.first_bytes || 0) + x.bytes > x.pair_total ? 'danger-text' : '', text: x.pair_total ? `${x.first_bytes ?? 0}B · ${(x.first_bytes || 0) + x.bytes}/${x.pair_total}B` : '' })] : [])])));
     if (!r.rows.length) t.appendChild(el('tr', {}, [el('td', { colspan: 7, class: 'muted', text: '내보낼 학생이 없습니다.' })]));
     box.appendChild(t);
     $('expCopyBtn').textContent = `클립보드 복사: ${r.rows.length}명`;
@@ -3307,6 +3376,7 @@
       if (!st.active) return ['제외', '비활성'];
       if (st.closed) return ['제외', '마감'];
       if (st.all_locked) return ['제외', '후보 3개 모두 잠김'];
+      if (st.pair_total && st.target <= 0) return ['제외', '1학기 최종안이 합산을 다 씀'];
       if (!st.records) {
         if (isSub && BT.useStd) return st.level ? ['가능', `성취기준만으로 생성(수준 ${st.level})`] : ['제외', '기록 없음: 성취수준을 고르면 성취기준으로 생성'];
         return ['제외', '기록 없음'];
@@ -3347,13 +3417,16 @@
     if (!BT.touched) can.forEach((x) => BT.sel.add(x.student_no));
     const t = el('table', { class: 'tbl' });
     const all = el('input', { type: 'checkbox', checked: can.length && can.every((x) => BT.sel.has(x.student_no)), onchange: (e) => { BT.touched = true; can.forEach((x) => (e.target.checked ? BT.sel.add(x.student_no) : BT.sel.delete(x.student_no))); renderBatchPanel(); } });
-    t.appendChild(el('tr', {}, [el('th', {}, [all]), ...['학년', '반', '번호', '이름', '기록', '성취수준', '처리', '결과'].map((h) => el('th', { text: h }))]));
+    const paired = info.students.some((x) => x.pair_total);
+    t.appendChild(el('tr', {}, [el('th', {}, [all]), ...['학년', '반', '번호', '이름', '기록', ...(paired ? ['목표(1학기)'] : []), '성취수준', '처리', '결과'].map((h) => el('th', { text: h }))]));
     list.forEach((x) => {
       const [ok, reason] = why(x);
       const res = BT.results[x.student_no];
       t.appendChild(el('tr', { class: x.active ? '' : 'inactive' }, [
         el('td', {}, [el('input', { type: 'checkbox', disabled: ok !== '가능', checked: ok === '가능' && BT.sel.has(x.student_no), onchange: (e) => { BT.touched = true; if (e.target.checked) BT.sel.add(x.student_no); else BT.sel.delete(x.student_no); renderBatchPanel(); } })]),
-        el('td', { text: x.grade ?? '' }), el('td', { text: x.class_no ?? '' }), el('td', { text: x.number ?? '' }), el('td', { text: x.name }), el('td', { text: x.records ? `${x.records}건 · ${x.bytes}B` : '-' }), el('td', {}, [levelCell(x)]),
+        el('td', { text: x.grade ?? '' }), el('td', { text: x.class_no ?? '' }), el('td', { text: x.number ?? '' }), el('td', { text: x.name }), el('td', { text: x.records ? `${x.records}건 · ${x.bytes}B` : '-' }),
+        ...(paired ? [el('td', { class: x.target <= 0 ? 'danger-text' : '', text: `${x.target}B${x.pair_total ? ` (${x.first_bytes === null || x.first_bytes === undefined ? '1학기 없음' : `1학기 ${x.first_bytes}B`})` : ''}` })] : []),
+        el('td', {}, [levelCell(x)]),
         el('td', { class: ok === '가능' ? '' : 'muted', text: reason }),
         el('td', {}, [res ? el('span', { class: res.ok ? 'res-ok' : 'res-fail', title: res.error || '', text: res.ok ? '✔ 후보 생성' : `✕ ${res.error || '실패'}` }) : null,
           res && res.ok ? el('button', { type: 'button', class: 'small link', text: '보기', onclick: () => openRecords(s.group_id, s.item, x.student_no) }) : null]),
