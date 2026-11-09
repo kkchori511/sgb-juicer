@@ -9,6 +9,7 @@ import json
 import re
 
 ROLES = ("unit", "standard", "label", "text", "header")
+# AI 답은 줄을 지우지 못한다: AI가 머리글이라고 한 줄은 'keep'(그대로 남김)으로 바꾸고 교사에게 알린다.
 UNIT_RE = re.compile(r"^\s*(?:\d{1,2}\s*[).]|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+\s*[.)]?|\(\d{1,2}\))\s*\S")
 STD_RE = re.compile(r"^\s*\[[^\]\s]{3,}\]")
 LABEL_RE = re.compile(r"^\s*([A-E])\s*$")
@@ -72,8 +73,10 @@ def ai_user(lines, roles):
     return "\n".join(out)
 
 
-def apply_ai(roles, answer):
-    """AI 답(JSON)을 unknown 줄에만 반영한다. 모르는 값은 text로."""
+def apply_ai(lines, roles, answer):
+    """AI 답(JSON)을 unknown 줄에만 반영한다. → (새 역할, AI 머리글 판단 줄, 확인 필요 줄)
+    - AI는 줄을 지울 수 없다: 'header'라고 해도 'keep'으로 남긴다.
+    - 줄 모양과 맞지 않는 답(A~E가 아닌 줄을 label로, '[' 없는 줄을 standard로)이나 빠진 답은 'keep'(확인 필요)."""
     m = re.search(r"\{.*\}", answer or "", re.S)
     data = {}
     if m:
@@ -81,12 +84,25 @@ def apply_ai(roles, answer):
             data = json.loads(m.group(0))
         except ValueError:
             data = {}
-    out = list(roles)
+    out, ai_headers, check = list(roles), [], []
     for i, r in enumerate(roles):
-        if r == "unknown":
-            v = str(data.get(str(i), "")).strip().lower()
-            out[i] = v if v in ROLES else "text"
-    return out
+        if r != "unknown":
+            continue
+        v = str(data.get(str(i), "")).strip().lower()
+        ln = lines[i]
+        if v == "header":
+            out[i] = "keep"
+            ai_headers.append(i)
+        elif v == "text" or (v == "unit" and len(ln.strip()) <= 60):
+            out[i] = v
+        elif v == "label" and LABEL_RE.match(ln):
+            out[i] = "label"
+        elif v == "standard" and STD_RE.match(ln):
+            out[i] = "standard"
+        else:
+            out[i] = "keep"
+            check.append(i)
+    return out, ai_headers, check
 
 
 def build(lines, roles):
@@ -99,16 +115,24 @@ def build(lines, roles):
         if not cur:
             return
         lv = cur["levels"]
-        empty = [k for k in cur["order"] if not lv[k]]
         has = [k for k in cur["order"] if lv[k]]
+        # 비어 있거나 아예 없는 수준(있는 수준 사이의 빈 곳만): B·D뿐이면 3단계
+        if has:
+            span = "ABCDE"[: "ABCDE".index(max(has)) + 1]
+            empty = [k for k in span if k >= min(has) and not lv.get(k)]
+        else:
+            empty = []
         note = ""
         if empty and set(empty) == {"B", "D"} and set(has) == {"A", "C", "E"}:
             note = " (3단계: A·C·E)"
             code = re.match(r"^\s*(\[[^\]]+\])", cur["line"])
             three.append(code.group(1) if code else cur["line"][:20])
         out.append(cur["line"].strip() + note)
-        for k in cur["order"]:
-            if lv[k]:
+        shown = cur["order"] + sorted(k for k in ([] if note else empty) if k not in cur["order"])
+        if not note:
+            shown = sorted(shown, key="ABCDE".index)
+        for k in shown:
+            if lv.get(k):
                 out.append(f"  {k}: " + " ".join(x.strip() for x in lv[k]))
             elif not note:
                 out.append(f"  {k}: (원문에 내용 없음)")
@@ -142,6 +166,11 @@ def build(lines, roles):
             if r == "inline":
                 cur["levels"][k].append(m.group(2))
             last_label = k
+        elif r == "keep":  # AI가 머리글이라 했거나 확인이 필요한 줄: 지우지 않고 그 자리에 둔다
+            if cur is not None:
+                cur["extra"].append(ln)
+            else:
+                out.append(ln.strip())
         else:  # text 또는 남은 unknown
             if r == "unknown":
                 unknown += 1
@@ -158,14 +187,16 @@ def build(lines, roles):
 
 
 def verify(lines, roles, result):
-    """원문 내용 줄(머리글 제외)이 결과에 순서대로 그대로 들어 있는지. 공백만 다른 것은 같다고 본다.
+    """원문 내용 줄이 결과에 순서대로 그대로 들어 있는지. 공백만 다른 것은 같다고 본다.
+    AI 판단과 상관없이 원문만 보고 정한다: 빈 줄, 규칙으로 정한 표 머리글(HEADERS), A~E 기호만 있는 줄만 뺀다.
     → 빠진 줄 번호 목록(비면 통과)"""
     hay = _norm(result)
     pos, missing = 0, []
-    for i, (ln, r) in enumerate(zip(lines, roles)):
-        if r in (None, "header", "label"):  # 수준 기호 줄은 구조로 다시 쓰므로(빈 B·D는 3단계로 뺌) 내용 줄만 본다
+    for i, ln in enumerate(lines):
+        st = ln.strip()
+        if not st or _norm(st) in HEADERS or LABEL_RE.match(st):
             continue
-        m = INLINE_RE.match(ln) if r == "inline" else None
+        m = INLINE_RE.match(ln)
         s = _norm(m.group(2) if m else ln)
         j = hay.find(s, pos)
         if j < 0:

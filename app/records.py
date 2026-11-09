@@ -59,20 +59,37 @@ class Records:
                 p = self.d.group(g["pair_id"])
             except DbError:
                 return None
+            if g["semester"] != 2 or p["semester"] != 1 or p["kind"] != "subject":  # 맞지 않는 연결은 쓰지 않는다
+                return None
             f = self.final(p["id"], "subject", sno)
             member = bool(self.d.q("SELECT 1 FROM memberships WHERE group_id=? AND student_no=?", (p["id"], str(sno))))
             first = count_bytes(f["text"]) if f and f["text"] else None
             total = int(g["pair_total"])
             remain = (total - first) if first is not None else None
+            mine = self.final(gid, item, sno)
+            mine_b = count_bytes(mine["text"]) if mine and mine["text"] else 0
             return {"role": "second", "other_id": p["id"], "other": p["label"], "total": total, "member": member,
                     "first_bytes": first, "first_text": (f["text"] if f else "") or "", "first_closed": bool(f and f["closed"]),
-                    "remain": remain, "target": max(remain, 0) if remain is not None else total // 2}
-        for s2 in self.d.groups():
-            if s2.get("pair_id") == g["id"] and s2.get("pair_total"):
-                f2 = self.final(s2["id"], "subject", sno)
-                return {"role": "first", "other_id": s2["id"], "other": s2["label"], "total": int(s2["pair_total"]),
-                        "second_bytes": count_bytes(f2["text"]) if f2 and f2["text"] else None}
-        return None
+                    "remain": remain, "target": max(remain, 0) if remain is not None else total // 2,
+                    # 합산 초과(1학기를 나중에 늘린 경우 등): 마감했더라도 다시 확인하도록
+                    "second_bytes": mine_b, "over": bool(mine_b and (first or 0) + mine_b > total),
+                    "second_closed": bool(mine and mine["closed"])}
+        if g["semester"] != 1:
+            return None
+        seconds = [s2 for s2 in self.d.groups() if s2.get("pair_id") == g["id"] and s2.get("pair_total") and s2["semester"] == 2]
+        if not seconds:
+            return None
+        mine = self.final(gid, item, sno)
+        mine_b = count_bytes(mine["text"]) if mine and mine["text"] else 0
+        others = []
+        for s2 in seconds:
+            f2 = self.final(s2["id"], "subject", sno)
+            b2 = count_bytes(f2["text"]) if f2 and f2["text"] else None
+            others.append({"id": s2["id"], "label": s2["label"], "total": int(s2["pair_total"]), "second_bytes": b2,
+                           "over": bool(b2 and mine_b + b2 > int(s2["pair_total"])), "second_closed": bool(f2 and f2["closed"])})
+        o = others[0]
+        return {"role": "first", "other_id": o["id"], "other": ", ".join(x["label"] for x in others), "total": o["total"],
+                "second_bytes": o["second_bytes"], "others": others, "first_bytes": mine_b, "over": any(x["over"] for x in others)}
 
     def target_for(self, gid, item, sno):
         """학생별 목표 바이트: 2학기 합산 과목이면 '합산 − 1학기 최종안', 아니면 담당 목표."""

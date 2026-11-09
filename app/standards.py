@@ -106,8 +106,8 @@ class Standards:
         out = []
         for g in self.d.groups():
             if g["kind"] == "subject":
-                r = self.d.q("SELECT length(text) n, updated_at FROM standards WHERE group_id=?", (g["id"],))
-                out.append({"id": g["id"], "label": g["label"], "has": bool(r and r[0]["n"]), "updated_at": r[0]["updated_at"] if r else ""})
+                r = self.d.q("SELECT text, updated_at FROM standards WHERE group_id=?", (g["id"],))
+                out.append({"id": g["id"], "label": g["label"], "has": bool(r and (r[0]["text"] or "").strip()), "updated_at": r[0]["updated_at"] if r else ""})
         return out
 
 

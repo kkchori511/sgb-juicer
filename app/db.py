@@ -366,10 +366,18 @@ class YearDb:
                 raise DbError("학년과 반을 입력해 주세요.")
             allowed.update(grade=gr, class_no=cl, name=f"{gr}학년 {cl}반")
         if not allowed:
-            return
+            return 0
         sets = ", ".join(f"{k}=?" for k in allowed)
+        unpaired = 0
         with self.tx() as c:
             c.execute(f"UPDATE groups SET {sets} WHERE id=?", (*allowed.values(), g["id"]))
+            # 학기를 바꾸면 맞지 않게 된 합산 연결을 푼다(2학기 → 1학기 연결만 유효)
+            if "semester" in allowed and allowed["semester"] != g["semester"]:
+                if allowed["semester"] != 2 and g.get("pair_id"):
+                    unpaired += c.execute("UPDATE groups SET pair_id=NULL, pair_total=NULL WHERE id=?", (g["id"],)).rowcount
+                if allowed["semester"] != 1:
+                    unpaired += c.execute("UPDATE groups SET pair_id=NULL, pair_total=NULL WHERE pair_id=?", (g["id"],)).rowcount
+        return unpaired
 
     def group_impact(self, gid):
         g = self.group(gid)

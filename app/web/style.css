@@ -511,9 +511,9 @@ textarea.cell-edit { min-height: 54px; font-size: 13px; width: 100%; }
 /* v0.13: 칸 접기 — 접으면 제목 줄만 남는다 */
 .fold-btn { border: none; background: none; padding: 0 4px 0 0; font-weight: 800; font-size: 15px; color: var(--text); cursor: pointer; white-space: nowrap; }
 .fold-btn:hover { background: none; color: var(--accent-hover); border: none; }
-.folded > :not(.sec-title:first-child) { display: none !important; }
-.folded > .sec-title:first-child > :not(.fold-btn) { display: none !important; }
-.folded > .sec-title:first-child { margin: 0; }
+:is(.rec-records, .final-sec, .res-sec).folded > :not(.sec-title:first-child) { display: none !important; }
+:is(.rec-records, .final-sec, .res-sec).folded > .sec-title:first-child > :not(.fold-btn) { display: none !important; }
+:is(.rec-records, .final-sec, .res-sec).folded > .sec-title:first-child { margin: 0; }
 .rec-main > .folded { flex: 0 0 auto !important; min-height: 0 !important; overflow: hidden; }
 /* 나란히 놓일 때 접은 칸은 세로 막대, 위아래로 쌓일 때는 제목 줄 */
 .rec-main > .folded { width: 46px; padding: 10px 6px; }
@@ -605,3 +605,28 @@ input.sec-in { width: 130px; height: 28px; padding: 2px 6px; font-size: 13px; di
 .steps-bar span.done { background: #ecfdf3; color: #166534; }
 .steps-bar span.done::before { content: '✔ '; }
 #wsteps li.done { color: #166534; }
+
+/* v0.15.1 (Codex V15·V16): 선택 표시는 상태 색(초록·파랑)과 겹치지 않게 짙은 회색 + ▶ */
+:root { --sel: #334155; }
+.gcard.active { border-color: var(--sel); box-shadow: 0 0 0 3px rgba(51, 65, 85, 0.22); }
+.gcard.active .g-name::before { content: '▶ '; color: var(--sel); }
+.gtab.active { background: var(--sel); border-color: var(--sel); }
+.gtab.active.is-done { background: var(--sel) !important; border-color: var(--sel) !important; color: #fff; }
+.gtab.active.is-done::before { color: #86efac; }
+.ib-item.active { border-color: var(--sel); box-shadow: 0 0 0 2px rgba(51, 65, 85, 0.25); }
+.ib-item.active .t::after { content: ' ◀ 선택됨'; font-size: 12px; color: var(--sel); font-weight: 700; }
+.ib-item.active.is-done { box-shadow: 0 0 0 2px rgba(51, 65, 85, 0.25); }
+.steps-bar span.active { background: var(--sel); color: #fff; }
+.steps-bar span.skipped { background: var(--surface-2); color: var(--muted); }
+.steps-bar span.skipped::after { content: ' (건너뜀)'; font-weight: 600; }
+.stu-group .stu.active { background: #e2e8f0; color: var(--text); box-shadow: inset 3px 0 0 var(--sel); }
+.stat-chip.st-final, .stat-chip.st-final b { color: var(--st-final); }
+.stat-chip.st-progress, .stat-chip.st-progress b { color: var(--st-progress); }
+.stat-chip.st-none, .stat-chip.st-none b { color: var(--st-none); }
+.stat-chip.st-closed, .stat-chip.st-closed b { color: var(--st-closed); }
+.stat-chip.on { border-color: var(--sel); background: #e2e8f0; box-shadow: 0 0 0 1px var(--sel); }
+.stat-scope { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.stu-group-head:disabled { cursor: default; opacity: 1; }
+.exp-st { font-weight: 800; white-space: nowrap; }
+.ai-prog-card { max-height: 86vh; display: flex; flex-direction: column; }
+.ai-prog-result { max-height: 38vh; overflow: auto; }

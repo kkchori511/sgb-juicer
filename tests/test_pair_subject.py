@@ -62,6 +62,19 @@ def main():
     rid2 = ok(api.add_record(s2, "subject", "10102", {"content": "활동"}))["id"]
     e = api.ai_synth(s2, "subject", "10102", [rid2], {})
     assert not e["ok"] and "이미 채웠" in e["error"], e
+    # V13: 2학기를 마감한 뒤 1학기를 늘려 합산을 넘으면 '초과'로 알림(마감은 그대로)
+    ok(api.edit_final(s2, "subject", "10101", "다" * 300))  # 900B → 600+900=1500 딱 맞음
+    ok(api.set_closed(s2, "subject", "10101", True))
+    assert not ok(api.student_view(s2, "subject", "10101"))["pair"]["over"]
+    ok(api.edit_final(s1, "subject", "10101", "가" * 400))  # 1200B
+    pv = ok(api.student_view(s2, "subject", "10101"))["pair"]
+    assert pv["over"] and pv["second_closed"] and pv["target"] == 300, pv
+    p1 = ok(api.student_view(s1, "subject", "10101"))["pair"]
+    assert p1["role"] == "first" and p1["over"] and p1["others"][0]["second_bytes"] == 900, p1
+    # V14: 연결된 1학기 과목을 2학기로 바꾸면 연결이 풀린다
+    r = ok(api.update_group(s1, {"semester": 2}))
+    assert r["unpaired"] == 1 and ok(api.student_view(s2, "subject", "10101"))["pair"] is None
+    ok(api.update_group(s1, {"semester": 1}))
     # 연결 풀기, 1학기 과목 삭제 시 연결도 풀림
     ok(api.update_group(s2, {"pair_id": None}))
     assert ok(api.student_view(s2, "subject", "10101"))["pair"] is None

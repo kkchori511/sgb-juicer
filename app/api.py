@@ -321,8 +321,8 @@ class Api:
     def update_group(self, gid, data):
         self._editable()
         d = self._db()
-        d.update_group(gid, **(data or {}))
-        return {"groups": d.groups()}
+        unpaired = d.update_group(gid, **(data or {}))
+        return {"groups": d.groups(), "unpaired": unpaired or 0}
 
     @safe
     def group_impact(self, gid):
@@ -906,7 +906,7 @@ class Api:
             raise db.DbError("정리할 내용이 없습니다. 성취기준을 먼저 붙여넣어 주세요.")
         roles = stdformat.classify(lines)
         unknown = roles.count("unknown")
-        ai_used, cost = False, 0.0
+        ai_used, cost, ai_headers, check = False, 0.0, [], []
         if unknown and use_ai:
             self._editable()
             cfg, model = self._model(model_index)
@@ -916,12 +916,13 @@ class Api:
                 answer, cost = self._call_ai(cfg["openrouter_key"].strip(), model, stdformat.ai_prompt(), stdformat.ai_user(lines, roles), cfg["privacy_block"])
             finally:
                 self._release(key)
-            roles = stdformat.apply_ai(roles, answer)
+            roles, ai_headers, check = stdformat.apply_ai(lines, roles, answer)
             ai_used = True
         out, three, headers, left = stdformat.build(lines, roles)
         missing = stdformat.verify(lines, roles, out)
         return {**(self._ai_out({"cost": cost}) if ai_used else {}), "text": out, "three_level": three,
                 "headers": [lines[i].strip() for i in headers], "unknown": unknown, "unknown_left": left, "ai_used": ai_used,
+                "ai_headers": [lines[i].strip() for i in ai_headers], "check": [lines[i].strip() for i in check],
                 "missing": [lines[i].strip() for i in missing], "gaps": [ln for _, ln in stdformat.gaps(lines, roles)],
                 "content_lines": sum(1 for r in roles if r not in (None, "header", "label"))}
 

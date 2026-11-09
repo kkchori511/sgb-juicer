@@ -104,8 +104,29 @@ def main():
     r = ok(api.standards_format(gid, odd, False))
     assert r["unknown"] == 1 and not r["ai_used"]
     r = ok(api.standards_format(gid, odd, True))
-    assert r["ai_used"] and CALLS and "~~ 참고 자료 ~~" in r["headers"] and r["missing"] == [], r
+    # V01: AI가 머리글이라 해도 지우지 않고 남기며 알려 준다
+    assert r["ai_used"] and CALLS and r["ai_headers"] == ["~~ 참고 자료 ~~"] and "~~ 참고 자료 ~~" in r["text"] and r["missing"] == [], r
     assert "0\t?\t~~ 참고 자료 ~~" in CALLS[-1]
+    # 보존 검사는 AI 역할과 무관: 내용 줄을 지운 정리본은 잡는다
+    L = stdformat.split_lines("수학적 모델링의 의미를 이해한다.\n[10수-01] 성취기준\nA\n설명")
+    assert stdformat.verify(L, ["header", "standard", "label", "text"], "[10수-01] 성취기준\n  A: 설명") == [0]
+    # V04: 줄 모양과 맞지 않는 AI 답은 확인 필요로 남김(오류 없음)
+    L = stdformat.split_lines("일반 문장입니다\n[10수-01] 기준\nA\n설명")
+    roles, hd, chk = stdformat.apply_ai(L, ["unknown", "standard", "label", "text"], '{"0": "label"}')
+    assert roles[0] == "keep" and chk == [0]
+    out, *_ = stdformat.build(L, roles)
+    assert "일반 문장입니다" in out
+    roles, hd, chk = stdformat.apply_ai(L, ["unknown", "standard", "label", "text"], "엉터리 답")
+    assert roles[0] == "keep" and chk == [0]
+    # V03: B·D 기호 자체가 없는 A·C·E도 3단계
+    L = stdformat.split_lines("[10수학-01] 기준 문장\nA: 가 설명\nC: 다 설명\nE: 마 설명")
+    R = stdformat.classify(L)
+    out, three, *_ = stdformat.build(L, R)
+    assert three == ["[10수학-01]"] and "(3단계: A·C·E)" in out and "(원문에 내용 없음)" not in out, out
+    # 사이가 빈 다른 수준은 '(원문에 내용 없음)'
+    L = stdformat.split_lines("[10수학-02] 기준\nA: 가\nB: 나\nD: 라")
+    out, three, *_ = stdformat.build(L, stdformat.classify(L))
+    assert "  C: (원문에 내용 없음)" in out and not three, out
     print("STDFORMAT OK")
 
 
