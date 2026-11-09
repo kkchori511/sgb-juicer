@@ -89,9 +89,51 @@ def test_api_and_reorder():
     rows = ok(api.inbox_view(bid))["rows"]
     ok(api.inbox_reorder(bid, [rows[1]["id"], rows[0]["id"]]))
     assert [r["content"] for r in ok(api.inbox_view(bid))["rows"]] == ["둘째", "첫째"]
+    return hr
+
+
+def test_record_bulk_and_finals(hr):
+    """v0.13: 누가기록 일괄 입력(한 학생 여러 줄·회차 이어 붙임·날짜는 기본 안 씀) + 기존 완성문 → 최종안 일괄."""
+    assert existing.norm_date("2026.3.5") == "2026-03-05" and existing.norm_date("2026-03-05 00:00:00") == "2026-03-05"
+    assert existing.norm_date("2026년 3월 5일") == "2026-03-05" and existing.norm_date("3월") == ""
+    raw = [["이름", "날짜", "활동명", "내용"], ["김철수", "2026.4.1", "독서", "첫 기록"], ["김철수", "2026.4.2", "토론", "둘째 기록"]]
+    d = existing.detect(raw)
+    c = d["columns"]
+    assert c["title"] == 2 and c["date"] is None and c["content"] == 3, c  # 날짜는 머리글이 있어도 기본 (없음)
+    api = Api(); api.attach(W())
+    ok(api.roster_apply(hr, [{"student_no": "20103", "name": "박민수"}, {"student_no": "20104", "name": "최다희"}, {"student_no": "20105", "name": "정우성"}], "add"))
+    ok(api.add_record(hr, "autonomy", "20101", {"content": "직접 쓴 기록"}))
+    b = ok(api.existing_build(hr, "autonomy", raw, True, {**c, "date": 1}))
+    assert b["rows"][0]["date"] == "2026-04-01" and b["rows"][1]["title"] == "토론"
+    r = ok(api.existing_apply(hr, "autonomy", b["rows"], "record"))
+    assert r["count"] == 2 and r["students"] == 1, r
+    recs = ok(api.student_view(hr, "autonomy", "20101"))["records"]
+    assert [(x["seq"], x["kind"], x["date"], x["title"]) for x in recs] == [(1, "record", "", ""), (2, "record", "2026-04-01", "독서"), (3, "record", "2026-04-02", "토론")], recs
+    # 이미 쓴 생기부는 여전히 학생당 한 줄
+    e = api.existing_apply(hr, "autonomy", [{"student_no": "20103", "content": "a"}, {"student_no": "20103", "content": "b"}])
+    assert not e["ok"] and "두 줄" in e["error"], e
+    # 기존 완성문 → 최종안 일괄
+    ok(api.existing_apply(hr, "autonomy", [{"student_no": "20103", "content": "박 옛 글"}, {"student_no": "20104", "content": "최 옛 글"}, {"student_no": "20105", "content": "정 옛 글"}]))
+    ok(api.existing_apply(hr, "autonomy", [{"student_no": "20103", "content": "박 새 글"}]))  # 박민수는 두 개
+    ok(api.edit_final(hr, "autonomy", "20104", "최 지금 최종안"))
+    ok(api.edit_final(hr, "autonomy", "20105", "정 마감본")); ok(api.set_closed(hr, "autonomy", "20105", True))
+    v = {x["student_no"]: x for x in ok(api.finals_bulk_view(hr, "autonomy"))["students"]}
+    assert [e["content"] for e in v["20103"]["existing"]] == ["박 옛 글", "박 새 글"] and v["20104"]["final"] == "최 지금 최종안" and v["20105"]["closed"]
+    latest = v["20103"]["existing"][-1]["id"]
+    assert ok(api.finals_from_existing(hr, "autonomy", [{"student_no": "20103", "record_id": latest}]))["count"] == 1
+    assert ok(api.student_view(hr, "autonomy", "20103"))["final"]["text"] == "박 새 글"
+    # 마감 학생·남의 기록은 거부(전부 취소)
+    e = api.finals_from_existing(hr, "autonomy", [{"student_no": "20104", "record_id": v["20104"]["existing"][0]["id"]},
+                                                {"student_no": "20105", "record_id": v["20105"]["existing"][0]["id"]}])
+    assert not e["ok"], e
+    assert ok(api.student_view(hr, "autonomy", "20104"))["final"]["text"] == "최 지금 최종안"  # 함께 취소됨
+    e = api.finals_from_existing(hr, "autonomy", [{"student_no": "20104", "record_id": latest}])
+    assert not e["ok"] and "바뀌었" in e["error"], e
+    ok(api.finals_from_existing(hr, "autonomy", [{"student_no": "20104", "record_id": v["20104"]["existing"][0]["id"]}]))  # 덮어쓰기
+    assert ok(api.student_view(hr, "autonomy", "20104"))["final"]["text"] == "최 옛 글"
 
 
 if __name__ == "__main__":
     test_parse()
-    test_api_and_reorder()
+    test_record_bulk_and_finals(test_api_and_reorder())
     print("EXISTING IMPORT OK")

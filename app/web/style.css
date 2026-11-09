@@ -329,8 +329,12 @@ textarea.tall { min-height: 300px; height: calc(100vh - 470px); resize: vertical
 .rec-head label { margin: 0; }
 .rec-head select { width: auto; height: 36px; padding: 4px 8px; max-width: 340px; }
 .rec-student { font-size: 17px; font-weight: 800; }
-.rec-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 230px minmax(0, 1.15fr) minmax(0, 1fr); gap: 12px; }
-.app.collapsed .rec-body { grid-template-columns: 230px minmax(0, 1.2fr) minmax(0, 1fr); }
+.rec-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 12px; }
+.rec-main { min-height: 0; min-width: 0; display: flex; gap: 12px; }
+.rec-main > .rec-records { flex: 1.15 1 0; min-width: 0; }
+.rec-main > .rec-final { flex: 1 1 0; min-width: 0; }
+.rec-tools { flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -2px 0 10px; padding: 6px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); }
+.rec-tools button { height: 34px; }
 .rec-list, .rec-records, .rec-final { min-height: 0; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
 .rec-list.collapsed { display: none; }
 .rec-list .search { margin-bottom: 6px; }
@@ -380,9 +384,11 @@ textarea.tall { min-height: 300px; height: calc(100vh - 470px); resize: vertical
 
 /* 세로로 긴 화면·좁은 창: 결과 칸을 아래로 */
 @media (max-aspect-ratio: 1/1), (max-width: 1180px) {
-  .rec-body, .app.collapsed .rec-body { grid-template-columns: 210px minmax(0, 1fr); grid-template-rows: minmax(0, 1.1fr) minmax(0, 1fr); }
-  .rec-list { grid-row: 1 / span 2; }
-  .rec-final { grid-column: 2; }
+  .rec-body { grid-template-columns: 210px minmax(0, 1fr); }
+  /* 위아래로 쌓을 때: 누가기록은 내용만큼, 최종안은 바로 아래에 붙여 남은 높이를 쓴다 */
+  .rec-main { flex-direction: column; }
+  .rec-main > .rec-records { flex: 0 1 auto; min-height: 90px; }
+  .rec-main > .rec-final { flex: 1 1 auto; min-height: 240px; }
 }
 .sheet-foot label { display: flex; align-items: center; gap: 6px; margin: 0; }
 .sheet-foot select { width: auto; height: 34px; padding: 3px 8px; }
@@ -477,12 +483,8 @@ tr.row-pending td { background: var(--warn-bg); }
 .guide-body .flash { background: var(--warn-bg); transition: background 1.2s; }
 
 /* 학생 목록 접기 */
-.rec-body.list-hidden, .app.collapsed .rec-body.list-hidden { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+.rec-body.list-hidden { grid-template-columns: minmax(0, 1fr); }
 .rec-body.list-hidden .rec-list { display: none; }
-@media (max-aspect-ratio: 1/1), (max-width: 1180px) {
-  .rec-body.list-hidden, .app.collapsed .rec-body.list-hidden { grid-template-columns: minmax(0, 1fr); }
-  .rec-body.list-hidden .rec-final { grid-column: 1; }
-}
 .badge.src { color: var(--muted); }
 
 /* v0.12: 체크 칸 두 배(26px), 체크한 줄은 초록 */
@@ -504,3 +506,22 @@ button.mini { padding: 1px 6px; font-size: 11px; line-height: 1.4; min-width: 0;
 textarea.cell-edit { min-height: 54px; font-size: 13px; width: 100%; }
 .rcard:has(> .rcard-head input[type=checkbox]:checked) { background: #e3f6ea; border-color: #16a34a; box-shadow: inset 4px 0 0 #16a34a; }
 #modal { z-index: 110; } /* 확인·오류 창은 늘 시트(입력 창) 위에 */
+
+/* v0.13: 칸 접기 — 접으면 제목 줄만 남는다 */
+.fold-btn { border: none; background: none; padding: 0 4px 0 0; font-weight: 800; font-size: 15px; color: var(--text); cursor: pointer; white-space: nowrap; }
+.fold-btn:hover { background: none; color: var(--accent-hover); border: none; }
+.folded > :not(.sec-title:first-child) { display: none !important; }
+.folded > .sec-title:first-child > :not(.fold-btn) { display: none !important; }
+.folded > .sec-title:first-child { margin: 0; }
+.rec-main > .folded { flex: 0 0 auto !important; min-height: 0 !important; overflow: hidden; }
+/* 나란히 놓일 때 접은 칸은 세로 막대, 위아래로 쌓일 때는 제목 줄 */
+.rec-main > .folded { width: 46px; padding: 10px 6px; }
+.rec-main > .folded > .sec-title > .fold-btn { writing-mode: vertical-rl; }
+@media (max-aspect-ratio: 1/1), (max-width: 1180px) {
+  .rec-main > .folded { width: auto; padding: 8px 12px; }
+  .rec-main > .folded > .sec-title > .fold-btn { writing-mode: horizontal-tb; }
+}
+.res-sec.folded { margin-top: 4px; }
+.date-opt { display: inline-flex; align-items: center; gap: 4px; margin: 0; }
+.final-bulk td .clip { max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: var(--text-2); }
+.final-bulk tr.off td { color: var(--muted); }

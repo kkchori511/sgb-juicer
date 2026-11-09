@@ -21,10 +21,12 @@ HINTS = {
     "clsnum": ("반/번호", "반번호", "반-번호", "반·번호"),
     "gradecls": ("학년-반", "학년/반", "학년반"),
     "change": ("학적변동구분", "학적변동"),
+    "title": ("활동명", "활동", "제목", "주제", "활동주제"),
+    "date": ("날짜", "일자", "활동일", "활동일자", "일시"),
     "content": ("내용", "세부능력및특기사항", "세특", "특기사항", "행동특성및종합의견", "종합의견", "활동내용", "기록"),
 }
 # clsany: 머리글 없이 모양으로 찾은 반/번호 칸(뜻이 정해지지 않음 — '1-1'은 두 가지로 맞춰 본다)
-ROLES = ("student_no", "name", "grade", "class_no", "number", "clsnum", "gradecls", "clsany", "change", "content")
+ROLES = ("student_no", "name", "grade", "class_no", "number", "clsnum", "gradecls", "clsany", "change", "title", "date", "content")
 
 
 def _norm(h):
@@ -35,7 +37,7 @@ def header_role(cell):
     c = _norm(cell)
     if not c:
         return None
-    for role in ("clsnum", "gradecls", "change", "ignore", "student_no", "name", "grade", "class_no", "number", "content"):
+    for role in ("clsnum", "gradecls", "change", "ignore", "student_no", "name", "grade", "class_no", "number", "title", "date", "content"):
         if any(c == _norm(h) for h in HINTS[role]):
             return role
     if len(c) <= 12 and ("내용" in c or "특기사항" in c or "의견" in c):  # 짧은 머리글만(본문 글에 '내용'이 들어간 경우 제외)
@@ -76,6 +78,8 @@ def detect(raw):
                     used.add(i)
                     return
 
+    # 날짜 칸은 머리글이 있어도 기본으로 쓰지 않는다(누가기록 날짜는 선택 사항). 화면에서 고르면 쓴다.
+    cols["date"] = None
     pick("student_no", lambda v: re.fullmatch(r"\d{5}", v.strip()) is not None)
     if cols["clsnum"] is None and cols["gradecls"] is None:
         pick("clsany", lambda v: CLS_RE.match(v) is not None or TRIPLE_RE.match(v) is not None)
@@ -150,6 +154,20 @@ def match_row(ext, members):
     return None, "none", "명렬에서 찾지 못함" if name else "이름 없음"
 
 
+DATE_RE = re.compile(r"^\s*(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})")
+
+
+def norm_date(v):
+    """'2026.3.5', '2026-03-05 00:00:00', '2026년 3월 5일' → '2026-03-05'. 못 읽으면 ''."""
+    m = DATE_RE.match(v or "")
+    if not m:
+        return ""
+    y, mo, d = (int(x) for x in m.groups())
+    if not (1 <= mo <= 12 and 1 <= d <= 31):
+        return ""
+    return f"{y:04d}-{mo:02d}-{d:02d}"
+
+
 def build(raw, header, cols, members):
     body = raw[1:] if header else raw
     kind, cls_col = None, cols.get("clsany")
@@ -178,5 +196,5 @@ def build(raw, header, cols, members):
         sno, state, note = match_row(ext, members)
         out.append({"row": i + 1, "ext_no": ext["student_no"], "ext_name": name, "ext_cls": cls_val or "-".join(
             str(x) for x in (ext["grade"], ext["class_no"], ext["number"]) if x is not None),
-            "change": get("change"), "content": content, "student_no": sno, "state": state, "note": note})
+            "change": get("change"), "title": get("title"), "date": norm_date(get("date")), "content": content, "student_no": sno, "state": state, "note": note})
     return out

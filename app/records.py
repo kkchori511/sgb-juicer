@@ -206,20 +206,66 @@ class Records:
             self._stale(c, gid, item, sno)
         return rid
 
-    def add_existing_bulk(self, gid, item, rows):
-        """이미 쓴 생기부 여러 학생 한꺼번에 — 전부 넣거나 전부 취소."""
+    def add_existing_bulk(self, gid, item, rows, kind="existing"):
+        """여러 학생 한꺼번에 — 전부 넣거나 전부 취소.
+        kind='existing': 이미 쓴 생기부(학생당 한 줄). kind='record': 누가기록(한 학생 여러 줄, 회차는 이어 붙임)."""
         self.slot(gid, item)
         for r in rows:
             self._member(gid, r["student_no"])
             self.require_open(gid, item, r["student_no"])
         with self.d.tx() as c:
             for r in rows:
-                c.execute(
-                    "INSERT INTO records(group_id,item,student_no,kind,seq,title,content,source) VALUES(?,?,?,'existing',NULL,?,?,?)",
-                    (int(gid), item, str(r["student_no"]), "이미 쓴 생기부", r["content"].strip(), "existing-bulk"),
-                )
-                self._stale(c, gid, item, r["student_no"])
+                sno = str(r["student_no"])
+                if kind == "record":
+                    seq = (c.execute("SELECT COALESCE(MAX(seq),0) FROM records WHERE group_id=? AND item=? AND student_no=? AND kind='record'",
+                                     (int(gid), item, sno)).fetchone()[0] or 0) + 1
+                    c.execute(
+                        "INSERT INTO records(group_id,item,student_no,kind,seq,date,title,content,source) VALUES(?,?,?,'record',?,?,?,?,?)",
+                        (int(gid), item, sno, seq, (r.get("date") or "").strip(), (r.get("title") or "").strip(), r["content"].strip(), "record-bulk"),
+                    )
+                else:
+                    c.execute(
+                        "INSERT INTO records(group_id,item,student_no,kind,seq,title,content,source) VALUES(?,?,?,'existing',NULL,?,?,?)",
+                        (int(gid), item, sno, "이미 쓴 생기부", r["content"].strip(), "existing-bulk"),
+                    )
+                self._stale(c, gid, item, sno)
         return len(rows)
+
+    def finals_bulk_view(self, gid, item):
+        """기존 완성문 → 최종안 일괄: 학생마다 기존 완성문 목록(오래된 것부터)과 지금 최종안·마감."""
+        self.slot(gid, item)
+        exist = {}
+        for r in self.d.q("SELECT id, student_no, content FROM records WHERE group_id=? AND item=? AND kind='existing' ORDER BY id",
+                          (int(gid), item)):
+            exist.setdefault(r["student_no"], []).append({"id": r["id"], "content": r["content"], "bytes": count_bytes(r["content"])})
+        finals = {f["student_no"]: f for f in self.d.q("SELECT student_no, text, closed FROM finals WHERE group_id=? AND item=?", (int(gid), item))}
+        out = []
+        for m in self.d.members(gid):
+            f = finals.get(m["student_no"])
+            out.append({"student_no": m["student_no"], "name": m["name"], "grade": m["grade"], "class_no": m["class_no"], "number": m["number"],
+                        "active": bool(m["active"]), "closed": bool(f and f["closed"]), "final": (f["text"] if f else "") or "",
+                        "existing": exist.get(m["student_no"], [])})
+        return out
+
+    def finals_from_existing(self, gid, item, picks):
+        """picks: [{student_no, record_id}] — 고른 기존 완성문을 그대로 최종안으로. 전부 하거나 전부 취소."""
+        self.slot(gid, item)
+        active = {m["student_no"]: m for m in self.d.members(gid) if m["active"]}
+        seen = set()
+        with self.d.tx() as c:
+            for p in picks:
+                sno = str(p.get("student_no") or "")
+                if sno in seen:
+                    raise DbError("같은 학생이 두 번 들어 있습니다.")
+                seen.add(sno)
+                if sno not in active:
+                    raise DbError(f"보낼 수 없는 학생입니다({sno}): 명렬에 없거나 비활성입니다.")
+                self.require_open(gid, item, sno)
+                r = c.execute("SELECT * FROM records WHERE id=?", (int(p.get("record_id") or 0),)).fetchone()
+                if not r or r["group_id"] != int(gid) or r["item"] != item or r["student_no"] != sno or r["kind"] != "existing":
+                    raise DbError(f"{active[sno]['name']}: 기존 완성문이 바뀌었습니다. 창을 다시 열어 주세요.")
+                self._upsert_final(c, gid, item, sno, r["content"], f"record:{r['id']}", {"op": "record", "kind": "existing", "bulk": True})
+        return len(seen)
 
     def reorder(self, gid, item, sno, ids):
         """학생×항목의 기록 순서를 화면에서 끈 순서로(종합할 때 AI에 보내는 순서도 이 순서)."""

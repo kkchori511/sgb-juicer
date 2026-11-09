@@ -88,10 +88,18 @@
           <button type="button" id="recNext">다음 학생 ▶</button>
           <label class="inline">모델 <select id="recModel"></select></label>
         </div>
+        <div class="rec-tools" id="recTools">
+          <span class="muted">이 항목 전체(반·과목):</span>
+          <button type="button" id="recBulkRecord" title="여러 학생의 누가기록을 엑셀에서 한 번에">📥 누가기록 일괄 입력</button>
+          <button type="button" id="recBulkExisting" title="여러 학생의 이미 쓴 생기부를 엑셀에서 한 번에">📥 이미 쓴 생기부 일괄 입력</button>
+          <button type="button" id="recBulkFinal" title="학생마다 기존 완성문을 최종안으로 한꺼번에">✔ 기존 완성문 → 최종안 일괄</button>
+        </div>
         <div class="rec-body" id="recBody">
           <aside class="rec-list" id="recList"></aside>
-          <section class="rec-records" id="recRecords"></section>
-          <section class="rec-final" id="recFinal"></section>
+          <div class="rec-main" id="recMain">
+            <section class="rec-records" id="recRecords"></section>
+            <section class="rec-final" id="recFinal"></section>
+          </div>
         </div>
       </section>
       <section class="panel" data-panel-content="batch">
@@ -391,7 +399,7 @@
             <ul>
               <li>왼쪽 학생 목록 → 가운데 누가기록 → 오른쪽 최종안·후보. [이전/다음 학생](Alt+↑/↓)으로 넘깁니다. 상태 필터로 '입력 중만' 같이 볼 수 있습니다.</li>
               <li><b>+ 누가기록</b>: 날짜·활동명·태그·내용. 회차는 자동으로 붙습니다.</li>
-              <li><b>이미 쓴 생기부 넣기</b>: 작성해 둔 문장을 '기존 완성문'으로 넣어 [다듬기(AI)] 하거나 [그대로 최종안으로]. 여러 학생은 [여러 학생 일괄 넣기](학번·내용 열 복사).</li>
+              <li><b>이미 쓴 생기부 넣기</b>: 작성해 둔 문장을 '기존 완성문'으로 넣어 [다듬기(AI)] 하거나 [그대로 최종안으로]. 여러 학생은 위 줄의 [📥 이미 쓴 생기부 일괄 입력](이름·내용 열 복사), 누가기록은 [📥 누가기록 일괄 입력], 기존 완성문을 한꺼번에 최종안으로 보내려면 [✔ 기존 완성문 → 최종안 일괄]. 누가기록 날짜는 [날짜 넣기]를 켤 때만 들어갑니다. ▾를 누르면 칸을 접습니다.</li>
               <li><b>정제(AI)</b>: 기록 한 건을 다듬은 후보를 만듭니다. [이 내용으로 기록 바꾸기]를 눌러야 기록이 바뀌고, 원문은 남습니다.</li>
               <li><b>이동</b>: 기록이나 문단을 그 학생이 속한 다른 항목(자율↔진로↔행특, 과목·동아리)으로 옮깁니다. 직후 [되돌리기] 가능.</li>
             </ul>

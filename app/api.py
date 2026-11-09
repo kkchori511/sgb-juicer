@@ -987,9 +987,11 @@ class Api:
         return {"rows": rows, "members": out_members}
 
     @safe
-    def existing_apply(self, gid, item, rows):
-        """rows: [{student_no, content}] — 화면에서 확정한 줄만."""
+    def existing_apply(self, gid, item, rows, kind="existing"):
+        """rows: [{student_no, content, title?, date?}] — 화면에서 확정한 줄만.
+        kind='existing': 학생당 한 줄. kind='record': 누가기록(한 학생 여러 줄 허용)."""
         self._editable()
+        kind = "record" if kind == "record" else "existing"
         d = self._db()
         rec = Records(d)
         rec.slot(gid, item)
@@ -1004,13 +1006,26 @@ class Api:
                 raise db.DbError(f"{m['name']}: 비활성 학생에게는 넣을 수 없습니다.")
             if not content:
                 raise db.DbError(f"{m['name']}: 내용이 비어 있습니다.")
-            if sno in seen:
+            if kind == "existing" and sno in seen:
                 raise db.DbError(f"{m['name']} 학생이 두 줄에 있습니다. 한 줄만 남겨 주세요.")
             seen.add(sno)
-            clean.append({"student_no": sno, "content": content})
+            clean.append({"student_no": sno, "content": content, "title": str(r.get("title") or ""),
+                          "date": existing.norm_date(str(r.get("date") or ""))})
         if not clean:
             raise db.DbError("넣을 줄이 없습니다.")
-        return {"count": self._rec().add_existing_bulk(gid, item, clean)}
+        return {"count": self._rec().add_existing_bulk(gid, item, clean, kind), "students": len(seen)}
+
+    @safe
+    def finals_bulk_view(self, gid, item):
+        """기존 완성문 → 최종안 일괄 보내기 확인 표."""
+        return {"students": self._rec().finals_bulk_view(gid, item)}
+
+    @safe
+    def finals_from_existing(self, gid, item, picks):
+        self._editable()
+        if not picks:
+            raise db.DbError("보낼 학생이 없습니다.")
+        return {"count": self._rec().finals_from_existing(gid, item, picks)}
 
     # ---------- 자료 인박스 ----------
     def _ib(self) -> Inbox:

@@ -1,5 +1,5 @@
 APP_NAME = "생기부 착즙기"
-VERSION = "0.12.0"
+VERSION = "0.13.0"
 MAKER = "Made by 김한량 디지털 공방"
 TAGLINE = "선생님의 자료 한 방울까지 생기부에 넣겠습니다."
 GITHUB_REPO = "kkchori511/sgb-juicer"
