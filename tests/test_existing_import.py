@@ -70,7 +70,7 @@ def test_api_and_reorder():
     b = ok(api.existing_build(hr, "behavior", pz["raw"], pz["header"], pz["columns"]))
     assert [r["state"] for r in b["rows"]] == ["confirmed", "confirmed"] and len(b["members"]) == 2
     assert ok(api.existing_apply(hr, "behavior", b["rows"]))["count"] == 2
-    # 누가기록 순서 바꾸기 → 종합 때 그 순서로 보냄
+    # 학생관찰기록 순서 바꾸기 → 종합 때 그 순서로 보냄
     ids = [ok(api.add_record(hr, "career", "20101", {"content": f"기록{i}"}))["id"] for i in range(3)]
     ok(api.reorder_records(hr, "career", "20101", [ids[2], ids[0], ids[1]]))
     got = [r["id"] for r in ok(api.student_view(hr, "career", "20101"))["records"]]
@@ -93,7 +93,7 @@ def test_api_and_reorder():
 
 
 def test_record_bulk_and_finals(hr):
-    """v0.13: 누가기록 일괄 입력(한 학생 여러 줄·회차 이어 붙임·날짜는 기본 안 씀) + 기존 완성문 → 최종안 일괄."""
+    """v0.13: 학생관찰기록 일괄 입력(한 학생 여러 줄·회차 이어 붙임·날짜는 기본 안 씀) + 기존 완성문 → 최종안 일괄."""
     assert existing.norm_date("2026.3.5") == "2026-03-05" and existing.norm_date("2026-03-05 00:00:00") == "2026-03-05"
     assert existing.norm_date("2026년 3월 5일") == "2026-03-05" and existing.norm_date("3월") == ""
     raw = [["이름", "날짜", "활동명", "내용"], ["김철수", "2026.4.1", "독서", "첫 기록"], ["김철수", "2026.4.2", "토론", "둘째 기록"]]

@@ -66,7 +66,7 @@ def test():
     assert not api.ai_standards_only(sub, "subject", "20302", {"text": t, "level": ""})["ok"]  # 수준 필수
     assert not api.ai_standards_only(sub, "subject", "20302", {"text": "", "level": "C"})["ok"]  # 기준 필수
     so = ok(api.ai_standards_only(sub, "subject", "20302", {"text": t, "level": "C"}))
-    assert "누가기록이 없다" in SENT[-1][0] and "3단계 중 C" in SENT[-1][0] and "이영희" not in SENT[-1][1]
+    assert "학생관찰기록이 없다" in SENT[-1][0] and "3단계 중 C" in SENT[-1][0] and "이영희" not in SENT[-1][1]
     res = ok(api.student_view(sub, "subject", "20302"))["results"][0]
     assert res["meta"]["basis"] == "standards_only" and res["meta"]["level"] == "C"
     ok(api.adopt_result(so["id"]))

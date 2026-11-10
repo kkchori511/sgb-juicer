@@ -79,7 +79,7 @@ def detect(raw):
                     used.add(i)
                     return
 
-    # 날짜 칸은 머리글이 있어도 기본으로 쓰지 않는다(누가기록 날짜는 선택 사항). 화면에서 고르면 쓴다.
+    # 날짜 칸은 머리글이 있어도 기본으로 쓰지 않는다(학생관찰기록 날짜는 선택 사항). 화면에서 고르면 쓴다.
     cols["date"] = None
     pick("student_no", lambda v: re.fullmatch(r"\d{5}", v.strip()) is not None)
     if cols["clsnum"] is None and cols["gradecls"] is None:

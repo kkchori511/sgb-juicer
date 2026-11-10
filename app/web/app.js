@@ -15,10 +15,10 @@
   let runCost = 0;
 
   const PANEL_TITLES = {
-    dashboard: '현황판', inbox: '자료 인박스', records: '항목별 기록', batch: '일괄 종합', export: '검토·내보내기',
-    roster: '명렬·담당 관리', tags: '태그', standards: '성취기준', settings: '설정', notice: '유의 사항', guide: '사용 안내',
+    dashboard: '현황판', inbox: '자료 인박스', records: '항목별 기록', tagrec: '태그별 기록', batch: '일괄 종합', export: '검토·내보내기',
+    roster: '명렬·담당 관리', tags: '태그 관리', standards: '성취기준', settings: '설정', notice: '유의 사항', guide: '사용 안내',
   };
-  const HELP = { dashboard: 'g-dashboard', inbox: 'g-inbox', records: 'g-records', batch: 'g-batch', export: 'g-export',
+  const HELP = { dashboard: 'g-dashboard', inbox: 'g-inbox', records: 'g-records', tagrec: 'g-tagrec', batch: 'g-batch', export: 'g-export',
     roster: 'g-roster', tags: 'g-settings', standards: 'g-standards', settings: 'g-settings', notice: 'g-flow' };
   function openGuide(anchor) {
     showPanel('guide');
@@ -93,7 +93,8 @@
     const a = await flushFinal();
     const b = await flushPending();
     const c = await flushCfg();
-    return a && b && c;
+    const d = await flushTagView();
+    return a && b && c && d;
   }
   // 학생·항목·학년도·화면을 바꾸기 전에: 저장에 실패하면 false(지금 화면을 그대로 둔다)
   async function leaveOk() {
@@ -211,7 +212,7 @@
   // ---------- 상단 바·메뉴 ----------
   // fromHistory: 마우스 뒤로·앞으로 버튼으로 온 경우(화면 기록을 새로 쌓지 않음)
   function showPanel(name, fromHistory) {
-    if (draftDirty() || pendingSaves.size) {
+    if (draftDirty() || pendingSaves.size || tvDirty()) {
       saveAllPending().then((ok) => {
         if (ok) showPanelNow(name, fromHistory);
         else { toast(SAVE_FAIL_MSG, 5000); if (fromHistory) history.pushState({ panel }, ''); }
@@ -236,6 +237,7 @@
     if (name === 'records') renderRecordsPanel();
     if (name === 'export') renderExport();
     if (name === 'tags') renderTags();
+    if (name === 'tagrec') renderTagView(true);
     if (name === 'inbox') renderInbox();
     if (name === 'standards') renderStandards();
     if (name === 'batch') { BT.touched = false; BT.sel.clear(); renderBatchPanel(); }
@@ -279,6 +281,7 @@
     if (panel === 'records') renderRecordsPanel();
     if (panel === 'export') renderExport();
     if (panel === 'tags') renderTags();
+    if (panel === 'tagrec') renderTagView();
     if (panel === 'inbox') { IB.bid = null; renderInbox(); }
     if (panel === 'standards') { SD.gid = null; renderStandards(); }
     if (panel === 'batch') { BT.slotKey = null; BT.results = {}; renderBatchPanel(); }
@@ -526,7 +529,7 @@
     row.appendChild(el('button', { type: 'button', class: 'link danger-text', text: '담당 삭제', onclick: async () => {
       const im = await call('group_impact', g.id);
       if (!im) return;
-      const parts = [`명렬 ${im.members}명`, im.records && `누가기록 ${im.records}건`, im.finals && `최종안 ${im.finals}건(마감 ${im.closed})`,
+      const parts = [`명렬 ${im.members}명`, im.records && `학생관찰기록 ${im.records}건`, im.finals && `최종안 ${im.finals}건(마감 ${im.closed})`,
         im.results && `AI 후보 ${im.results}건`, im.batches && `인박스 묶음 ${im.batches}개`, im.standards && '성취기준'].filter(Boolean).join(', ');
       if (!(await confirmBox(`'${g.label}' 담당을 지우면 함께 지워집니다:\n${parts}\n\n지우기 전에 자동으로 백업합니다(설정 > 백업·자료에서 복원 가능). 계속할까요?`, '삭제'))) return;
       const r = await mutate('delete_group', g.id);
@@ -647,7 +650,7 @@
           el('div', { class: 'two-col', style: 'margin-top:10px' }, [
             el('div', { class: 'choice-card' }, [el('b', { text: '비활성화' }), el('p', { class: 'hint', text: '명렬에 남기되 붉은 글씨로 표시합니다. 기록·최종안은 그대로 두고, 매칭·일괄 처리·내보내기에서만 빠집니다. 나중에 다시 활성화할 수 있습니다.' }),
               el('button', { type: 'button', class: 'primary', text: '비활성화', onclick: () => { closeSheet(); resolve({ how: 'deactivate', all: all.checked }); } })]),
-            el('div', { class: 'choice-card' }, [el('b', { class: 'danger-text', text: '삭제' }), el('p', { class: 'hint', text: '명렬에서 지우고 그 소속의 누가기록·후보·최종안도 함께 지웁니다. 지우기 전에 자동으로 백업합니다.' }),
+            el('div', { class: 'choice-card' }, [el('b', { class: 'danger-text', text: '삭제' }), el('p', { class: 'hint', text: '명렬에서 지우고 그 소속의 학생관찰기록·후보·최종안도 함께 지웁니다. 지우기 전에 자동으로 백업합니다.' }),
               el('button', { type: 'button', class: 'btn-danger', text: '삭제', onclick: () => { closeSheet(); resolve({ how: 'delete', all: all.checked }); } })]),
           ]),
           el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: () => { closeSheet(); resolve(null); } })]));
@@ -660,7 +663,7 @@
       }
       const im = await call('member_impact', g.id, nos, choice.all);
       if (!im) return;
-      const parts = [im.records && `누가기록 ${im.records}건`, im.finals && `최종안 ${im.finals}건`, im.results && `AI 후보 ${im.results}건`, im.inbox && `인박스 연결 ${im.inbox}건(연결만 풂)`].filter(Boolean).join(', ');
+      const parts = [im.records && `학생관찰기록 ${im.records}건`, im.finals && `최종안 ${im.finals}건`, im.results && `AI 후보 ${im.results}건`, im.inbox && `인박스 연결 ${im.inbox}건(연결만 풂)`].filter(Boolean).join(', ');
       if (!(await confirmBox(`${nos.length}명을 ${choice.all ? '모든 소속' : `'${g.label}'`}에서 지웁니다.${parts ? `\n함께 지워지는 자료: ${parts}` : '\n함께 지워지는 기록은 없습니다.'}\n\n지우기 전에 자동으로 백업합니다. 계속할까요?`, '삭제'))) return;
       const r = await mutate('remove_members', g.id, nos, choice.all);
       if (r) { ys.groups = r.groups; toast(`${nos.length}명을 지웠습니다. 백업: ${r.backup}`); renderRoster(); }
@@ -1671,7 +1674,7 @@
       const holder = el('div', { class: 'stu-group' + (folded ? ' folded' : ''), style: `--gc:${groupColor(gr.key)}` });
       const head = el('button', { type: 'button', class: 'stu-group-head', 'aria-expanded': folded ? 'false' : 'true', disabled: narrowing,
         title: narrowing ? '검색·필터 중에는 모두 펼쳐 보입니다' : folded ? '펼치기' : '접기',
-        onclick: () => { setFold(fk, !folded); renderStudentList(); } }, [`${narrowing ? '•' : folded ? '▸' : '▾'} ${gr.label}`, el('span', { class: 'cnt', text: `${all.length}명 · 마감 ${done}` })]);
+        onclick: () => { setFold(fk, !folded); renderStudentList(); } }, [el('span', { class: 'g-name', text: `${narrowing ? '•' : folded ? '▸' : '▾'} ${gr.label}` }), el('span', { class: 'cnt', text: `전체 ${all.length}명 · 마감 ${done}명` })]);
       holder.appendChild(head);
       box.appendChild(holder);
       if (folded) return;
@@ -1781,7 +1784,7 @@
       return r;
     });
   }
-  // 칸 접기(누가기록·최종안·후보): 접은 상태는 기억해 둔다
+  // 칸 접기(학생관찰기록·최종안·후보): 접은 상태는 기억해 둔다
   const FOLD_KEY = 'sgb.fold';
   const fold = (() => { try { return JSON.parse(localStorage.getItem(FOLD_KEY) || '{}') || {}; } catch (e) { return {}; } })();
   // 최종안 칸은 '최종안'과 '후보'를 따로 접는다. 둘 다 접으면 칸 전체가 막대(제목은 늘 보임).
@@ -1817,10 +1820,10 @@
     box.innerHTML = '';
     const v = R.view;
     const locked = closedNow();
-    const head = el('div', { class: 'sec-title' }, [foldBtn('records', box, `${v.student.name} 누가기록 ${v.records.length}건`), el('span', { class: 'spacer' }),
-      el('button', { type: 'button', class: 'primary', disabled: locked, text: '+ 누가기록', onclick: () => recordForm(null, 'record') }),
+    const head = el('div', { class: 'sec-title' }, [foldBtn('records', box, `${v.student.name} 학생관찰기록 ${v.records.length}건`), el('span', { class: 'spacer' }),
+      el('button', { type: 'button', class: 'primary', disabled: locked, text: '+ 학생관찰기록', onclick: () => recordForm(null, 'record') }),
       el('button', { type: 'button', disabled: locked, text: '이미 쓴 생기부 넣기', onclick: () => recordForm(null, 'existing') }),
-      R.slot.item === 'subject' ? el('button', { type: 'button', disabled: locked, title: '누가기록이 없는 학생을 성취기준과 성취수준으로', text: '성취기준만으로 생성', onclick: standardsOnlyDialog }) : null,
+      R.slot.item === 'subject' ? el('button', { type: 'button', disabled: locked, title: '학생관찰기록이 없는 학생을 성취기준과 성취수준으로', text: '성취기준만으로 생성', onclick: standardsOnlyDialog }) : null,
     ]);
     box.appendChild(head);
     if (locked && !ys.archived) box.appendChild(el('div', { class: 'stale', text: '● 마감된 항목입니다. 고치려면 오른쪽 [마감 해제]를 누르세요.' }));
@@ -1834,7 +1837,7 @@
       el('button', { type: 'button', disabled: locked || !sel.length, text: '다른 항목으로 이동', onclick: () => openMove(v.records.filter((r) => R.selected.has(r.id))) }),
     ]));
     if (!v.records.length) {
-      box.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '아직 기록이 없습니다.' }), R.slot.item === 'subject' ? el('button', { type: 'button', class: 'primary', disabled: locked, text: '기록 없이 성취기준만으로 생성', onclick: standardsOnlyDialog }) : null, el('p', { class: 'hint', text: '[+ 누가기록]으로 활동을 하나씩 쌓거나, 이미 쓴 생기부를 넣어 다듬을 수 있습니다. 여러 학생의 엑셀 자료는 자료 인박스에서 학생별로 나눠 한 번에 보낼 수 있습니다.' })]));
+      box.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '아직 기록이 없습니다.' }), R.slot.item === 'subject' ? el('button', { type: 'button', class: 'primary', disabled: locked, text: '기록 없이 성취기준만으로 생성', onclick: standardsOnlyDialog }) : null, el('p', { class: 'hint', text: '[+ 학생관찰기록]으로 활동을 하나씩 쌓거나, 이미 쓴 생기부를 넣어 다듬을 수 있습니다. 여러 학생의 엑셀 자료는 자료 인박스에서 학생별로 나눠 한 번에 보낼 수 있습니다.' })]));
       return;
     }
     // 기록 순서: ⠿ 끌기·▲▼ (종합할 때 AI에 보내는 순서)
@@ -1855,6 +1858,11 @@
   function recordCard(r, locked) {
     const isSel = R.selected.has(r.id);
     const card = el('div', { class: 'rcard' + (isSel ? ' sel' : '') });
+    if (R.highlight === r.id) { // 태그별 기록에서 [이 항목에서 열기]로 온 기록
+      R.highlight = null;
+      card.classList.add('flash');
+      requestAnimationFrame(() => card.scrollIntoView({ block: 'center' }));
+    }
     const label = r.kind === 'existing' ? el('span', { class: 'badge existing', text: '기존 완성문' }) : el('span', { class: 'seq', text: `${r.seq}회` });
     card.appendChild(el('div', { class: 'rcard-head' }, [
       el('input', { type: 'checkbox', checked: isSel, onchange: (e) => { if (e.target.checked) R.selected.add(r.id); else R.selected.delete(r.id); renderRecords(); } }),
@@ -1901,7 +1909,7 @@
     ]);
   }
   async function aiRecord(r, btn) {
-    const what = r.kind === 'existing' ? '기존 완성문 다듬기' : '누가기록 정제';
+    const what = r.kind === 'existing' ? '기존 완성문 다듬기' : '학생관찰기록 정제';
     const out = await busyRun(btn, `rec${r.id}`, () => aiRun({
       title: what,
       rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['대상', `${r.kind === 'existing' ? '기존 완성문' : `${r.seq}회 기록`}${r.title ? ` · ${r.title}` : ''} (${r.bytes}B)`], ['모델', modelName($('recModel'))]],
@@ -1951,7 +1959,7 @@
       upd();
       const tags = tagPicker(r ? r.tags.map((t) => t.id) : []);
       box.append(
-        el('div', { class: 'sheet-head' }, [el('h2', { text: `${r ? '기록 수정' : existing ? '이미 쓴 생기부 넣기' : '누가기록 추가'} · ${R.view.student.name}` }), el('span', { class: 'muted', text: R.slot.label })]),
+        el('div', { class: 'sheet-head' }, [el('h2', { text: `${r ? '기록 수정' : existing ? '이미 쓴 생기부 넣기' : '학생관찰기록 추가'} · ${R.view.student.name}` }), el('span', { class: 'muted', text: R.slot.label })]),
         existing ? null : el('div', { class: 'inline' }, [el('label', { class: 'date-opt' }, [useDate, '날짜 넣기']), date, dateNote, el('label', { style: 'margin:0' }, ['활동명']), title]),
         existing ? el('div', { class: 'inline' }, [el('label', { style: 'margin:0' }, ['제목']), title]) : null,
         el('label', { text: '태그' }), tags,
@@ -2246,18 +2254,18 @@
   }
   const stepBar = (n) => el('div', { class: 'steps' }, ['① 자료 붙여넣기', '② 열·학생 연결 확인', '③ 입력'].map((t, i) => el('span', { class: i + 1 === n ? 'on' : '', text: t })));
 
-  // 여러 학생 일괄 입력: kind='existing'(이미 쓴 생기부 → 기존 완성문, 학생당 한 줄) / 'record'(누가기록, 한 학생 여러 줄, 활동명·날짜 선택).
+  // 여러 학생 일괄 입력: kind='existing'(이미 쓴 생기부 → 기존 완성문, 학생당 한 줄) / 'record'(학생관찰기록, 한 학생 여러 줄, 활동명·날짜 선택).
   // 파일마다 다른 형식. 이름·내용만 있으면 이름으로 연결한다. NEIS 업로드 파일(반/번호·성명·내용)도 알아본다.
   // 표에서 고친 것(내용·학생·확정·빼기·순서)은 원본 행 번호로 기억해, 열을 다시 골라도 그대로 둔다.
   async function openExistingBulk(kind) {
     if (!R.slot) return;
     const isRec = kind === 'record';
-    const what = isRec ? '누가기록' : '이미 쓴 생기부';
+    const what = isRec ? '학생관찰기록' : '이미 쓴 생기부';
     const c = await api.read_clipboard();
     const clip = c && c.ok && (c.text || '').includes('\t') ? c.text : '';
     const gid = R.slot.group_id, item = R.slot.item, slotLabel = R.slot.label;
     const intro = isRec
-      ? '학생별 누가기록으로 추가합니다. 한 학생이 여러 줄이면 줄마다 한 건씩 들어가고 회차는 이어 붙습니다. 이미 있는 기록은 바꾸지 않습니다. 이름과 기록 내용 칸만 있으면 되고, 활동명·날짜 칸은 고를 때만 넣습니다.'
+      ? '학생별 학생관찰기록으로 추가합니다. 한 학생이 여러 줄이면 줄마다 한 건씩 들어가고 회차는 이어 붙습니다. 이미 있는 기록은 바꾸지 않습니다. 이름과 기록 내용 칸만 있으면 되고, 활동명·날짜 칸은 고를 때만 넣습니다.'
       : "작성해 둔 문장을 학생별 '기존 완성문' 기록으로 추가합니다. 아직 최종안은 아닙니다 — 최종안 반영은 다음 단계([✔ 기존 완성문 → 최종안 일괄])입니다. 이미 있는 기록은 바꾸지 않습니다. 이름과 생기부 내용 칸만 있으면 되고, NEIS 업로드 파일(학년도·학기·…·반/번호·성명·학적변동 구분·내용)도 그대로 읽습니다.";
     let lastText = clip;
     openSheet((box) => {
@@ -2600,7 +2608,554 @@
     }
   }
 
-  // ---------- 태그 ----------
+  // ---------- 태그별 기록 ----------
+  // 태그 하나를 고르면 그 태그가 붙은 기록을 학생 전부 한 화면에 모아 바로 고친다.
+  // 저장: 칸을 벗어나거나 Ctrl+S. 기록마다 순서대로(앞 저장이 끝나야 다음). 화면을 연 뒤 다른 곳에서 바뀐 기록은 덮지 않는다(expect).
+  // 되돌리기: 이 학년도에서 이 화면으로 고치기 전 값(undo.before)으로. 서버가 그 뒤 바뀌었거나 마감됐으면 거절한다.
+  // 상태(기록 줄): 되돌리는 중 > 저장 중 > 저장 실패 > 저장 전 > 저장됨(되돌리기) — tvRowState로 매번 계산한다.
+  const TV_ITEM_ICON = { autonomy: '🏫', career: '🧭', behavior: '💬', subject: '📘', club: '🎭' };
+  const TV_FLT0 = () => ({ scope: '', slot: '', status: 'all', q: '', inactive: false });
+  const TV = { tag: null, flt: TV_FLT0(), data: null, limit: 100, rec: new Map(), sel: new Set(), out: new Set(), queue: new Map(),
+    undo: new Map(), ops: new Set(), slotUI: new Map(), seq: 0, cseq: 0, loading: false, year: null, anchor: null, bulk: null };
+  const tvTagKey = () => `sgb.tv.tag.${ys.year}`;
+  async function rawCall(method, ...args) {
+    try { return await api[method](...args); } catch (e) { return { ok: false, error: String(e) }; }
+  }
+  const tvFields = (r) => ({ content: r.content, date: r.date || '', title: r.title || '', tag_ids: [...(r.tag_ids || r.tags || [])].sort((a, b) => a - b) });
+  const sameVal = (k, a, b) => (k === 'tag_ids' ? JSON.stringify([...(a || [])].sort((x, y) => x - y)) === JSON.stringify([...(b || [])].sort((x, y) => x - y)) : (a || '').trim() === (b || '').trim());
+  const sameAll = (cur, want) => Object.keys(want || {}).every((k) => sameVal(k, cur[k], want[k]));
+  const slotKeyOf = (r) => `${r.group_id}:${r.item}:${r.student_no}`;
+  function tvDiff(st) {
+    const d = {};
+    ['content', 'date', 'title', 'tag_ids'].forEach((k) => { if (!sameVal(k, st.draft[k], st.saved[k])) d[k] = st.draft[k]; });
+    return d;
+  }
+  const tvHasDiff = (st) => Object.keys(tvDiff(st)).length > 0;
+  function tvDirty() {
+    if (TV.queue.size || TV.ops.size) return true;
+    for (const st of TV.rec.values()) if (tvHasDiff(st)) return true;
+    return false;
+  }
+  // 저장 대기·진행 중인 것과 되돌리기·일괄 작업을 모두 끝낸다. 남은 글이 있으면 false(화면을 바꾸지 않는다)
+  async function flushTagView() {
+    const jobs = [...TV.ops];
+    for (const [rid, st] of TV.rec) if (tvHasDiff(st) && !(st.err && st.err.code)) jobs.push(tvSave(rid));
+    jobs.push(...TV.queue.values());
+    await Promise.all(jobs);
+    tvSaveSummary();
+    for (const st of TV.rec.values()) if (tvHasDiff(st)) return false;
+    return true;
+  }
+  // 기록 하나의 작업 줄(저장·되돌리기)에 이어 붙인다
+  function tvEnqueue(rid, fn) {
+    const prev = TV.queue.get(rid) || Promise.resolve();
+    const p = prev.then(fn, fn);
+    TV.queue.set(rid, p);
+    p.finally(() => { if (TV.queue.get(rid) === p) TV.queue.delete(rid); const st = TV.rec.get(rid); if (st) tvMark(st); tvSaveSummary(); });
+    return p;
+  }
+  function tvSave(rid) {
+    const st = TV.rec.get(rid);
+    if (st) { st.pending = true; tvMark(st); }
+    return tvEnqueue(rid, () => tvSaveNow(rid));
+  }
+  async function tvSaveNow(rid) {
+    const st = TV.rec.get(rid);
+    if (!st) return;
+    st.pending = false;
+    const diff = tvDiff(st);
+    if (!Object.keys(diff).length) return;
+    const expect = {};
+    Object.keys(diff).forEach((k) => { expect[k] = st.saved[k]; });
+    const before = { ...st.saved };
+    st.saving = true; tvMark(st); tvSaveSummary();
+    const r = await rawCall('update_record', rid, { ...diff, expect, year: TV.year });
+    st.saving = false;
+    if (!r || r.ok === false) {
+      st.err = { msg: (r && r.error) || '저장하지 못했습니다.', code: r && r.code };
+      tvMark(st);
+      return;
+    }
+    st.err = null;
+    markSaved();
+    const now = tvFields(r.record);
+    // 칸마다 맞춘다: 저장하는 동안 손대지 않은 칸은 서버 값으로, 더 고친 칸은 고친 글을 그대로 둔다
+    ['content', 'date', 'title', 'tag_ids'].forEach((k) => {
+      const untouched = k in diff ? sameVal(k, st.draft[k], diff[k]) : sameVal(k, st.draft[k], before[k]);
+      if (untouched) st.draft[k] = now[k];
+    });
+    // 되돌리기 기준: 처음 고치기 전 값(before)과 지금 저장된 값(after)
+    const u = st.undo || { before: {}, after: {} };
+    Object.keys(diff).forEach((k) => { if (!(k in u.before)) u.before[k] = before[k]; });
+    Object.keys(u.before).forEach((k) => { if (sameVal(k, u.before[k], now[k])) delete u.before[k]; });
+    u.after = {};
+    Object.keys(u.before).forEach((k) => { u.after[k] = now[k]; });
+    st.undo = Object.keys(u.before).length ? u : null;
+    if (st.undo) TV.undo.set(rid, st.undo); else TV.undo.delete(rid);
+    st.saved = now;
+    tvApplyState(st, r.record);
+  }
+  // 서버의 기록 상태를 화면에 반영(태그·제외 예정·최종안 확인 필요)
+  function tvApplyState(st, rec) {
+    st.r.tags = [...st.saved.tag_ids];
+    st.r.closed = !!rec.closed;
+    tvSetSlotStale(slotKeyOf(st.r), !!rec.stale);
+    tvOutCheck(st);
+    if (st.sync) st.sync();
+    tvMark(st);
+    tvSaveSummary();
+    tvRefreshCounts();
+  }
+  function tvOutCheck(st) {
+    const id = st.r.id, tags = st.saved.tag_ids;
+    const out = TV.tag === 0 ? tags.length > 0 : TV.tag ? !tags.includes(TV.tag) : false;
+    if (out) TV.out.add(id); else TV.out.delete(id);
+  }
+  function tvSetSlotStale(key, stale) {
+    for (const st of TV.rec.values()) if (slotKeyOf(st.r) === key) st.r.stale = stale;
+    const ui = TV.slotUI.get(key);
+    if (ui) ui.stale.hidden = !stale || ui.closed;
+  }
+  function tvUndo(rid) {
+    const st = TV.rec.get(rid);
+    if (!st || !st.undo || st.busy) return;
+    st.busy = true; tvMark(st);
+    return tvEnqueue(rid, async () => {
+      const u = st.undo;
+      const r = await rawCall('revert_record', rid, u.before, u.after, TV.year);
+      st.busy = false;
+      if (!r || r.ok === false) { tvMark(st); await alertBox((r && r.error) || '되돌리지 못했습니다.'); return; }
+      markSaved();
+      st.saved = tvFields(r.record); st.draft = { ...st.saved }; st.undo = null; st.err = null;
+      TV.undo.delete(rid);
+      tvApplyState(st, r.record);
+      toast('이 화면에서 고치기 전 내용으로 되돌렸습니다.');
+    });
+  }
+  // 충돌·마감으로 저장하지 못한 기록: 내 글을 복사해 두고 지금 저장된 내용을 불러온다
+  async function tvDiscard(rid, copy) {
+    const st = TV.rec.get(rid);
+    if (!st) return;
+    if (copy && !(await tvCopy(st.draft.content))) return;
+    const r = await call('record_state', rid);
+    if (!r) return;
+    st.saved = tvFields(r.record); st.draft = { ...st.saved }; st.err = null; st.undo = null; TV.undo.delete(rid);
+    st.r.closed = !!r.record.closed;
+    const old = st.ui && st.ui.card;
+    if (old && old.isConnected) old.replaceWith(tvRecordCard(st.r));
+    tvApplyState(st, r.record);
+  }
+  async function tvCopy(text) {
+    const r = await rawCall('copy_text', text);
+    if (r && r.ok !== false) { toast('내 글을 클립보드에 복사했습니다.'); return true; }
+    await alertBox('클립보드에 복사하지 못했습니다. 글상자의 내용을 직접 복사해 두세요.');
+    return false;
+  }
+  function tvSaveSummary() {
+    const box = $('tvSave');
+    if (!box) return;
+    let dirty = 0, fail = 0, busy = 0;
+    for (const st of TV.rec.values()) {
+      if (st.err) fail++;
+      else if (st.saving || st.busy || st.pending) busy++;
+      else if (tvHasDiff(st)) dirty++;
+    }
+    box.className = 'tv-save' + (fail ? ' bad' : busy || dirty || TV.ops.size ? ' busy' : '');
+    box.textContent = fail ? `저장 실패 ${fail}건 — 빨간 기록을 확인하세요` : busy || TV.ops.size ? `저장 중 ${busy || ''}…` : dirty ? `저장 전 ${dirty}건 (칸을 벗어나거나 Ctrl+S)` : (TV.data ? '모두 저장됨' : '');
+  }
+  function tvRowState(st) {
+    if (st.busy) return 'undoing';
+    if (st.saving || st.pending) return 'saving';
+    if (st.err) return 'fail';
+    if (tvHasDiff(st)) return 'dirty';
+    if (st.undo) return 'saved';
+    return 'none';
+  }
+  function tvMark(st) {
+    if (!st.ui) return;
+    const state = tvRowState(st);
+    const s = st.ui.state;
+    s.innerHTML = '';
+    st.ui.card.classList.toggle('save-fail', state === 'fail');
+    const lockEdit = state === 'undoing';
+    st.ui.ta.readOnly = !st.ui.can || lockEdit;
+    if (state === 'undoing') s.append(el('span', { class: 'tv-st saving', text: '되돌리는 중…' }));
+    else if (state === 'saving') s.append(el('span', { class: 'tv-st saving', text: '저장 중…' }));
+    else if (state === 'fail') {
+      const hard = st.err.code === 'conflict' || st.err.code === 'closed';
+      s.append(el('span', { class: 'tv-st fail', text: `저장 못 함: ${st.err.msg}` }));
+      if (hard) {
+        s.append(el('button', { type: 'button', class: 'small', text: '내 글 복사', onclick: () => tvCopy(st.draft.content) }),
+          el('button', { type: 'button', class: 'small', text: '내 글 복사 후 지금 내용 불러오기', onclick: () => tvDiscard(st.r.id, true) }));
+      } else {
+        s.append(el('button', { type: 'button', class: 'small', text: '다시 저장', onclick: () => { st.err = null; tvSave(st.r.id); } }),
+          el('button', { type: 'button', class: 'small', text: '내 글 복사', onclick: () => tvCopy(st.draft.content) }));
+      }
+    } else if (state === 'dirty') s.append(el('span', { class: 'tv-st dirty', text: '저장 전' }));
+    else if (state === 'saved') {
+      s.append(el('span', { class: 'tv-st ok', text: '저장됨' }),
+        el('button', { type: 'button', class: 'link', text: '되돌리기', title: '이 화면에서 고치기 전 내용으로 돌아갑니다(그 뒤 다른 곳에서 바뀌었거나 마감했으면 되돌리지 않습니다)', onclick: () => tvUndo(st.r.id) }));
+    }
+    const b = st.ui.badges;
+    b.innerHTML = '';
+    if (TV.out.has(st.r.id)) b.append(el('span', { class: 'badge tv-out', text: TV.tag === 0 ? '태그를 붙임 · 다음 조회 때 목록에서 빠짐' : '이 태그를 뺌 · 다음 조회 때 목록에서 빠짐' }));
+    st.ui.bytes.textContent = `${bytesOf(st.draft.content)}B`;
+  }
+  function tvEditable(r) { return !ys.archived && !r.closed && r.active && !r.gone; }
+  function tvLock(r) {
+    if (r.closed) return { cls: 'closed', text: '● 마감됨 · 읽기 전용' };
+    if (ys.archived) return { cls: 'other', text: '🔒 보관 학년도 · 읽기 전용' };
+    if (!r.active || r.gone) return { cls: 'other', text: '🔒 비활성 학생 · 읽기 전용' };
+    return null;
+  }
+  const tvAnyFilter = () => !!(TV.flt.scope || TV.flt.slot || TV.flt.status !== 'all' || TV.flt.q || TV.flt.inactive);
+  // 조회: 가장 최근 요청의 응답만 반영한다. 조회하는 동안 목록은 고칠 수 없다. 실패하면 false
+  async function renderTagView(keepScroll) {
+    if (TV.year !== ys.year) {
+      TV.year = ys.year; TV.data = null; TV.rec.clear(); TV.sel.clear(); TV.out.clear(); TV.undo.clear(); TV.flt = TV_FLT0(); TV.bulk = null; TV.anchor = null;
+      const saved = localStorage.getItem(tvTagKey()); TV.tag = saved === null || saved === '' ? null : +saved;
+    }
+    const seq = ++TV.seq, year = ys.year;
+    const main = $('tvMain');
+    const top = main.scrollTop;
+    TV.loading = true; main.inert = true; main.classList.add('loading');
+    const r = await rawCall('tag_view', TV.tag, { ...TV.flt });
+    if (seq !== TV.seq || year !== ys.year) return false; // 더 새 조회가 있거나 학년도가 바뀜
+    TV.loading = false; main.inert = false; main.classList.remove('loading');
+    if (!r || r.ok === false) { await alertBox((r && r.error) || '불러오지 못했습니다.'); return false; }
+    if (TV.tag && !r.tags.some((t) => t.id === TV.tag)) { TV.tag = null; return renderTagView(); }
+    TV.data = r;
+    TV.rec.clear(); TV.out.clear(); TV.slotUI.clear();
+    const live = new Set(r.records.filter(tvEditable).map((x) => x.id));
+    for (const id of [...TV.sel]) if (!live.has(id)) TV.sel.delete(id);
+    r.records.forEach((x) => {
+      const f = tvFields(x);
+      const u = TV.undo.get(x.id);
+      const undo = u && sameAll(f, u.after) ? u : null; // 다시 불러와도 되돌리기를 남긴다(그 뒤 바뀌었으면 버림)
+      if (u && !undo) TV.undo.delete(x.id);
+      TV.rec.set(x.id, { r: x, saved: f, draft: { ...f }, undo, err: null, ui: null });
+    });
+    tvRenderFilters();
+    tvRenderTags();
+    tvRenderMain();
+    tvSaveSummary();
+    if (keepScroll) main.scrollTop = top;
+    if (TV.anchor) {
+      const st = TV.rec.get(TV.anchor);
+      TV.anchor = null;
+      if (st && st.ui) { st.ui.card.scrollIntoView({ block: 'center' }); st.ui.card.classList.add('flash'); }
+    }
+    return true;
+  }
+  function tvRenderFilters() {
+    const o = TV.data.options;
+    const fill = (sel, groups, cur) => {
+      sel.innerHTML = '';
+      groups.forEach(([label, opts]) => {
+        if (!label) { opts.forEach((x) => sel.appendChild(el('option', { value: x.key, text: x.label, selected: x.key === cur }))); return; }
+        if (!opts.length) return;
+        sel.appendChild(el('optgroup', { label }, opts.map((x) => el('option', { value: x.key, text: x.label, selected: x.key === cur }))));
+      });
+    };
+    fill($('tvScope'), [['', [{ key: '', label: '전체' }]], ['학년-반 (그 반 학생의 모든 기록)', o.classes], ['수업 (그 과목·수업 기록만)', o.sections]], TV.flt.scope);
+    fill($('tvSlot'), [['', [{ key: '', label: '전체' }]], ['항목', o.items], ['과목·동아리', o.slots]], TV.flt.slot);
+    $('tvStatus').value = TV.flt.status;
+    if (document.activeElement !== $('tvQ')) $('tvQ').value = TV.flt.q;
+    $('tvInactive').checked = !!TV.flt.inactive;
+    $('tvClear').hidden = !tvAnyFilter();
+    const ts = $('tvTagSel');
+    ts.innerHTML = '';
+    ts.appendChild(el('option', { value: '', text: '태그 고르기', selected: TV.tag === null }));
+    TV.data.tags.forEach((t) => ts.appendChild(el('option', { value: t.id, text: `${t.name} (${t.count}건)`, selected: t.id === TV.tag })));
+    ts.appendChild(el('option', { value: '0', text: `태그 없음 (${TV.data.untagged}건)`, selected: TV.tag === 0 }));
+  }
+  function tvRenderTags() {
+    const box = $('tvTags');
+    const q0 = box.querySelector('input.search');
+    const keepQ = q0 ? q0.value : '';
+    box.innerHTML = '';
+    const d = TV.data;
+    const find = el('input', { type: 'search', class: 'search', placeholder: '태그 찾기', 'aria-label': '태그 찾기', value: keepQ });
+    const list = el('div', { class: 'tv-taglist' });
+    const draw = () => {
+      list.innerHTML = '';
+      const q = find.value.trim();
+      d.tags.filter((t) => !q || t.name.includes(q)).forEach((t) => list.appendChild(el('button', { type: 'button', class: 'tv-tag' + (t.id === TV.tag ? ' active' : '') + (t.count ? '' : ' zero'), 'aria-pressed': t.id === TV.tag ? 'true' : 'false',
+        onclick: () => tvPickTag(t.id) }, [el('span', { class: 'nm', text: t.name }), el('span', { class: 'cnt', text: `${t.count}건` })])));
+      if (!d.tags.length) list.appendChild(el('p', { class: 'muted', text: '태그가 없습니다.' }));
+    };
+    find.addEventListener('input', draw);
+    draw();
+    box.append(el('div', { class: 'tv-tags-title', text: '태그' }), find, list,
+      el('div', { class: 'tv-sep' }),
+      el('button', { type: 'button', class: 'tv-tag untag' + (TV.tag === 0 ? ' active' : ''), 'aria-pressed': TV.tag === 0 ? 'true' : 'false', onclick: () => tvPickTag(0) }, [el('span', { class: 'nm', text: '태그 없음' }), el('span', { class: 'cnt', text: `${d.untagged}건` })]),
+      el('p', { class: 'hint', text: '숫자는 위 필터를 적용한 기록 수입니다. 한 기록에 태그가 여럿이면 각각 셉니다.' }),
+      el('button', { type: 'button', class: 'link', text: '태그 관리로 →', onclick: () => showPanel('tags') }));
+  }
+  async function tvPickTag(id) {
+    if (id === TV.tag) return;
+    if (!(await leaveOk())) { if (TV.data) tvRenderFilters(); return; }
+    const prev = TV.tag;
+    TV.tag = id; TV.limit = 100;
+    if (await renderTagView()) {
+      if (TV.sel.size) toast('태그를 바꿔 선택을 풀었습니다.');
+      TV.sel.clear(); TV.bulk = null; tvRenderBulk(); tvRenderSum();
+      try { localStorage.setItem(tvTagKey(), String(id)); } catch (e) { /* 무시 */ }
+    } else if (TV.seq && TV.tag === id) { TV.tag = prev; if (TV.data) { tvRenderFilters(); tvRenderTags(); } }
+  }
+  async function tvSetFilter(patch) {
+    if (!(await leaveOk())) { if (TV.data) tvRenderFilters(); return; }
+    const prev = { ...TV.flt };
+    Object.assign(TV.flt, patch); TV.limit = 100;
+    if (await renderTagView()) {
+      if (TV.sel.size) toast('조건을 바꿔 선택을 풀었습니다.');
+      TV.sel.clear(); TV.bulk = null; tvRenderBulk(); tvRenderSum();
+    } else if (JSON.stringify(TV.flt) === JSON.stringify({ ...prev, ...patch })) { TV.flt = prev; if (TV.data) tvRenderFilters(); }
+  }
+  async function tvRefreshCounts() {
+    const seq = ++TV.cseq, year = ys.year;
+    const r = await rawCall('tag_view', null, { ...TV.flt });
+    if (seq !== TV.cseq || year !== ys.year || !r || r.ok === false || !TV.data) return;
+    TV.data.tags = r.tags; TV.data.untagged = r.untagged;
+    tvRenderTags();
+    tvRenderFilters();
+  }
+  function tvRenderSum() {
+    const d = TV.data, sum = $('tvSum');
+    sum.innerHTML = '';
+    if (!d || TV.tag === null) return;
+    const name = TV.tag === 0 ? '태그 없음' : (d.tags.find((t) => t.id === TV.tag) || {}).name;
+    const editable = d.records.filter(tvEditable).length;
+    const shown = Math.min(TV.limit, d.records.length);
+    sum.append(el('b', { text: name }), ` · ${d.students}명 ${d.records.length}건`,
+      el('span', { class: 'muted', text: ` (고칠 수 있음 ${editable}건 · 읽기 전용 ${d.records.length - editable}건) · ${shown}/${d.records.length}건 표시` }));
+    if (TV.bulk) {
+      const b = TV.bulk;
+      sum.append(el('span', { class: 'tv-bulk-note' }, [`최근 일괄 작업: ${b.text} `, el('button', { type: 'button', class: 'link', text: '되돌리기', onclick: () => tvBulkUndo() })]));
+    }
+    sum.append(el('span', { class: 'tv-note', text: '이 태그가 붙은 기록만 보입니다(학생별 미입력 현황이 아님). 기록을 고쳐도 최종안 문장은 자동으로 바뀌지 않습니다. [되돌리기]는 이 학년도에서 이 화면을 쓰는 동안 남습니다.' }));
+  }
+  function tvClassOf(r) {
+    if (!r.grade || !r.class_no) return { key: 'c:-', label: '반 정보 없음' };
+    return { key: `c:${r.grade}-${r.class_no}`, label: `${r.grade}학년 ${r.class_no}반` };
+  }
+  function tvSrcLabel(r) {
+    const it = ITEM_LABELS[r.item];
+    if (r.gkind === 'subject') return `${it} · ${r.group_name}${r.semester ? `(${r.semester}학기)` : ''}`;
+    return `${it} · ${r.group_name}`;
+  }
+  function tvRenderMain(focusFrom) {
+    const main = $('tvMain');
+    main.innerHTML = '';
+    TV.slotUI.clear();
+    const d = TV.data;
+    tvRenderSum();
+    if (TV.tag === null) {
+      main.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: d.tags.length ? '태그를 고르세요. 그 태그가 붙은 기록이 학생 전부 한 화면에 모입니다.' : '아직 태그가 없습니다. 태그 관리에서 먼저 만드세요.' }),
+        d.tags.length ? null : el('button', { type: 'button', class: 'primary', text: '태그 관리', onclick: () => showPanel('tags') })]));
+      tvRenderBulk();
+      return;
+    }
+    const recs = d.records.slice(0, TV.limit);
+    if (!d.records.length) {
+      const total = TV.tag === 0 ? d.untagged : ((d.tags.find((t) => t.id === TV.tag) || {}).count || 0);
+      main.appendChild(el('div', { class: 'empty-state' }, [
+        el('p', { text: tvAnyFilter() ? '필터 조건에 맞는 기록이 없습니다.' : total === 0 && TV.tag !== 0 ? '이 태그가 붙은 기록이 아직 없습니다. 기록에 태그를 붙이면 여기에 모입니다.' : '기록이 없습니다.' }),
+        tvAnyFilter() ? el('button', { type: 'button', text: '필터 지우기', onclick: () => tvSetFilter(TV_FLT0()) }) : null,
+        !TV.flt.inactive ? el('p', { class: 'hint', text: '비활성 학생의 기록은 [비활성 포함]을 켜야 보입니다.' }) : null]));
+      tvRenderBulk();
+      return;
+    }
+    // 학년-반 → 학생 → 담당(항목) → 기록
+    const total = {}, shownPer = {}, clsCount = {};
+    d.records.forEach((r) => { total[r.student_no] = (total[r.student_no] || 0) + 1; const k = tvClassOf(r).key; clsCount[k] = clsCount[k] || { n: 0, s: new Set() }; clsCount[k].n++; clsCount[k].s.add(r.student_no); });
+    recs.forEach((r) => { shownPer[r.student_no] = (shownPer[r.student_no] || 0) + 1; });
+    let cls = null, stu = null, slot = null, clsBox = null, stuBox = null, slotBox = null;
+    let focusEl = null;
+    recs.forEach((r, i) => {
+      const c = tvClassOf(r);
+      if (c.key !== cls) {
+        cls = c.key; stu = null;
+        const fk = `tv:${c.key}`;
+        const box = el('div', { class: 'tv-class' + (fold[fk] ? ' folded' : ''), style: `--gc:${groupColor(c.key)}` });
+        const cc = clsCount[c.key];
+        const arrow = el('span', { text: `${fold[fk] ? '▸' : '▾'} ${c.label}` });
+        const head = el('button', { type: 'button', class: 'tv-class-head', 'aria-expanded': fold[fk] ? 'false' : 'true', title: fold[fk] ? '펼치기' : '접기' },
+          [arrow, el('span', { class: 'cnt', text: `학생 ${cc.s.size}명 · 기록 ${cc.n}건` })]);
+        head.addEventListener('click', () => {
+          setFold(fk, !fold[fk]);
+          box.classList.toggle('folded', !!fold[fk]);
+          arrow.textContent = `${fold[fk] ? '▸' : '▾'} ${c.label}`;
+          head.setAttribute('aria-expanded', fold[fk] ? 'false' : 'true');
+          head.title = fold[fk] ? '펼치기' : '접기';
+        });
+        box.appendChild(head);
+        main.appendChild(box);
+        clsBox = box;
+      }
+      if (r.student_no !== stu) {
+        stu = r.student_no; slot = null;
+        const part = shownPer[r.student_no] < total[r.student_no] ? ` (표시 ${shownPer[r.student_no]}/${total[r.student_no]}건 — 나머지는 아래 [다음 100건 보기])` : '';
+        stuBox = el('div', { class: 'tv-stu' }, [el('div', { class: 'tv-stu-head' }, [
+          el('b', { text: `${r.student_no} ${r.name}` }), r.active && !r.gone ? null : el('span', { class: 'badge', text: '비활성' }),
+          el('span', { class: 'muted', text: `이 태그 기록 ${total[r.student_no]}건${part}` })])]);
+        clsBox.appendChild(stuBox);
+      }
+      const sk = `${r.group_id}:${r.item}`;
+      if (sk !== slot) {
+        slot = sk;
+        const st = STATUS[r.status] || STATUS.none;
+        const stale = el('span', { class: 'badge tv-stale', text: '최종안 확인 필요', title: '기록이 바뀌었습니다. 이 항목에서 열어 최종안을 확인하세요.', hidden: !(r.stale && !r.closed) });
+        TV.slotUI.set(slotKeyOf(r), { stale, closed: r.closed });
+        slotBox = el('div', { class: 'tv-slot' + (r.closed ? ' is-closed' : '') }, [el('div', { class: 'tv-slot-head' }, [
+          el('span', { class: `tv-src it-${r.item}`, text: `${TV_ITEM_ICON[r.item] || ''} ${tvSrcLabel(r)}` }),
+          r.gkind === 'subject' && r.section ? el('span', { class: 'muted', text: `수업: ${r.section}` }) : null,
+          el('span', { class: `tv-stat ${st.cls}`, title: '이 항목의 상태', text: `${st.icon} ${st.text}` }),
+          stale,
+          el('span', { class: 'spacer' }),
+          el('button', { type: 'button', class: 'link', text: '이 항목에서 열기 ↗', title: '항목별 기록에서 이 학생의 이 항목을 엽니다. 돌아오면 이 자리로 옵니다.',
+            onclick: () => { TV.anchor = r.id; R.highlight = r.id; openRecords(r.group_id, r.item, r.student_no); } })])]);
+        stuBox.appendChild(slotBox);
+      }
+      const card = tvRecordCard(r);
+      slotBox.appendChild(card);
+      if (focusFrom !== undefined && i === focusFrom) focusEl = card;
+    });
+    if (d.records.length > recs.length) {
+      const from = recs.length;
+      main.appendChild(el('button', { type: 'button', class: 'tv-more', text: `전체 결과 중 다음 100건 보기 (남은 ${d.records.length - recs.length}건)`,
+        onclick: async () => { if (!(await leaveOk())) return; TV.limit += 100; tvRenderMain(from); } }));
+    }
+    if (focusEl) { focusEl.scrollIntoView({ block: 'start' }); const ta = focusEl.querySelector('textarea'); if (ta) ta.focus({ preventScroll: true }); }
+    tvRenderBulk();
+  }
+  function tvRecordCard(r) {
+    const st = TV.rec.get(r.id);
+    const can = tvEditable(r);
+    const who = `${r.name} · ${tvSrcLabel(r)}${r.seq ? ` · ${r.seq}회` : r.kind === 'existing' ? ' · 기존 완성문' : ''}`;
+    const card = el('div', { class: 'tv-rec' + (can ? '' : ' locked') + (TV.sel.has(r.id) ? ' sel' : ''), 'data-rid': r.id });
+    const cb = can ? el('input', { type: 'checkbox', checked: TV.sel.has(r.id), title: '여러 기록 태그 작업에 고르기', 'aria-label': `${who} 기록 고르기` }) : null;
+    if (cb) cb.addEventListener('change', () => { cb.checked ? TV.sel.add(r.id) : TV.sel.delete(r.id); card.classList.toggle('sel', cb.checked); tvRenderBulk(); });
+    const metaStr = () => [r.kind === 'existing' ? '기존 완성문' : (r.seq ? `${r.seq}회` : ''), st.draft.date, st.draft.title].filter(Boolean).join(' · ') || '(활동명·날짜 없음)';
+    const metaText = el('span', { class: 'tv-meta', text: metaStr() });
+    const ta = el('textarea', { class: 'tv-ta', rows: 2, 'aria-label': `${who} 내용` });
+    ta.value = st.draft.content;
+    ta.readOnly = !can;
+    const fit = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, 420) + 'px'; };
+    requestAnimationFrame(fit);
+    ta.addEventListener('input', () => { if (ta.readOnly) return; st.draft.content = ta.value; fit(); tvMark(st); tvSaveSummary(); });
+    ta.addEventListener('blur', () => { if (tvHasDiff(st) && !(st.err && st.err.code)) tvSave(r.id); });
+    // 날짜·활동명: 펼쳐서 고친다
+    const metaEdit = el('div', { class: 'tv-meta-edit', hidden: true });
+    let di = null, ti = null;
+    if (can && r.kind !== 'existing') {
+      di = el('input', { type: 'date', value: st.draft.date || '', 'aria-label': `${who} 날짜` });
+      ti = el('input', { type: 'text', value: st.draft.title || '', placeholder: '활동명', 'aria-label': `${who} 활동명` });
+      di.addEventListener('change', () => { st.draft.date = di.value; metaText.textContent = metaStr(); tvMark(st); tvSave(r.id); });
+      ti.addEventListener('input', () => { st.draft.title = ti.value; metaText.textContent = metaStr(); tvMark(st); tvSaveSummary(); });
+      ti.addEventListener('blur', () => { if (tvHasDiff(st) && !(st.err && st.err.code)) tvSave(r.id); });
+      metaEdit.append(el('label', { class: 'inline' }, ['날짜 ', di]), el('label', { class: 'inline grow' }, ['활동명 ', ti]));
+    }
+    // 태그 칩
+    const chips = el('div', { class: 'tv-chips' });
+    const drawChips = () => {
+      chips.innerHTML = '';
+      const names = new Map((TV.data.tags || []).map((t) => [t.id, t.name]));
+      const off = !can || st.busy;
+      st.draft.tag_ids.forEach((tid) => chips.appendChild(el('span', { class: 'tag' + (tid === TV.tag ? ' cur' : '') }, [names.get(tid) || '(지운 태그)',
+        off ? null : el('button', { type: 'button', class: 'x', text: '×', title: `이 기록에서 '${names.get(tid)}' 태그만 빼기`, 'aria-label': `${who}에서 ${names.get(tid)} 태그만 빼기`,
+          onclick: () => { st.draft.tag_ids = st.draft.tag_ids.filter((x) => x !== tid); drawChips(); tvSave(r.id); } })])));
+      if (!off) {
+        const rest = (TV.data.tags || []).filter((t) => !st.draft.tag_ids.includes(t.id));
+        if (rest.length) {
+          const add = el('select', { class: 'tv-addtag', 'aria-label': `${who}에 태그 더하기` }, [el('option', { value: '', text: '+ 태그' }), ...rest.map((t) => el('option', { value: t.id, text: t.name }))]);
+          add.addEventListener('change', () => { if (!add.value) return; st.draft.tag_ids = [...st.draft.tag_ids, +add.value]; drawChips(); tvSave(r.id); });
+          chips.appendChild(add);
+        }
+      }
+      if (!st.draft.tag_ids.length && !can) chips.appendChild(el('span', { class: 'muted', text: '태그 없음' }));
+    };
+    drawChips();
+    const state = el('span', { class: 'tv-state', 'aria-live': 'polite' });
+    const badges = el('span', { class: 'tv-badges' });
+    const bytes = el('span', { class: 'muted tv-bytes' });
+    const lock = tvLock(r);
+    card.append(el('div', { class: 'tv-rec-head' }, [cb, metaText,
+      can && r.kind !== 'existing' ? el('button', { type: 'button', class: 'link', text: '날짜·활동명 수정', 'aria-label': `${who} 날짜·활동명 수정`, onclick: () => { metaEdit.hidden = !metaEdit.hidden; if (!metaEdit.hidden) ti.focus(); } }) : null,
+      lock ? el('span', { class: `tv-lock ${lock.cls}`, text: lock.text }) : null, el('span', { class: 'spacer' }), badges, bytes]),
+    metaEdit, ta, el('div', { class: 'tv-rec-foot' }, [chips, el('span', { class: 'spacer' }), state]));
+    st.ui = { card, state, badges, bytes, ta, can };
+    // 저장 응답·되돌리기·일괄 작업 뒤 화면을 고친 글(draft)에 맞춘다. 지금 쓰고 있는 칸은 건드리지 않는다
+    st.sync = () => {
+      if (document.activeElement !== ta && ta.value !== st.draft.content) { ta.value = st.draft.content; fit(); }
+      if (di && document.activeElement !== di && di.value !== (st.draft.date || '')) di.value = st.draft.date || '';
+      if (ti && document.activeElement !== ti && ti.value !== (st.draft.title || '')) ti.value = st.draft.title || '';
+      metaText.textContent = metaStr();
+      if (!chips.contains(document.activeElement)) drawChips();
+    };
+    tvMark(st);
+    return card;
+  }
+  function tvRenderBulk() {
+    const bar = $('tvBulk');
+    bar.innerHTML = '';
+    if (!TV.sel.size || !TV.data) { bar.hidden = true; return; }
+    bar.hidden = false;
+    const recs = TV.data.records.filter((r) => TV.sel.has(r.id));
+    const n = new Set(recs.map((r) => r.student_no)).size;
+    const tagSel = (ph) => el('select', { 'aria-label': ph }, [el('option', { value: '', text: ph }), ...TV.data.tags.map((t) => el('option', { value: t.id, text: t.name }))]);
+    const addSel = tagSel('태그 더하기…'), rmSel = tagSel('태그 빼기…');
+    addSel.addEventListener('change', () => tvBulkRun(addSel, 'add', n));
+    rmSel.addEventListener('change', () => tvBulkRun(rmSel, 'remove', n));
+    bar.append(el('b', { text: `선택 ${n}명 ${recs.length}건` }), el('span', { class: 'muted', text: '(고칠 수 있는 기록만 고를 수 있습니다)' }), addSel, rmSel,
+      el('button', { type: 'button', text: '선택 해제', onclick: () => { TV.sel.clear(); document.querySelectorAll('#tvMain .tv-rec.sel').forEach((c) => { c.classList.remove('sel'); const x = c.querySelector('input[type=checkbox]'); if (x) x.checked = false; }); tvRenderBulk(); } }));
+  }
+  // 일괄 태그: 목록을 다시 불러오지 않고 바뀐 기록만 고친다(개별 되돌리기·제외 예정 표시 유지)
+  function tvApplyStates(states) {
+    Object.entries(states || {}).forEach(([rid, rec]) => {
+      const st = TV.rec.get(+rid);
+      if (!st) return;
+      const now = tvFields(rec);
+      if (sameVal('tag_ids', st.draft.tag_ids, st.saved.tag_ids)) st.draft.tag_ids = now.tag_ids;
+      st.saved.tag_ids = now.tag_ids;
+      if (st.undo && 'tag_ids' in st.undo.after) st.undo.after.tag_ids = now.tag_ids;
+      tvApplyState(st, rec);
+    });
+  }
+  async function tvOp(fn) {
+    const main = $('tvMain');
+    const p = (async () => { main.inert = true; try { return await fn(); } finally { main.inert = false; } })();
+    TV.ops.add(p);
+    tvSaveSummary();
+    try { return await p; } finally { TV.ops.delete(p); tvSaveSummary(); }
+  }
+  async function tvBulkRun(sel, mode, n) {
+    if (!sel.value) return;
+    const tid = +sel.value, tname = sel.selectedOptions[0].textContent;
+    sel.value = '';
+    if (!(await leaveOk())) return;
+    const ids = [...TV.sel];
+    const r = await tvOp(() => mutate('tag_records_undoable', ids, [tid], mode, TV.year));
+    if (!r) return;
+    tvApplyStates(r.states);
+    TV.bulk = { text: `${n}명 ${ids.length}건 중 ${r.pairs.length}건에 '${tname}' 태그 ${mode === 'add' ? '더함' : '뺌'}`, pairs: r.pairs, mode };
+    tvRenderSum();
+    toast(`${TV.bulk.text}. 위 요약 줄의 [되돌리기]로 취소할 수 있습니다.`);
+  }
+  async function tvBulkUndo() {
+    const b = TV.bulk;
+    if (!b) return;
+    if (!(await leaveOk())) return;
+    const u = await tvOp(() => mutate('undo_tag_records', b.pairs, b.mode, TV.year));
+    if (!u) return;
+    tvApplyStates(u.states);
+    TV.bulk = null;
+    tvRenderSum();
+    const why = [u.changed ? `${u.changed}건은 그 뒤 태그가 다시 바뀌어` : '', u.skipped - u.changed ? `${u.skipped - u.changed}건은 마감·삭제되어` : ''].filter(Boolean).join(', ');
+    toast(why ? `${u.done}건을 되돌렸습니다. ${why} 건너뛰었습니다.` : `${u.done}건을 되돌렸습니다.`, why ? 6000 : 3000);
+  }
+
+  // ---------- 태그 관리 ----------
   async function renderTags() {
     const r = await call('tags');
     if (!r) return;
@@ -2615,6 +3170,35 @@
         if ((tg.used || tg.used_inbox) && !(await confirmBox(`'${tg.name}' 태그를 지우면 기록 ${tg.used}건${tg.used_closed ? `(마감된 기록 ${tg.used_closed}건 포함)` : ''}${tg.used_inbox ? `과 보내기 전 인박스 묶음 ${tg.used_inbox}개` : ''}에서 빠집니다. 태그 정리는 마감과 관계없이 반영됩니다.`, '삭제'))) return;
         if (await mutate('delete_tag', tg.id)) renderTags();
       } })])]));
+    });
+  }
+
+  // 인박스 묶음 이름 → 태그. 만든 태그는 같은 이름의 보내기 전 묶음에도 붙인다.
+  async function tagsFromInbox() {
+    const r = await call('inbox_tag_names');
+    if (!r) return;
+    if (!r.names.length) { alertBox('자료 인박스에 묶음이 없습니다.'); return; }
+    const picks = new Set();
+    openSheet((box) => {
+      const okBtn = el('button', { type: 'button', class: 'primary', disabled: true, text: '태그로 만들기' });
+      const upd = () => { okBtn.disabled = !picks.size; okBtn.textContent = picks.size ? `태그 ${picks.size}개 만들기` : '태그로 만들기'; };
+      const list = el('div', { class: 'tag-inbox-list' }, r.names.map((n) => {
+        const cb = el('input', { type: 'checkbox', disabled: n.exists, checked: n.exists });
+        cb.addEventListener('change', () => { cb.checked ? picks.add(n.name) : picks.delete(n.name); upd(); });
+        const note = n.exists ? '이미 태그 있음' : n.open ? `보내기 전 묶음 ${n.open}개에 붙임` : '보낸 묶음 — 태그만 만듦';
+        return el('label', { class: 'tag-inbox-row' + (n.exists ? ' is-done' : '') }, [cb, el('b', { text: n.name }), el('span', { class: 'muted', text: note })]);
+      }));
+      okBtn.onclick = async () => {
+        const res = await mutate('tags_from_inbox', [...picks]);
+        if (!res) return;
+        closeSheet(); renderTags();
+        toast(`태그 ${res.made}개를 만들었습니다${res.attached ? ` · 인박스 묶음 ${res.attached}개에 붙임` : ''}.`);
+      };
+      box.append(
+        el('div', { class: 'sheet-head' }, [el('h2', { text: '인박스 묶음 이름을 태그로' })]),
+        el('p', { class: 'hint', text: '고른 이름으로 태그를 만듭니다. 보내기 전 묶음에는 그 태그를 바로 붙여, 보낼 때 기록에 함께 붙습니다. 이미 보낸 묶음은 바꾸지 않습니다.' }),
+        list,
+        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }), okBtn]));
     });
   }
 
@@ -2702,7 +3286,7 @@
     m.appendChild(el('div', { class: 'empty-state' }, [
       el('h2', { text: '자료 인박스' }),
       el('p', { text: '어떤 활동 자료든 여기로 가져와 학생별로 나눈 뒤 항목에 보냅니다.' }),
-      el('p', { class: 'hint', text: '① 가져오기(엑셀 붙여넣기·xlsx·스캔 PDF) → ② 학생 매칭 → ③ AI 정제(선택) → ④ 보내기 검토. 스캔 PDF는 CLOVA OCR로 읽습니다. 한 학생씩 직접 쓰는 기록은 항목별 기록의 [+ 누가기록]을 쓰세요.' }),
+      el('p', { class: 'hint', text: '① 가져오기(엑셀 붙여넣기·xlsx·스캔 PDF) → ② 학생 매칭 → ③ AI 정제(선택) → ④ 보내기 검토. 스캔 PDF는 CLOVA OCR로 읽습니다. 한 학생씩 직접 쓰는 기록은 항목별 기록의 [+ 학생관찰기록]을 쓰세요.' }),
       el('div', { class: 'steps-btns' }, [el('button', { type: 'button', class: 'primary edit-only', text: '+ 새 자료 묶음', onclick: newBatch })]),
     ]));
   }
@@ -3388,7 +3972,7 @@
       box.append(
         el('div', { class: 'sheet-head' }, [el('h2', { text: `성취기준만으로 생성 · ${v.student.name}` }), el('span', { class: 'muted', text: `${R.slot.label} · 목표 ${R.target}B` })]),
         el('div', { class: 'sheet-body' }, [
-          el('div', { class: 'warn', text: '이 학생은 누가기록이 없어 성취기준만으로 문장을 만듭니다. 결과에는 "기록 없음, 성취기준으로 생성" 표시가 남습니다. 활동명·사건은 지어내지 않도록 지시합니다.' }),
+          el('div', { class: 'warn', text: '이 학생은 학생관찰기록이 없어 성취기준만으로 문장을 만듭니다. 결과에는 "기록 없음, 성취기준으로 생성" 표시가 남습니다. 활동명·사건은 지어내지 않도록 지시합니다.' }),
           el('div', { class: 'map-row' }, [el('label', {}, [`성취수준(${v.standards.level_scale}단계)`, lvl]), el('span', { class: 'muted', text: v.student.level ? `명렬 값: ${v.student.level}` : '명렬에 수준이 없습니다' }), el('label', {}, ['모델', model])]),
           el('div', { class: 'col-label', text: '이번에 쓸 성취기준 (필요한 부분만 남겨도 됩니다)' }), ta,
         ]),
@@ -3688,6 +4272,29 @@
     $('expXlsxBtn').addEventListener('click', () => doExport('xlsx'));
     const addTag = async () => { if (await mutate('add_tag', $('tagNew').value)) { $('tagNew').value = ''; renderTags(); } };
     $('tagAddBtn').addEventListener('click', addTag);
+    $('tagFromInboxBtn').addEventListener('click', tagsFromInbox);
+    $('tvScope').addEventListener('change', (e) => tvSetFilter({ scope: e.target.value }));
+    $('tvSlot').addEventListener('change', (e) => tvSetFilter({ slot: e.target.value }));
+    $('tvStatus').addEventListener('change', (e) => tvSetFilter({ status: e.target.value }));
+    $('tvInactive').addEventListener('change', (e) => tvSetFilter({ inactive: e.target.checked }));
+    $('tvQ').addEventListener('input', debounce((e) => tvSetFilter({ q: e.target.value }), 400));
+    $('tvQ').setAttribute('aria-label', '이름·학번·내용 찾기');
+    $('tvClear').addEventListener('click', () => tvSetFilter({ scope: '', slot: '', status: 'all', q: '', inactive: false }));
+    $('tvTagSel').addEventListener('change', (e) => { if (e.target.value !== '') tvPickTag(+e.target.value); });
+    $('tvReload').addEventListener('click', async () => {
+      if (await leaveOk()) { renderTagView(true); return; }
+      const bad = [...TV.rec.values()].filter((st) => tvHasDiff(st));
+      if (!bad.length) return;
+      if (!(await confirmBox(`저장하지 못한 기록이 ${bad.length}건 있습니다. 이 기록들의 내 글을 클립보드에 모아 복사한 뒤 버리고, 지금 저장된 내용으로 새로 불러올까요?`, '복사하고 새로 불러오기'))) return;
+      if (!(await tvCopy(bad.map((st) => `[${st.r.student_no} ${st.r.name} · ${tvSrcLabel(st.r)}]\n${st.draft.content}`).join('\n\n')))) return;
+      bad.forEach((st) => { st.draft = { ...st.saved }; st.err = null; });
+      renderTagView(true);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (panel !== 'tagrec' || !(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return;
+      e.preventDefault();
+      flushTagView().then((ok) => toast(ok ? '모두 저장했습니다.' : '저장하지 못한 기록이 있습니다. 빨간 기록을 확인하세요.'));
+    });
     $('tagNew').addEventListener('keydown', (e) => { if (e.key === 'Enter') addTag(); });
     $('prItem').addEventListener('change', (e) => { P.item = e.target.value; renderPrompts(); });
     $('prPrompt').addEventListener('input', savePrompt);

@@ -64,7 +64,10 @@ def safe(fn):
                 return out
             return {"ok": True, **(out if isinstance(out, dict) else {"value": out})}
         except (db.DbError, updater.UpdateError, openrouter.LlmError, weights.WeightError) as e:
-            return {"ok": False, "error": str(e)}
+            out = {"ok": False, "error": str(e)}
+            if getattr(e, "code", None):
+                out["code"] = e.code
+            return out
         except Exception as e:  # 알 수 없는 오류도 앱을 멈추지 않게
             return {"ok": False, "error": f"처리하지 못했습니다: {e.__class__.__name__}: {e}"}
 
@@ -637,8 +640,51 @@ class Api:
 
     @safe
     def update_record(self, rid, data):
-        self._editable()
-        self._rec().update_record(rid, data or {})
+        data = dict(data or {})
+        self._editable(data.pop("year", None))
+        rec = self._rec()
+        rec.update_record(rid, data or {})
+        return {"record": rec.record_state(rid)}
+
+    # ---------- 태그별 기록 ----------
+    @safe
+    def tag_view(self, tag_id, flt=None):
+        d = self._db()
+        return Records(d).tag_view(d.role(), tag_id, flt or {})
+
+    @safe
+    def record_state(self, rid):
+        return {"record": self._rec().record_state(rid)}
+
+    @safe
+    def revert_record(self, rid, before, after, year=None):
+        self._editable(year)
+        return {"record": self._rec().revert_record(rid, before or {}, after or {})}
+
+    @safe
+    def tag_records_undoable(self, record_ids, tag_ids, mode="add", year=None):
+        self._editable(year)
+        rec = self._rec()
+        pairs = rec.tag_records_changed(record_ids, tag_ids, mode)
+        return {"pairs": pairs, "states": {str(r): rec.record_state(r) for r in {p[0] for p in pairs}}}
+
+    @safe
+    def undo_tag_records(self, pairs, mode, year=None):
+        self._editable(year)
+        rec = self._rec()
+        done, skipped, changed = rec.undo_tag_pairs(pairs, mode)
+        ids = {int(p[0]) for p in pairs or []}
+        states = {}
+        for r in ids:
+            try:
+                states[str(r)] = rec.record_state(r)
+            except db.DbError:
+                pass
+        return {"done": done, "skipped": skipped, "changed": changed, "states": states}
+
+    @safe
+    def copy_text(self, text):
+        export.write_clipboard(text or "")
         return {}
 
     @safe
@@ -735,6 +781,17 @@ class Api:
         return {"id": tid, "tags": rec.tags()}
 
     @safe
+    def inbox_tag_names(self):
+        return {"names": self._rec().inbox_tag_names()}
+
+    @safe
+    def tags_from_inbox(self, names):
+        self._editable()
+        rec = self._rec()
+        made, attached = rec.tags_from_inbox(names)
+        return {"made": made, "attached": attached, "tags": rec.tags()}
+
+    @safe
     def rename_tag(self, tid, name):
         self._editable()
         rec = self._rec()
@@ -793,7 +850,7 @@ class Api:
 
     @safe
     def ai_record(self, rid, model_index=None):
-        """기록 한 건: 누가기록은 정제(refine), 이미 쓴 생기부는 다듬기(polish). 내용만 보낸다."""
+        """기록 한 건: 학생관찰기록은 정제(refine), 이미 쓴 생기부는 다듬기(polish). 내용만 보낸다."""
         self._editable()
         rec = self._rec()
         r = rec.record(rid)
@@ -881,7 +938,7 @@ class Api:
         self._guard(key)
         try:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"] + rule, pr["example"], target),
-                                       "(누가기록 없음 — 성취기준과 성취수준으로만 작성)", cfg["privacy_block"])
+                                       "(학생관찰기록 없음 — 성취기준과 성취수준으로만 작성)", cfg["privacy_block"])
             meta.update({"model": model, "op": "synth", "prompt": pr["prompt"], "example": pr["example"], "target": target})
             nid, dropped = rec.add_result(gid, item, sno, "synth", text, meta, cost)
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
@@ -1034,7 +1091,7 @@ class Api:
     @safe
     def existing_apply(self, gid, item, rows, kind="existing", req_id=None):
         """rows: [{student_no, content, title?, date?}] — 화면에서 확정한 줄만.
-        kind='existing': 학생당 한 줄. kind='record': 누가기록(한 학생 여러 줄 허용).
+        kind='existing': 학생당 한 줄. kind='record': 학생관찰기록(한 학생 여러 줄 허용).
         req_id: 같은 요청이 두 번 와도(연속 클릭) 한 번만 넣는다."""
         self._editable()
         done = self._req_done(req_id)

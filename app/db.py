@@ -1,7 +1,7 @@
 """학년도별 학생 자료(SQLite). 파일: 데이터 폴더/2026학년도.sqlite
 
 v1: 역할·담당(학급/과목/동아리)·학생·소속(명렬)·일정.
-v2: 태그·누가기록·AI 결과 후보·최종안(마감). 기록 다루는 함수는 records.py.
+v2: 태그·학생관찰기록·AI 결과 후보·최종안(마감). 기록 다루는 함수는 records.py.
 v3: 자료 인박스(묶음·행·정제 후보). 다루는 함수는 inbox.py.
 v4: 인박스 행에 원본 페이지 번호(pages) — 스캔 PDF 원본 보기용.
 v5: 과목별 성취기준(standards).
@@ -14,7 +14,7 @@ from contextlib import contextmanager
 
 from .paths import data_dir
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 KINDS = ("homeroom", "subject", "club")
 ROLES = ("homeroom", "subject")  # 담임 / 비담임
 
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS records (
     group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     item TEXT NOT NULL,              -- autonomy/career/behavior/subject/club
     student_no TEXT NOT NULL,
-    kind TEXT NOT NULL DEFAULT 'record', -- record(누가기록) / existing(이미 쓴 생기부)
+    kind TEXT NOT NULL DEFAULT 'record', -- record(학생관찰기록) / existing(이미 쓴 생기부)
     seq INTEGER,                     -- 회차
     date TEXT DEFAULT '',
     title TEXT DEFAULT '',           -- 활동명
@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS records (
     weight REAL,                     -- 종합 비중(%) 직접 지정값
     created_at TEXT DEFAULT (datetime('now','localtime')),
     updated_at TEXT DEFAULT (datetime('now','localtime')),
-    pos INTEGER                      -- 화면에서 끌어 바꾼 순서(없으면 기본 순서)
+    pos INTEGER,                     -- 화면에서 끌어 바꾼 순서(없으면 기본 순서)
+    tags_ver INTEGER DEFAULT 0       -- 태그가 바뀔 때마다 1씩(v9)
 );
 CREATE INDEX IF NOT EXISTS ix_records_slot ON records(group_id, item, student_no);
 CREATE TABLE IF NOT EXISTS record_tags (
@@ -164,7 +165,16 @@ CREATE TABLE IF NOT EXISTS schedules (
 
 
 class DbError(Exception):
-    pass
+    code = None
+
+
+class ConflictError(DbError):
+    """화면을 연 뒤 다른 곳에서 바뀌어 저장하지 않음(태그별 기록)."""
+    code = "conflict"
+
+
+class ClosedError(DbError):
+    code = "closed"
 
 
 def year_path(year: int):
@@ -205,6 +215,8 @@ class YearDb:
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(records)")}
         if "pos" not in cols:
             self._conn.execute("ALTER TABLE records ADD COLUMN pos INTEGER")
+        if "tags_ver" not in cols:  # v9: 기록의 태그가 바뀔 때마다 1씩(일괄 태그 되돌리기 확인용)
+            self._conn.execute("ALTER TABLE records ADD COLUMN tags_ver INTEGER DEFAULT 0")
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(groups)")}
         if "pair_id" not in cols:
             self._conn.execute("ALTER TABLE groups ADD COLUMN pair_id INTEGER")

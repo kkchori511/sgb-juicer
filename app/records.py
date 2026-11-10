@@ -1,4 +1,4 @@
-"""누가기록·태그·AI 결과 후보·최종안·마감(학년도 DB 위에서 동작).
+"""학생관찰기록·태그·AI 결과 후보·최종안·마감(학년도 DB 위에서 동작).
 
 '칸(slot)' = (담당 group_id, 항목 item, 학생 student_no).
 담임반은 autonomy/career/behavior, 과목은 subject, 동아리는 club 항목을 가진다.
@@ -6,7 +6,7 @@
 import json
 import re
 
-from .db import DbError, YearDb
+from .db import ClosedError, ConflictError, DbError, YearDb
 from .textutil import count_bytes
 
 HOMEROOM_ITEMS = ("autonomy", "career", "behavior")
@@ -122,7 +122,7 @@ class Records:
 
     def require_open(self, gid, item, sno):
         if self.is_closed(gid, item, sno):
-            raise DbError(CLOSED_MSG)
+            raise ClosedError(CLOSED_MSG)
 
     def _stale(self, c, gid, item, sno):
         c.execute("UPDATE finals SET stale=1 WHERE group_id=? AND item=? AND student_no=? AND text<>''", (int(gid), item, str(sno)))
@@ -178,6 +178,38 @@ class Records:
         with self.d.tx() as c:
             return c.execute("INSERT INTO tags(name) VALUES(?)", (name,)).lastrowid
 
+    def inbox_tag_names(self):
+        """인박스 묶음 이름 목록(같은 이름은 하나로). 이미 태그로 있는지, 보내기 전 묶음 수."""
+        have = {r["name"] for r in self.d.q("SELECT name FROM tags")}
+        out = {}
+        for b in self.d.q("SELECT id, title, stage FROM inbox_batches ORDER BY updated_at DESC, id DESC"):
+            name = (b["title"] or "").strip()
+            if not name:
+                continue
+            o = out.setdefault(name, {"name": name, "exists": name in have, "batches": 0, "open": 0})
+            o["batches"] += 1
+            o["open"] += b["stage"] != "sent"
+        return list(out.values())
+
+    def tags_from_inbox(self, names):
+        """고른 묶음 이름을 태그로 만들고, 같은 이름의 보내기 전 묶음에 그 태그를 붙인다. 이미 있는 태그는 건너뛴다.
+        → (만든 태그 수, 태그를 붙인 묶음 수)"""
+        names = list(dict.fromkeys((n or "").strip() for n in names or []))
+        names = [n for n in names if n]
+        made = attached = 0
+        with self.d.tx() as c:
+            for name in names:
+                if c.execute("SELECT 1 FROM tags WHERE name=?", (name,)).fetchone():
+                    continue
+                tid = c.execute("INSERT INTO tags(name) VALUES(?)", (name,)).lastrowid
+                made += 1
+                for bid, ids in c.execute("SELECT id, tag_ids FROM inbox_batches WHERE TRIM(title)=? AND stage<>'sent'", (name,)).fetchall():
+                    ids = json.loads(ids or "[]")
+                    if tid not in ids:
+                        c.execute("UPDATE inbox_batches SET tag_ids=? WHERE id=?", (json.dumps(ids + [tid]), bid))
+                        attached += 1
+        return made, attached
+
     def rename_tag(self, tid, name):
         name = (name or "").strip()
         if not name:
@@ -190,6 +222,7 @@ class Records:
     def delete_tag(self, tid):
         """태그 사전 정리는 마감과 관계없이 전체에 반영한다(결정 27). 인박스의 태그 지정도 함께 뺀다."""
         with self.d.tx() as c:
+            c.execute("UPDATE records SET tags_ver=COALESCE(tags_ver,0)+1 WHERE id IN (SELECT record_id FROM record_tags WHERE tag_id=?)", (int(tid),))
             c.execute("DELETE FROM record_tags WHERE tag_id=?", (int(tid),))
             for b in c.execute("SELECT id, tag_ids FROM inbox_batches").fetchall():
                 ids = json.loads(b[1] or "[]")
@@ -208,12 +241,198 @@ class Records:
             self.require_open(r["group_id"], r["item"], r["student_no"])
         with self.d.tx() as c:
             for rid in rids:
+                n = 0
                 for tid in tids:
                     if mode == "remove":
-                        c.execute("DELETE FROM record_tags WHERE record_id=? AND tag_id=?", (rid, tid))
+                        n += c.execute("DELETE FROM record_tags WHERE record_id=? AND tag_id=?", (rid, tid)).rowcount
                     else:
-                        c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (rid, tid))
+                        n += c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (rid, tid)).rowcount
+                if n:
+                    c.execute("UPDATE records SET tags_ver=COALESCE(tags_ver,0)+1 WHERE id=?", (rid,))
         return len(rids)
+
+    def tag_records_changed(self, record_ids, tag_ids, mode="add"):
+        """tag_records와 같고, 실제로 바뀐 (기록, 태그, 바뀐 뒤 태그 버전)을 돌려준다(되돌리기용)."""
+        rids = [int(x) for x in record_ids or []]
+        tids = [int(x) for x in tag_ids or []]
+        with self.d._lock:  # 확인·쓰기·버전 읽기 사이에 다른 저장이 끼지 않게(RLock이라 안쪽 tx도 같은 잠금)
+            have = {(r["record_id"], r["tag_id"]) for r in self.d.q(
+                f"SELECT record_id, tag_id FROM record_tags WHERE record_id IN ({','.join('?' * len(rids)) or 'NULL'})", tuple(rids))}
+            self.tag_records(rids, tids, mode)
+            ver = {r["id"]: r["tags_ver"] or 0 for r in self.d.q(
+                f"SELECT id, tags_ver FROM records WHERE id IN ({','.join('?' * len(rids)) or 'NULL'})", tuple(rids))}
+        if mode == "remove":
+            return [[r, t, ver.get(r, 0)] for r in rids for t in tids if (r, t) in have]
+        return [[r, t, ver.get(r, 0)] for r in rids for t in tids if (r, t) not in have]
+
+    def undo_tag_pairs(self, pairs, mode):
+        """일괄 태그 되돌리기: mode는 처음 실행한 동작(add면 지금 빼고, remove면 다시 붙인다).
+        건너뜀: 마감·삭제된 기록, 지운 태그, 그 뒤 태그가 다시 바뀐 기록(태그 버전이 다름).
+        → (되돌린 수, 건너뛴 수, 그 뒤 바뀌어 건너뛴 수)"""
+        done = skipped = changed = 0
+        bumped = set()
+        with self.d.tx() as c:
+            for p in pairs or []:
+                rid, tid = int(p[0]), int(p[1])
+                ver = int(p[2]) if len(p) > 2 else None
+                r = c.execute("SELECT group_id, item, student_no, COALESCE(tags_ver,0) FROM records WHERE id=?", (rid,)).fetchone()
+                if not r or self.is_closed(r[0], r[1], r[2]) or not c.execute("SELECT 1 FROM tags WHERE id=?", (tid,)).fetchone():
+                    skipped += 1
+                    continue
+                if ver is not None and r[3] != ver + (1 if rid in bumped else 0):
+                    skipped += 1
+                    changed += 1
+                    continue
+                if mode == "add":
+                    c.execute("DELETE FROM record_tags WHERE record_id=? AND tag_id=?", (rid, tid))
+                else:
+                    c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (rid, tid))
+                if rid not in bumped:
+                    c.execute("UPDATE records SET tags_ver=COALESCE(tags_ver,0)+1 WHERE id=?", (rid,))
+                    bumped.add(rid)
+                done += 1
+        return done, skipped, changed
+
+    # ---------- 태그별 기록 ----------
+    def record_state(self, rid):
+        """기록 한 건의 지금 값(태그별 기록 화면의 저장·되돌리기 확인용)."""
+        r = self.record(rid)
+        tids = sorted(x["tag_id"] for x in self.d.q("SELECT tag_id FROM record_tags WHERE record_id=?", (int(rid),)))
+        f = self.final(r["group_id"], r["item"], r["student_no"])
+        return {"id": r["id"], "content": r["content"], "date": r["date"] or "", "title": r["title"] or "", "tag_ids": tids,
+                "bytes": count_bytes(r["content"]), "updated_at": r["updated_at"],
+                "closed": bool(f and f["closed"]), "stale": bool(f and f["stale"]), "has_final": bool(f and f["text"])}
+
+    def revert_record(self, rid, before, after):
+        """이 화면에서 저장한 것을 되돌린다. 그 뒤 다른 곳에서 다시 고쳤거나 마감했으면 덮지 않는다."""
+        with self.d.tx() as c:  # 확인과 쓰기를 한 잠금 안에서
+            cur = self.record_state(rid)
+            if cur["closed"]:
+                raise ClosedError("그 사이 마감되어 되돌리지 않았습니다. 고치려면 항목별 기록에서 마감을 해제하세요.")
+            if not self._same(cur, after):
+                raise ConflictError("이 화면에서 저장한 뒤 내용이 다시 바뀌어 되돌리지 않았습니다. 지금 내용을 확인해 주세요.")
+            data = {k: v for k, v in (before or {}).items() if k in ("content", "date", "title", "tag_ids")}
+            if "tag_ids" in data:
+                live = {r["id"] for r in self.d.q("SELECT id FROM tags")}
+                data["tag_ids"] = [int(x) for x in data["tag_ids"] if int(x) in live]
+            self._write_record(c, self.record(rid), data)
+        return self.record_state(rid)
+
+    @staticmethod
+    def _same(cur, want):
+        for k, v in (want or {}).items():
+            now = cur.get(k)
+            same = sorted(int(x) for x in v or []) == now if k == "tag_ids" else (v or "").strip() == (now or "").strip()
+            if not same:
+                return False
+        return True
+
+    def tag_view(self, role, tag_id, flt=None):
+        """태그 하나(0이면 '태그 없음')가 붙은 기록 전부. 볼 수 있는 담당(slots)만.
+        flt: scope('' / 'c:학년-반' / 's:담당id:수업'), slot('' / 'i:항목' / 'g:담당id:항목'), status(all/open/closed), q(찾기), inactive(비활성 포함)
+        - 학년-반: 그 반 학생의 모든 기록. 수업: 그 담당·수업 학생의 그 담당 기록만.
+        - 태그별 수는 태그 선택을 뺀 나머지 필터를 적용해 센다."""
+        flt = flt or {}
+        slots = self.slots(role)
+        sidx = {(s["group_id"], s["item"]): i for i, s in enumerate(slots)}
+        gmeta = {g["id"]: g for g in self.d.groups()}
+        mem = {}
+        for gid in {s["group_id"] for s in slots}:
+            for m in self.d.members(gid):
+                mem[(gid, m["student_no"])] = m
+        smaps = {}
+        rows = self.d.q("SELECT id, group_id, item, student_no, kind, seq, date, title, content, updated_at, pos FROM records")
+        tagmap = {}
+        for t in self.d.q("SELECT record_id, tag_id FROM record_tags"):
+            tagmap.setdefault(t["record_id"], []).append(t["tag_id"])
+        stu = {s["student_no"]: s for s in self.d.q("SELECT * FROM students")}
+        # 필터 선택지: 볼 수 있는 담당의 반·수업·항목(지금 0건이어도 그대로 둔다)
+        classes, sections = {}, {}
+        for (gid, sno), m in mem.items():
+            if m["grade"] and m["class_no"]:
+                classes[f"c:{m['grade']}-{m['class_no']}"] = (m["grade"], m["class_no"])
+            g = gmeta.get(gid)
+            if g and g["kind"] == "subject" and m["section"]:
+                sections[f"s:{gid}:{m['section']}"] = (g["name"], g["semester"] or 0, m["section"])
+        recs = []
+        for r in rows:
+            key = (r["group_id"], r["item"])
+            if key not in sidx:
+                continue
+            m = mem.get((r["group_id"], r["student_no"]))
+            if m is None:
+                s0 = stu.get(r["student_no"]) or {"name": "", "grade": None, "class_no": None, "number": None}
+                m = {**s0, "student_no": r["student_no"], "active": 0, "section": "", "gone": True}
+            if key not in smaps:
+                smaps[key] = self.status_map(*key)
+            st = smaps[key].get(r["student_no"], {})
+            g = gmeta[r["group_id"]]
+            sl = slots[sidx[key]]
+            recs.append({**r, "tags": sorted(tagmap.get(r["id"], [])), "bytes": count_bytes(r["content"]),
+                         "name": m["name"], "grade": m["grade"], "class_no": m["class_no"], "number": m["number"],
+                         "section": m.get("section") or "", "active": bool(m["active"]), "gone": bool(m.get("gone")),
+                         "slot_label": sl["label"], "group_name": g["name"], "gkind": g["kind"], "semester": g["semester"],
+                         "status": st.get("status", "progress"), "closed": bool(st.get("closed")), "stale": bool(st.get("stale")),
+                         "has_final": bool(st.get("has_final")), "slot_order": sidx[key]})
+        scope, slot = flt.get("scope") or "", flt.get("slot") or ""
+        status, q = flt.get("status") or "all", (flt.get("q") or "").strip()
+
+        def keep(r):
+            if not flt.get("inactive") and not r["active"]:
+                return False
+            if scope.startswith("c:"):
+                if f"c:{r['grade']}-{r['class_no']}" != scope:
+                    return False
+            elif scope.startswith("s:"):
+                _, gid, sec = scope.split(":", 2)
+                if r["group_id"] != int(gid) or r["section"] != sec:
+                    return False
+            if slot.startswith("i:") and r["item"] != slot[2:]:
+                return False
+            if slot.startswith("g:"):
+                _, gid, it = slot.split(":", 2)
+                if (r["group_id"], r["item"]) != (int(gid), it):
+                    return False
+            if status == "open" and r["closed"]:
+                return False
+            if status == "closed" and not r["closed"]:
+                return False
+            if q and not any(q in (r[k] or "") for k in ("name", "student_no", "content", "title")):
+                return False
+            return True
+
+        base = [r for r in recs if keep(r)]
+        counts = {}
+        untagged = 0
+        for r in base:
+            if not r["tags"]:
+                untagged += 1
+            for t in r["tags"]:
+                counts[t] = counts.get(t, 0) + 1
+        tags = [{**t, "count": counts.get(t["id"], 0)} for t in self.d.q("SELECT id, name FROM tags ORDER BY sort_order, name")]
+        tid = None if tag_id in (None, "") else int(tag_id)
+        if tid is None:
+            sel = []
+        elif tid == 0:
+            sel = [r for r in base if not r["tags"]]
+        else:
+            sel = [r for r in base if tid in r["tags"]]
+        sel.sort(key=lambda r: (r["grade"] or 99, r["class_no"] or 999, r["number"] or 999, r["student_no"], r["slot_order"],
+                                r["pos"] is None, r["pos"] or 0, r["kind"] == "record", r["seq"] or 0, r["id"]))
+        items = []
+        for it in ("autonomy", "career", "behavior", "subject", "club"):
+            if any(s["item"] == it for s in slots):
+                items.append({"key": f"i:{it}", "label": ITEM_LABEL[it] + (" 전체" if it in ("subject", "club") else "")})
+        return {
+            "tags": tags, "untagged": untagged, "records": sel,
+            "students": len({r["student_no"] for r in sel}),
+            "options": {
+                "classes": [{"key": k, "label": f"{v[0]}학년 {v[1]}반"} for k, v in sorted(classes.items(), key=lambda x: x[1])],
+                "sections": [{"key": k, "label": f"{v[0]}({v[1]}학기) · {v[2]}" if v[1] else f"{v[0]} · {v[2]}"} for k, v in sorted(sections.items(), key=lambda x: x[1])],
+                "items": items,
+                "slots": [{"key": f"g:{s['group_id']}:{s['item']}", "label": s["label"]} for s in slots if s["kind"] != "homeroom"],
+            },
+        }
 
     # ---------- 기록 ----------
     def record(self, rid):
@@ -268,7 +487,7 @@ class Records:
 
     def add_existing_bulk(self, gid, item, rows, kind="existing"):
         """여러 학생 한꺼번에 — 전부 넣거나 전부 취소.
-        kind='existing': 이미 쓴 생기부(학생당 한 줄). kind='record': 누가기록(한 학생 여러 줄, 회차는 이어 붙임)."""
+        kind='existing': 이미 쓴 생기부(학생당 한 줄). kind='record': 학생관찰기록(한 학생 여러 줄, 회차는 이어 붙임)."""
         self.slot(gid, item)
         for r in rows:
             self._member(gid, r["student_no"])
@@ -364,8 +583,16 @@ class Records:
                 c.execute("UPDATE records SET pos=? WHERE id=?", (i + 1, rid))
 
     def update_record(self, rid, data):
-        r = self.record(rid)
-        self.require_open(r["group_id"], r["item"], r["student_no"])
+        # 마감 확인·변경 확인·쓰기를 한 잠금(트랜잭션) 안에서: 그 사이 다른 저장이 끼지 않는다
+        with self.d.tx() as c:
+            r = self.record(rid)
+            self.require_open(r["group_id"], r["item"], r["student_no"])
+            if data.get("expect") and not self._same(self.record_state(rid), data["expect"]):
+                # 태그별 기록: 화면에 불러온 뒤 다른 곳에서 바뀌었으면 덮지 않는다
+                raise ConflictError("이 기록은 화면을 연 뒤 다른 곳에서 바뀌었습니다. 지금 내용을 불러와 확인한 뒤 고쳐 주세요.")
+            self._write_record(c, r, data)
+
+    def _write_record(self, c, r, data):
         fields = {}
         for k in ("date", "title", "content"):
             if k in data:
@@ -385,16 +612,19 @@ class Records:
                     raise DbError("비중은 숫자로 입력해 주세요.")
                 if fields["weight"] < 0:
                     raise DbError("비중은 0 이상이어야 합니다.")
-        with self.d.tx() as c:
-            if fields:
-                sets = ", ".join(f"{k}=?" for k in fields)
-                c.execute(f"UPDATE records SET {sets}, updated_at=datetime('now','localtime') WHERE id=?", (*fields.values(), r["id"]))
-            if "tag_ids" in data:
+        if fields:
+            sets = ", ".join(f"{k}=?" for k in fields)
+            c.execute(f"UPDATE records SET {sets}, updated_at=datetime('now','localtime') WHERE id=?", (*fields.values(), r["id"]))
+        if "tag_ids" in data:
+            old = sorted(x[0] for x in c.execute("SELECT tag_id FROM record_tags WHERE record_id=?", (r["id"],)).fetchall())
+            new = sorted({int(t) for t in data["tag_ids"] or []})
+            if old != new:
                 c.execute("DELETE FROM record_tags WHERE record_id=?", (r["id"],))
-                for tid in data["tag_ids"] or []:
-                    c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (r["id"], int(tid)))
-            if "content" in fields and fields["content"] != r["content"]:
-                self._stale(c, r["group_id"], r["item"], r["student_no"])
+                for tid in new:
+                    c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (r["id"], tid))
+                c.execute("UPDATE records SET tags_ver=COALESCE(tags_ver,0)+1 WHERE id=?", (r["id"],))
+        if "content" in fields and fields["content"] != r["content"]:
+            self._stale(c, r["group_id"], r["item"], r["student_no"])
 
     def apply_candidate_to_record(self, result_id):
         """기록 한 건의 정제 후보로 기록 내용을 바꾼다(처음 원문은 original에 남긴다)."""
