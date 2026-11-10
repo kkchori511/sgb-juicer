@@ -36,13 +36,13 @@
       <button type="button" class="nav" data-panel="inbox"><i>📥</i><span>자료 인박스 <b class="nav-badge" id="ibBadge" hidden></b></span></button>
       <button type="button" class="nav" data-panel="records"><i>📝</i><span>항목별 기록</span></button>
       <button type="button" class="nav" data-panel="tagrec" title="태그로 기록을 모아 바로 고칩니다"><i>🔖</i><span>태그별 기록</span></button>
-      <button type="button" class="nav" data-panel="batch"><i>⚙️</i><span>일괄 종합</span></button>
       <button type="button" class="nav" data-panel="export"><i>📤</i><span>검토·내보내기</span></button>
       <div class="nav-sep"></div>
       <button type="button" class="nav" data-panel="roster"><i>👥</i><span>명렬·담당 관리</span></button>
       <button type="button" class="nav" data-panel="tags" title="태그 이름 추가·변경·삭제"><i>🏷️</i><span>태그 관리</span></button>
-      <button type="button" class="nav" data-panel="standards"><i>📚</i><span>성취기준</span></button>
-      <button type="button" class="nav" data-panel="settings"><i>🔧</i><span>설정</span></button>
+      <button type="button" class="nav" data-panel="standards"><i>📚</i><span>성취기준·활동 개요</span></button>
+      <button type="button" class="nav" data-panel="settings"><i>⚙️</i><span>설정</span></button>
+      <div class="nav-sep"></div>
       <button type="button" class="nav" data-panel="guide"><i>📖</i><span>사용 안내</span></button>
       <button type="button" class="nav" data-panel="notice"><i>⚠️</i><span>유의 사항</span></button>
     </nav>
@@ -95,6 +95,7 @@
           <button type="button" id="recBulkRecord" title="여러 학생의 학생관찰기록을 엑셀에서 한 번에">📥 학생관찰기록 일괄 입력</button>
           <button type="button" id="recBulkExisting" title="여러 학생의 이미 쓴 생기부를 엑셀에서 한 번에">📥 이미 쓴 생기부 일괄 입력</button>
           <button type="button" id="recBulkFinal" title="학생마다 기존 완성문을 최종안으로 한꺼번에">✔ 기존 완성문 → 최종안 일괄</button>
+          <button type="button" id="recBasisGen" class="ai-btn" hidden>기준 자료로 여러 명 생성</button>
         </div>
         <div class="rec-body" id="recBody">
           <aside class="rec-list" id="recList"></aside>
@@ -103,9 +104,6 @@
             <section class="rec-final" id="recFinal"></section>
           </div>
         </div>
-      </section>
-      <section class="panel" data-panel-content="batch">
-        <div class="card" id="batchCard"></div>
       </section>
       <section class="panel" data-panel-content="export">
         <div class="card">
@@ -356,8 +354,8 @@
             <a href="#g-records">4. 항목별 기록</a>
             <a href="#g-tagrec">4-1. 태그별 기록</a>
             <a href="#g-synth">5. 종합·최종안·마감</a>
-            <a href="#g-batch">6. 일괄 종합</a>
-            <a href="#g-standards">7. 성취기준</a>
+            <a href="#g-basis">6. 기준 자료로 생성</a>
+            <a href="#g-standards">7. 성취기준·활동 개요</a>
             <a href="#g-export">8. 검토·내보내기</a>
             <a href="#g-dashboard">9. 현황판</a>
             <a href="#g-settings">10. 설정·프롬프트·태그</a>
@@ -370,7 +368,7 @@
               <li><b>처음 설정</b> — OpenRouter 키, 담임/비담임, 담당(반·과목·동아리), 명렬, 일정</li>
               <li><b>자료 모으기</b> — 엑셀·스캔 PDF는 <b>자료 인박스</b>로, 한 학생씩 쓰는 기록은 <b>항목별 기록</b>에서 직접</li>
               <li><b>학생별로 쌓기</b> — 항목(자율·진로·행특·세특·동아리)마다 학생별 학생관찰기록이 한 건씩 쌓입니다</li>
-              <li><b>종합</b> — 학기말에 기록을 골라 비중대로 AI가 한 문장으로 종합(학생별 또는 일괄)</li>
+              <li><b>종합</b> — 학기말에 기록을 골라 비중대로 AI가 한 문장으로 종합. 기록이 없는 학생은 성취기준·활동 개요로 생성</li>
               <li><b>최종안 채택 → 마감</b> — 후보 중 하나를 고르거나 직접 고친 뒤 검토가 끝나면 마감</li>
               <li><b>내보내기</b> — 항목별로 xlsx 저장 또는 클립보드 복사 후 NEIS에 붙여넣기</li>
             </ol>
@@ -447,14 +445,21 @@
               <li>여러 기록을 체크해 태그를 한꺼번에 더하거나 뺄 수 있습니다(되돌리기 가능). 이 화면은 태그가 붙은 기록만 보여 주므로 학생별 미입력 현황은 현황판·항목별 기록에서 보세요.</li>
             </ul>
 
-            <h2 id="g-batch">6. 일괄 종합</h2>
-            <p>항목을 고르면 학생마다 처리 가능 여부가 미리 나옵니다(마감·후보 3개 잠김·기록 없음·비활성은 제외). [종합 실행]을 누르면 학생마다 모든 기록을 저장된 비중(없으면 길이 비례)으로 종합합니다. 진행 중 [중지]할 수 있고, 끝나면 [실패한 학생만 다시 실행]. 결과는 각 학생의 후보에 들어가니 학생 화면에서 확인·채택하세요.</p>
+            <h2 id="g-basis">6. 기준 자료로 생성 (기록 없는 학생)</h2>
+            <ul>
+              <li>항목별 기록 위 줄의 <b>[✨ 성취기준으로 여러 명 생성]</b>(세특) / <b>[✨ 활동 개요로 여러 명 생성]</b>(자율·진로·동아리)에서 학생관찰기록 없이 기준 자료만으로 후보를 만듭니다. 학생 화면의 [성취기준만으로 생성]·[활동 개요만으로 생성]은 그 학생만 고른 채로 같은 창을 엽니다. 창 오른쪽 위 [📚 … 보기·고치기]로 기준 자료를 바로 열 수 있습니다.</li>
+              <li>자율·진로·동아리는 먼저 <b>① 공통 참여 활동</b>을 고르고(처음에는 모두), 다른 학생만 [이 학생만 바꾸기]로 고칩니다. 세특은 학생마다 <b>성취수준</b>을 고릅니다(실행할 때 명렬에도 저장).</li>
+              <li><b>② 대상 학생</b>: [기록 없는 학생 모두 고르기]로 한 번에 고르거나 체크해 특정 학생만 넣습니다. 기록이 있는 학생을 골라도 기록은 쓰지 않습니다. 마감·비활성·후보 3개 잠김 학생은 고를 수 없습니다. 실패·중지된 학생은 [실패·중지된 N명 고르기]로 이어서 합니다.</li>
+              <li>같은 기준 자료를 쓰면 문장이 비슷해지기 쉽습니다. 같은 담당에서 먼저 만든 다른 학생 후보(최대 3개, 학번·이름 없음)를 함께 보내 표현을 다르게 쓰게 하고, 끝나면 표현이 많이 겹치는 학생에게 <b>'표현 겹침 높음'</b>을 붙입니다. 이 표시는 글자가 겹치는 정도를 본 참고값이며 내용이 같은지는 [후보 보기]로 직접 비교하세요.</li>
+              <li>결과는 학생 화면의 '종합·다듬기 후보'에도 들어가며 "관찰기록 없이 … 생성" 표시가 남습니다. 실제 모습과 맞는지 꼭 확인하세요.</li>
+            </ul>
 
-            <h2 id="g-standards">7. 성취기준 (과목 세특)</h2>
+            <h2 id="g-standards">7. 성취기준·활동 개요</h2>
             <ul>
               <li>메뉴 [성취기준]에서 과목마다 붙여넣기·PDF(글자 있는 문서)·한글(hwpx)로 넣고 필요한 부분만 남깁니다. 학년도마다 따로 저장됩니다.</li>
               <li>세특 종합 창에서 <b>[성취기준 사용]</b>을 켜면 기록을 성취기준 관점에서 해석하고, 학생의 <b>성취수준</b>에 맞는 표현 수위로 씁니다.</li>
-              <li>기록이 없는 학생은 <b>[성취기준만으로 생성]</b>(성취수준 필수). 결과에는 "기록 없음, 성취기준으로 생성" 표시가 남으니 실제 수업 모습과 맞는지 꼭 확인하세요.</li>
+              <li>기록이 없는 학생은 <b>[성취기준만으로 생성]</b>(성취수준 필수, 6장 참고). 결과에는 "관찰기록 없이 성취기준으로 생성" 표시가 남으니 실제 수업 모습과 맞는지 꼭 확인하세요.</li>
+              <li><b>활동 개요</b>(자율활동·진로활동·동아리): 학교에서 정한 활동을 한 줄에 하나씩 적어 둡니다(예: <code>4월 과학의 날 — 탐구 포스터 제작, 발표</code>). 기록 없는 학생을 [활동 개요로 생성]할 때 학생마다 참여한 활동만 골라 씁니다.</li>
             </ul>
 
             <h2 id="g-export">8. 검토 · 내보내기</h2>
@@ -485,7 +490,8 @@
             <ul>
               <li>모든 자료는 프로그램 옆 <code>생기부착즙기_데이터</code> 폴더에 저장되고, 바꿀 때마다 자동 저장됩니다(상단 '저장됨').</li>
               <li>앱을 켤 때 하루 한 번 자동 백업(최근 7개). 설정 &gt; 백업·자료에서 [지금 백업]·[이 백업으로 복원].</li>
-              <li>새 버전이 나오면 상단에 알림이 뜹니다. [지금 업데이트]를 누르면 백업 후 새 버전으로 바뀌어 다시 켜집니다.</li>
+              <li>업데이트 직전 백업(<code>업데이트전</code>)과 자료 형식이 바뀌어 처음 켤 때 만드는 백업(<code>형식변경전</code>)은 하루 백업에 밀려 지워지지 않게 따로 최근 3개를 보관합니다. exe를 직접 바꿔 넣어도 형식변경전 백업은 만들어집니다.</li>
+              <li>새 버전이 나오면 상단에 알림이 뜹니다. [지금 업데이트]를 누르면 백업 후 새 버전으로 바뀌어 다시 켜집니다. 메뉴가 없어지거나 합쳐지는 업데이트는 먼저 안내를 보여 주고, <b>'확인했어요'</b>를 직접 입력해야 진행합니다.</li>
               <li>새 학년도는 설정 &gt; 역할·학년도에서 시작합니다. 이전 학년도는 상단에서 골라 조회만 할 수 있습니다.</li>
               <li>다른 PC로 옮길 때는 exe와 자료 폴더를 함께 복사하세요. 다른 사람에게 줄 때는 <b>exe만</b> 주세요.</li>
             </ul>

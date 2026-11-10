@@ -18,7 +18,7 @@ import webview
 from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, existing, export, ocr, openrouter, prompts, roster, scan, stdformat, updater, weights
 from .records import Records, items_of
 from .inbox import Inbox
-from .standards import Standards, check_level, read_hwpx_text, read_pdf_text, standards_rule
+from .standards import Outlines, Standards, avoid_rule, check_level, outline_rule, read_hwpx_text, read_pdf_text, similarity, standards_rule
 from .paths import data_dir
 from .textutil import count_bytes
 
@@ -922,33 +922,90 @@ class Api:
         return (standards_rule(std["text"], level, g["level_scale"] or 5, only),
                 {"standards": True, "level": level, "basis": "standards_only" if only else "records+standards", "standards_text": std["text"][:20000]})
 
+    def _basis_avoid(self, rec, gid, item, sno, n=3):
+        """같은 담당에서 기준 자료만으로 만든 다른 학생의 최근 문장(겹치지 않게 AI에 함께 보냄). 학번·이름은 넣지 않는다.
+        기준 자료로 만든 후보만 먼저 골라 최근 n개(일반 종합 후보가 많아도 가려지지 않게)."""
+        rows = rec.d.q("SELECT text FROM results WHERE group_id=? AND item=? AND student_no<>? AND record_id IS NULL AND op='synth' "
+                       "AND json_extract(meta, '$.basis') IN ('standards_only', 'outline_only') ORDER BY id DESC LIMIT ?",
+                       (int(gid), item, str(sno), int(n)))
+        return [r["text"] for r in rows]
+
     @safe
     def ai_standards_only(self, gid, item, sno, std, model_index=None):
-        """기록이 없는 학생: 성취기준(과 성취수준)만으로 세특 후보를 만든다. 학번·이름은 보내지 않는다."""
+        """기록이 없는 학생: 기준 자료만으로 후보를 만든다. 학번·이름은 보내지 않는다.
+        세특 std={text, level}(성취기준·성취수준), 자율·진로·동아리 std={lines}(이 학생이 참여한 활동 개요 줄).
+        같은 담당에서 이미 만든 다른 학생 문장 몇 개를 함께 보내 50% 이상 다르게 쓰게 한다."""
         self._editable()
         rec = self._rec()
         g, _ = rec.slot(gid, item)
         rec.require_open(gid, item, sno)
         rec.check_room(gid, item, sno)
         target = rec.ai_target(gid, item, sno)
-        rule, meta = self._std_rule(g, item, std, only=True)
+        if item == "subject":
+            rule, meta = self._std_rule(g, item, std, only=True)
+        elif item in ("autonomy", "career", "club"):
+            lines = [str(x).strip() for x in ((std or {}).get("lines") or []) if str(x).strip()]
+            if not lines:
+                raise db.DbError("이 학생이 참여한 활동을 하나 이상 골라 주세요.")
+            rule = outline_rule(lines)
+            meta = {"basis": "outline_only", "outline_lines": lines}
+        else:
+            raise db.DbError("기준 자료로 생성은 세특·자율·진로·동아리에서만 쓸 수 있습니다.")
+        avoid = self._basis_avoid(rec, gid, item, sno)
+        rule += avoid_rule(avoid)
+        meta["avoid_count"] = len(avoid)
         cfg, model = self._model(model_index)
         pr = prompts.merged(cfg["prompts"])[item]["synth"]
         key = ("slot", int(gid), item, str(sno))
         self._guard(key)
         try:
+            what = "성취기준과 성취수준" if item == "subject" else "활동 개요"
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"] + rule, pr["example"], target),
-                                       "(학생관찰기록 없음 — 성취기준과 성취수준으로만 작성)", cfg["privacy_block"])
+                                       f"(학생관찰기록 없음 — {what}으로만 작성)", cfg["privacy_block"])
             meta.update({"model": model, "op": "synth", "prompt": pr["prompt"], "example": pr["example"], "target": target})
             nid, dropped = rec.add_result(gid, item, sno, "synth", text, meta, cost)
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
         finally:
             self._release(key)
 
+    @safe
+    def basis_similarity(self, gid, item, snos=None):
+        """기준 자료만으로 만든 학생별 최신 후보와, 다른 학생 후보와 표현이 얼마나 겹치는지(글자 3개 묶음 기준 참고값).
+        반환: {학번: {sim, with, text, with_text}} — snos가 있으면 그 학생들만(비교 상대는 담당 전체)."""
+        rec = self._rec()
+        rows = rec.d.q("SELECT student_no, text FROM results WHERE group_id=? AND item=? AND record_id IS NULL AND op='synth' "
+                       "AND json_extract(meta, '$.basis') IN ('standards_only', 'outline_only') ORDER BY id", (int(gid), item))
+        latest = {r["student_no"]: r["text"] for r in rows}
+        want = [str(x) for x in snos] if snos else list(latest)
+        out = {}
+        for a in want:
+            if a not in latest:
+                continue
+            best, who = 0.0, ""
+            for b, tb in latest.items():
+                if b != a:
+                    v = similarity(latest[a], tb)
+                    if v > best:
+                        best, who = v, b
+            out[a] = {"sim": round(best, 3), "with": who, "text": latest[a], "with_text": latest.get(who, "")}
+        return {"similar": out}
+
+    # ---------- 활동 개요(자율·진로·동아리) ----------
+    @safe
+    def outline_get(self, gid, item):
+        return Outlines(self._db()).get(gid, item)
+
+    @safe
+    def outline_save(self, gid, item, text, source=None, year=None):
+        self._editable(year)
+        Outlines(self._db()).save(gid, item, text, source)
+        return {}
+
     # ---------- 성취기준 ----------
     @safe
     def standards_overview(self):
-        return {"subjects": Standards(self._db()).overview()}
+        d = self._db()
+        return {"subjects": Standards(d).overview(), "outlines": Outlines(d).overview()}
 
     @safe
     def standards_format(self, gid, text, use_ai=False, model_index=None):
@@ -1477,10 +1534,12 @@ class Api:
         return info
 
     @safe
-    def update_apply(self):
+    def update_apply(self, confirm=None):
         info = self._update_info
         if not info:
             raise updater.UpdateError("새 버전 정보가 없습니다. 다시 확인해 주세요.")
+        if info.get("warning") and (confirm or "").strip() != updater.CONFIRM_WORD:
+            raise updater.UpdateError(f"이 업데이트는 안내를 읽고 '{updater.CONFIRM_WORD}'를 입력해야 진행합니다.")
         if not updater.can_apply():
             raise updater.UpdateError("Windows exe에서만 자동 업데이트할 수 있습니다.")
         if not info.get("sha256"):

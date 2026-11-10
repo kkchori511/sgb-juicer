@@ -793,6 +793,7 @@ class Records:
     def batch_info(self, gid, item):
         """학생마다 일괄 종합 가능 여부."""
         g, target = self.slot(gid, item)
+        sts = self.status_map(gid, item)
         out = []
         for m in self.d.members(gid):
             recs = self.d.q("SELECT id, kind, content, weight FROM records WHERE group_id=? AND item=? AND student_no=? ORDER BY pos IS NULL, pos, kind='record', COALESCE(seq,0), id",
@@ -806,6 +807,7 @@ class Records:
                 "bytes": sum(count_bytes(r["content"]) for r in recs),
                 "closed": bool(f and f["closed"]), "has_final": bool(f and f["text"]),
                 "all_locked": len(slot_res) >= MAX_RESULTS and all(r["locked"] for r in slot_res),
+                "results": len(slot_res), "status": (sts.get(m["student_no"]) or {}).get("status", "none"),
                 **self._pair_cols(gid, item, m["student_no"], target),
             })
         return {"group": g, "target": target, "students": out}

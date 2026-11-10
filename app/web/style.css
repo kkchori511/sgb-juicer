@@ -492,8 +492,8 @@ tr.row-pending td { background: var(--warn-bg); }
 input[type=checkbox] { width: 26px; height: 26px; min-width: 26px; margin: 0 6px 0 0; accent-color: #16a34a; cursor: pointer; vertical-align: middle; }
 label.inline { display: inline-flex; align-items: center; gap: 4px; }
 .tbl td:has(> input[type=checkbox]:only-child), .tbl th:has(> input[type=checkbox]:only-child) { cursor: pointer; text-align: center; width: 48px; }
-.tbl tr:has(> td > input[type=checkbox]:checked) > td { background: #e3f6ea; }
-.tbl tr:has(> td > input[type=checkbox]:checked) > td:first-child { box-shadow: inset 4px 0 0 #16a34a; }
+.tbl tr:has(> td > input[type=checkbox]:checked) > td { background: #eef1f6; } /* 선택은 중립색(완료 초록과 구분) */
+.tbl tr:has(> td > input[type=checkbox]:checked) > td:first-child { box-shadow: inset 4px 0 0 #64748b; }
 .rcard.sel { background: #e3f6ea; border-color: #16a34a; box-shadow: inset 4px 0 0 #16a34a; }
 /* 줄 순서 바꾸기 */
 .sort-ctl { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
@@ -505,7 +505,7 @@ button.mini { padding: 1px 6px; font-size: 11px; line-height: 1.4; min-width: 0;
 .drop-before > td, .rcard.drop-before { box-shadow: inset 0 3px 0 var(--accent) !important; }
 .drop-after > td, .rcard.drop-after { box-shadow: inset 0 -3px 0 var(--accent) !important; }
 textarea.cell-edit { min-height: 54px; font-size: 13px; width: 100%; }
-.rcard:has(> .rcard-head input[type=checkbox]:checked) { background: #e3f6ea; border-color: #16a34a; box-shadow: inset 4px 0 0 #16a34a; }
+.rcard:has(> .rcard-head input[type=checkbox]:checked) { background: #eef1f6; border-color: #64748b; box-shadow: inset 4px 0 0 #64748b; }
 #modal { z-index: 110; } /* 확인·오류 창은 늘 시트(입력 창) 위에 */
 
 /* v0.13: 칸 접기 — 접으면 제목 줄만 남는다 */
@@ -720,3 +720,47 @@ input.sec-in { width: 130px; height: 28px; padding: 2px 6px; font-size: 13px; di
   .tv-tags { display: none; }
   .tv-tagsel { display: inline-flex !important; }
 }
+
+/* 태그 색(파스텔 글로우): 태그 번호로 6색 고정 배정. 보라 계열과 상태 색(회색·초록·파랑·노랑)은 쓰지 않는다 */
+.tc0 { --tc: #f472b6; --tbg: #fde4f0; --tfg: #9d174d; } /* 분홍 */
+.tc1 { --tc: #fb923c; --tbg: #ffead6; --tfg: #9a3412; } /* 살구 */
+.tc2 { --tc: #2dd4bf; --tbg: #d7f7f1; --tfg: #115e59; } /* 민트 */
+.tc3 { --tc: #f87171; --tbg: #fee2e2; --tfg: #991b1b; } /* 산호 */
+.tc4 { --tc: #a3e635; --tbg: #eefbd5; --tfg: #3f6212; } /* 라임 */
+.tc5 { --tc: #c8a27a; --tbg: #f3e9dc; --tfg: #6b4f2e; } /* 모래 */
+.tag.tc { background: var(--tbg); border-color: color-mix(in srgb, var(--tc) 55%, white); color: var(--tfg); font-weight: 700;
+  box-shadow: 0 0 5px color-mix(in srgb, var(--tc) 35%, transparent); }
+.tv-chips .tag.tc.cur { border-color: var(--tc); box-shadow: 0 0 0 1px var(--tc), 0 0 6px color-mix(in srgb, var(--tc) 45%, transparent); }
+.tagpick button.tc { background: color-mix(in srgb, var(--tbg) 45%, white); border-color: color-mix(in srgb, var(--tc) 40%, white); color: var(--tfg); }
+.tagpick button.tc:hover { box-shadow: 0 0 5px color-mix(in srgb, var(--tc) 35%, transparent); }
+.tagpick button.tc.on { background: var(--tbg); border-color: var(--tc); color: var(--tfg); font-weight: 800; box-shadow: 0 0 0 1px var(--tc), 0 0 8px color-mix(in srgb, var(--tc) 50%, transparent); }
+.tagpick button.tc.on::before { content: '✓ '; }
+.tdot { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 3px; background: var(--tc, var(--border)); box-shadow: 0 0 6px color-mix(in srgb, var(--tc, transparent) 70%, transparent); }
+.tag-name-cell { display: flex; align-items: center; gap: 8px; }
+
+/* AI를 실행하는 버튼: 보라 배경 + 노랗게 빛나는 큰 반짝이 아이콘 */
+button.ai-btn { background: #7c3aed; border-color: #7c3aed; color: #fff; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+button.ai-btn:hover:not(:disabled) { background: #6d28d9; border-color: #6d28d9; box-shadow: 0 0 10px rgba(124, 58, 237, 0.45); }
+button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; margin: -3px 0;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fde047' d='M10 2c.6 4.6 2.4 6.4 7 7-4.6.6-6.4 2.4-7 7-.6-4.6-2.4-6.4-7-7 4.6-.6 6.4-2.4 7-7z'/%3E%3Cpath fill='%23fef08a' d='M18.5 13c.35 2.6 1.4 3.65 4 4-2.6.35-3.65 1.4-4 4-.35-2.6-1.4-3.65-4-4 2.6-.35 3.65-1.4 4-4z'/%3E%3Cpath fill='%23fef08a' d='M19 1.5c.25 1.8 1 2.55 2.8 2.8-1.8.25-2.55 1-2.8 2.8-.25-1.8-1-2.55-2.8-2.8 1.8-.25 2.55-1 2.8-2.8z'/%3E%3C/svg%3E") center / contain no-repeat;
+  filter: drop-shadow(0 0 2px rgba(253, 224, 71, 0.95)) drop-shadow(0 0 5px rgba(250, 204, 21, 0.7)); }
+.upd-warn { white-space: pre-wrap; max-height: 45vh; overflow: auto; line-height: 1.6; font-weight: 600; }
+
+/* 기준 자료로 생성(성취기준·활동 개요) */
+.basis-tbl td { vertical-align: top; }
+.basis-tbl tr.is-off td { color: var(--muted); }
+.basis-tbl .small-note { font-size: 12px; font-weight: 400; margin-top: 2px; }
+.basis-tbl .basis-sum { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.basis-tbl .basis-sum .link { padding: 0 2px; }
+.basis-tbl tr.basis-text-row td { background: #fafafa; }
+.basis-common { margin: 6px 0 10px; }
+.basis-picks.wide { max-width: none; }
+.basis-picks.wide button { white-space: normal; text-align: left; }
+.gen-ok { font-weight: 700; color: #5b21b6; } /* 이번 실행 성공(완료 초록과 구분) */
+.basis-out { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.basis-tbl td:nth-child(3) { white-space: nowrap; }
+.basis-picks { display: flex; flex-wrap: wrap; gap: 4px; max-width: 520px; }
+.basis-picks button, .basis-acts button.small { border-radius: 999px; }
+.basis-picks button.on, .basis-acts button.small.on { background: #ede9fe; border-color: #7c3aed; color: #5b21b6; }
+.basis-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.basis-lines { margin: 6px 0 0 18px; line-height: 1.7; }

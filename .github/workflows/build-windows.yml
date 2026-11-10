@@ -41,6 +41,7 @@ jobs:
           python tests/test_pair_subject.py
           python tests/test_stdformat.py
           python tests/test_tag_view.py
+          python tests/test_basis_gen.py
 
       - name: Version info
         shell: pwsh

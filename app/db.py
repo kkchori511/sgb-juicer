@@ -6,6 +6,10 @@ v3: 자료 인박스(묶음·행·정제 후보). 다루는 함수는 inbox.py.
 v4: 인박스 행에 원본 페이지 번호(pages) — 스캔 PDF 원본 보기용.
 v5: 과목별 성취기준(standards).
 v6: 기록 순서(records.pos). v7: 선택과목 수업(memberships.section). v8: 1·2학기 합산 과목(groups.pair_id·pair_total).
+v9: 기록 태그 버전(records.tags_ver). v10: 자율·진로·동아리 활동 개요(outlines).
+
+자료 형식 규칙: 표·열은 더하기만 한다(지우거나 이름을 바꾸지 않는다). 화면을 없애도 그 자료 표는 남긴다.
+형식이 바뀌는 첫 실행 때는 열기 전에 '형식변경전' 백업을 만든다(backup.before_migration).
 """
 import re
 import sqlite3
@@ -14,7 +18,7 @@ from contextlib import contextmanager
 
 from .paths import data_dir
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 KINDS = ("homeroom", "subject", "club")
 ROLES = ("homeroom", "subject")  # 담임 / 비담임
 
@@ -156,6 +160,14 @@ CREATE TABLE IF NOT EXISTS standards (
     source TEXT DEFAULT '',          -- 마지막으로 가져온 곳(붙여넣기/파일 이름)
     updated_at TEXT DEFAULT (datetime('now','localtime'))
 );
+CREATE TABLE IF NOT EXISTS outlines (
+    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    item TEXT NOT NULL,              -- autonomy / career / club
+    text TEXT NOT NULL DEFAULT '',   -- 활동 개요(한 줄에 활동 하나)
+    source TEXT DEFAULT '',
+    updated_at TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (group_id, item)
+);
 CREATE TABLE IF NOT EXISTS schedules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date TEXT NOT NULL,          -- YYYY-MM-DD
@@ -175,6 +187,19 @@ class ConflictError(DbError):
 
 class ClosedError(DbError):
     code = "closed"
+
+
+def file_schema_version(path) -> int:
+    """열지 않고(이전 형식 그대로) 파일의 자료 형식 번호를 읽는다. 읽지 못하면 0."""
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            row = con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+        finally:
+            con.close()
+        return _int(row[0]) or 0 if row else 0
+    except sqlite3.Error:
+        return 0
 
 
 def year_path(year: int):
@@ -402,6 +427,7 @@ class YearDb:
             "results": one("SELECT COUNT(*) n FROM results WHERE group_id=?"),
             "batches": one("SELECT COUNT(*) n FROM inbox_batches WHERE group_id=?"),
             "standards": one("SELECT COUNT(*) n FROM standards WHERE group_id=? AND text<>''"),
+            "outlines": one("SELECT COUNT(*) n FROM outlines WHERE group_id=? AND text<>''"),
         }
 
     def delete_group(self, gid):
@@ -412,6 +438,7 @@ class YearDb:
             c.execute("DELETE FROM finals WHERE group_id=?", (int(gid),))
             c.execute("DELETE FROM records WHERE group_id=?", (int(gid),))
             c.execute("DELETE FROM standards WHERE group_id=?", (int(gid),))
+            c.execute("DELETE FROM outlines WHERE group_id=?", (int(gid),))
             c.execute("DELETE FROM groups WHERE id=?", (int(gid),))
             c.execute("UPDATE groups SET pair_id=NULL, pair_total=NULL WHERE pair_id=?", (int(gid),))
             c.execute("DELETE FROM students WHERE student_no NOT IN (SELECT student_no FROM memberships)")
@@ -618,12 +645,23 @@ def _int(v):
 
 _open = {}
 _open_lock = threading.Lock()
+_premig_done = False  # 이번 실행에서 형식변경전 백업을 이미 만들었는지
 
 
 def open_year(year: int) -> YearDb:
+    global _premig_done
     with _open_lock:
         db = _open.get(int(year))
         if db is None:
+            path = year_path(year)
+            if path.exists() and file_schema_version(path) < SCHEMA_VERSION:
+                if not _premig_done:
+                    from . import backup  # 순환 import 피함
+                    try:
+                        backup.before_migration()
+                    except Exception as e:
+                        raise DbError(f"자료 형식을 바꾸기 전 백업을 만들지 못해 열지 않았습니다: {e}") from e
+                    _premig_done = True
             db = YearDb(year)
             _open[int(year)] = db
         return db

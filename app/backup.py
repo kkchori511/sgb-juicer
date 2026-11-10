@@ -14,6 +14,9 @@ from . import db
 from .paths import backup_dir, data_dir
 
 KEEP = 7
+# 업데이트·형식 변경 직전 백업은 하루 백업에 밀려 지워지지 않게 따로 최근 몇 개를 보관한다
+KEEP_SPECIAL = 3
+SPECIAL = ("업데이트전", "형식변경전")
 
 
 DONE = "완료"
@@ -69,9 +72,51 @@ def prune(keep=KEEP, protect=()):
             except OSError:
                 pass
     dirs = sorted(_dirs(), key=lambda p: p.name, reverse=True)
-    for p in dirs[keep:]:
+    special = [p for p in dirs if _is_special(p.name)]
+    normal = [p for p in dirs if not _is_special(p.name)]
+    for p in normal[keep:] + special[KEEP_SPECIAL:]:
         if p.name not in protect:
             shutil.rmtree(p, ignore_errors=True)
+
+
+def _is_special(name):
+    # 이름: YYYY-MM-DD_HHMMSS_사유[_n]
+    parts = name.split("_")
+    return len(parts) >= 3 and parts[2] in SPECIAL
+
+
+def before_migration() -> str:
+    """자료 형식이 바뀌는 첫 실행: 학년도 파일을 열기(=형식 변경) 전에 그대로 복사해 둔다.
+    exe를 손으로 바꿔 넣어 자동 업데이트 백업을 건너뛴 경우도 막는다. 바꿀 파일이 없으면 아무것도 하지 않는다."""
+    old = [y for y in db.list_years() if y not in db._open and db.file_schema_version(db.year_path(y)) < db.SCHEMA_VERSION]
+    if not old:
+        return ""
+    name = _new_name("형식변경전")
+    tmp = backup_dir() / f".작성중_{name}"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True)
+    try:
+        for y in db.list_years():
+            if y in db._open:
+                db._open[y].backup_to(tmp / db.year_path(y).name)
+            else:
+                src = sqlite3.connect(f"file:{db.year_path(y)}?mode=ro", uri=True)
+                dst = sqlite3.connect(tmp / db.year_path(y).name)
+                try:
+                    src.backup(dst)
+                finally:
+                    dst.close()
+                    src.close()
+            sc = data_dir() / "스캔" / str(y)
+            if sc.is_dir() and any(sc.iterdir()):
+                shutil.copytree(sc, tmp / "스캔" / str(y))
+        (tmp / DONE).write_text("ok", encoding="utf-8")
+        tmp.rename(backup_dir() / name)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    prune(protect={name})
+    return name
 
 
 def daily(last: str) -> str:

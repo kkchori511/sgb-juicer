@@ -23,6 +23,72 @@ from .paths import app_dir, data_dir
 
 API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 ASSET_NAME = "SGB-Juicer.exe"
+API_LIST = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=30"
+# 릴리스 노트에 이 제목의 절(## ⚠ 업데이트 전 꼭 읽기)이 있으면, 화면을 없애거나 합쳐 자료 위치가 바뀌는 업데이트다.
+# 앱은 [지금 업데이트]를 누를 때 이 절을 보여 주고 '확인했어요'를 직접 쳐야 진행한다.
+WARN_HEAD = "업데이트 전 꼭 읽기"
+CONFIRM_WORD = "확인했어요"
+
+
+def warning_of(body: str) -> str:
+    """릴리스 노트에서 '업데이트 전 꼭 읽기' 절만 꺼낸다(없으면 빈 글자).
+    절은 같은 수준이거나 더 높은 제목에서 끝난다(### 하위 제목은 절 안에 포함)."""
+    out, level = [], 0
+    for ln in (body or "").replace("\r", "").split("\n"):
+        m = re.match(r"^(#{1,6})\s", ln)
+        if m:
+            n = len(m.group(1))
+            if level and n <= level:
+                break
+            if not level:
+                if WARN_HEAD in ln:
+                    level = n
+                continue
+        if level:
+            if ln.startswith("**Full Changelog"):
+                break
+            out.append(ln)
+    return "\n".join(out).strip()
+
+
+INCOMPLETE = ("업데이트 안내를 모두 확인하지 못했습니다(인터넷 연결 또는 GitHub 응답 문제). "
+              "건너뛴 버전에 메뉴가 없어지거나 합쳐지는 변경이 있을 수 있으니, [변경 내용]이나 릴리스 페이지에서 확인한 뒤 진행하세요.")
+
+
+def warnings_between(latest_tag: str, latest_body: str, local: str = VERSION, max_pages: int = 10) -> tuple[str, bool]:
+    """지금 버전과 새 버전 사이(건너뛴 버전 포함)의 경고를 모은다. 반환: (경고 글, 끝까지 확인했는지).
+    릴리스 목록을 지금 버전보다 옛 릴리스가 나올 때까지 쪽마다 넘겨 본다. 중간에 못 읽으면 확인 못 함으로 본다."""
+    found, complete = {}, False
+    try:
+        for page in range(1, max_pages + 1):
+            res = requests.get(f"{API_LIST}&page={page}", timeout=15, headers={"Accept": "application/vnd.github+json"})
+            if not res.ok:
+                break
+            rows = res.json()
+            if not isinstance(rows, list):
+                break
+            if not rows:
+                complete = True  # 더 없음
+                break
+            for r in rows:
+                tag = r.get("tag_name", "")
+                if r.get("draft") or r.get("prerelease") or not is_newer(tag, local) or is_newer(tag, latest_tag.lstrip("v")):
+                    continue
+                w = warning_of(r.get("body") or "")
+                if w:
+                    found[tag] = w
+            # 목록은 최신순: 이 쪽에 지금 버전 이하가 있으면 그 아래는 볼 필요 없음
+            if any(parse_version(r.get("tag_name", "")) and not is_newer(r.get("tag_name", ""), local) for r in rows):
+                complete = True
+                break
+    except (requests.RequestException, ValueError):
+        complete = False
+    w = warning_of(latest_body)
+    if w:
+        found[latest_tag] = w
+    order = sorted(found, key=parse_version)
+    text = found[order[0]] if len(order) == 1 else "\n\n".join(f"[{t}]\n{found[t]}" for t in order)
+    return text, complete
 
 
 class UpdateError(Exception):
@@ -43,6 +109,14 @@ def is_newer(remote: str, local: str = VERSION) -> bool:
 
 def can_apply() -> bool:
     return bool(getattr(sys, "frozen", False)) and os.name == "nt"
+
+
+def _warning_text(tag, body):
+    """확인할 경고 글. 끝까지 확인하지 못했으면 그 사실도 경고로 넣어 '확인했어요' 입력을 받는다(경고 없음과 구분)."""
+    text, complete = warnings_between(tag, body)
+    if complete:
+        return text
+    return INCOMPLETE + (f"\n\n{text}" if text else "")
 
 
 def check() -> dict:
@@ -69,6 +143,8 @@ def check() -> dict:
         "available": True,
         "version": tag.lstrip("v"),
         "notes": (data.get("body") or "").strip()[:2000],
+        "warning": _warning_text(tag, data.get("body") or ""),
+        "confirm_word": CONFIRM_WORD,
         "url": asset.get("browser_download_url"),
         "size": asset.get("size"),
         "sha256": sha,
