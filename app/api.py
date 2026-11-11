@@ -79,6 +79,7 @@ class Api:
         self._window = None
         self._busy = threading.Lock()
         self._update_info = None
+        self._xlsx_paths = {}  # 시트 고르기 대기: 표시값 → 고른 파일 경로(파일 창을 다시 띄우지 않으려고)
         self._run_cost = 0.0
         self._ai_keys = set()
         self._ai_extra = ""  # 이번 실행에만 쓰는 추가 요구 사항(ai_extra_set)
@@ -355,15 +356,57 @@ class Api:
             raise db.DbError("붙여넣은 내용이 없습니다. 엑셀에서 학번·이름 칸을 복사해 주세요.")
         return {"raw": rows, **roster.detect(rows)}
 
+    # ---------- 엑셀 시트 고르기 ----------
+    def _xlsx_token(self, path):
+        import secrets
+
+        t = secrets.token_hex(8)
+        self._xlsx_paths[t] = path
+        while len(self._xlsx_paths) > 20:
+            self._xlsx_paths.pop(next(iter(self._xlsx_paths)))
+        return t
+
+    def _xlsx_pick(self, path):
+        """시트가 하나(내용 있는 것)면 (rows, None). 여럿이면 (None, 고르기 정보)."""
+        sheets = roster.xlsx_sheets(path)
+        full = [x for x in sheets if x["rows"]]
+        if len(full) <= 1:
+            return roster.parse_xlsx(path, full[0]["name"] if full else None), None
+        return None, {"token": self._xlsx_token(path), "file": os.path.basename(path), "sheets": sheets}
+
+    def _xlsx_path(self, token):
+        path = self._xlsx_paths.get(token or "")
+        if not path or not os.path.exists(path):
+            raise db.DbError("고른 파일을 다시 찾지 못했습니다. 파일을 다시 골라 주세요.")
+        return path
+
     @safe
-    def roster_from_xlsx(self):
-        """명렬 파일을 여러 개 한꺼번에 고를 수 있다(xlsx·csv). 파일마다 읽은 결과와 오류를 돌려준다."""
+    def roster_from_xlsx(self, token=None, sheets=None):
+        """명렬 파일을 여러 개 한꺼번에 고를 수 있다(xlsx·csv). 파일마다 읽은 결과와 오류를 돌려준다.
+        시트가 여러 개인 xlsx는 ask로 돌려주고, 화면에서 고른 시트(여러 개 가능)를 token·sheets로 다시 부른다."""
+        if token:
+            path = self._xlsx_path(token)
+            name = os.path.basename(path)
+            files, errors = [], []
+            for sh in sheets or []:
+                try:
+                    rows = roster.parse_xlsx(path, sh)
+                except Exception:
+                    errors.append(f"{name} › {sh}: 읽지 못했습니다")
+                    continue
+                if not rows:
+                    errors.append(f"{name} › {sh}: 고른 시트에 내용이 없습니다")
+                    continue
+                files.append({"raw": rows, "file": f"{name} › {sh}", **roster.detect(rows)})
+            if not files:
+                raise db.DbError("읽은 명렬이 없습니다.\n" + "\n".join(errors or ["시트를 하나 이상 골라 주세요."]))
+            return {"files": files, "errors": errors, "ask": []}
         result = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True,
                                                  file_types=("명렬 파일 (*.xlsx;*.csv)", "Excel 파일 (*.xlsx)", "CSV 파일 (*.csv)"))
         if not result:
             return {"ok": False, "cancelled": True}
         paths = list(result) if isinstance(result, (list, tuple)) else [result]
-        files, errors = [], []
+        files, errors, ask = [], [], []
         for path in paths:
             name = os.path.basename(path)
             try:
@@ -379,17 +422,20 @@ class Api:
                         raise ValueError
                     rows = roster.parse_text(text)
                 else:
-                    rows = roster.parse_xlsx(path)
+                    rows, pick = self._xlsx_pick(path)
+                    if pick:
+                        ask.append(pick)
+                        continue
             except Exception:
                 errors.append(f"{name}: 열지 못했습니다(Excel에서 열려 있으면 닫고 다시 시도)")
                 continue
             if not rows:
-                errors.append(f"{name}: 첫 번째 시트에 내용이 없습니다")
+                errors.append(f"{name}: 내용이 없습니다")
                 continue
             files.append({"raw": rows, "file": name, **roster.detect(rows)})
-        if not files:
+        if not files and not ask:
             raise db.DbError("읽은 명렬이 없습니다.\n" + "\n".join(errors))
-        return {"files": files, "errors": errors}
+        return {"files": files, "errors": errors, "ask": ask}
 
     def _members_map(self, d, gid):
         return {m["student_no"]: bool(m["active"]) for m in d.members(gid)}
@@ -1179,19 +1225,15 @@ class Api:
 
     # ---------- 이미 쓴 생기부 일괄 넣기 ----------
     @safe
-    def existing_parse(self, gid, item, text=None, from_xlsx=False):
-        """이미 쓴 생기부: 붙여넣은 글 또는 xlsx를 읽고 열을 알아본다(NEIS 업로드 형식 포함)."""
+    def existing_parse(self, gid, item, text=None, from_xlsx=False, token=None, sheet=None):
+        """이미 쓴 생기부: 붙여넣은 글 또는 xlsx를 읽고 열을 알아본다(NEIS 업로드 형식 포함).
+        시트가 여러 개면 {sheets, token}을 돌려주고, 고른 시트를 token·sheet로 다시 부른다."""
         d = self._db()
         Records(d).slot(gid, item)
         if from_xlsx:
-            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
-            if not res:
-                return {"ok": False, "cancelled": True}
-            path = res[0] if isinstance(res, (list, tuple)) else res
-            try:
-                raw = roster.parse_xlsx(path)
-            except Exception:
-                raise db.DbError("xlsx 파일을 열지 못했습니다. Excel에서 열려 있으면 닫고 다시 시도해 주세요.")
+            raw, pick = self._read_xlsx(token, sheet)
+            if pick or raw is None:
+                return pick or {"ok": False, "cancelled": True}
         else:
             raw = roster.parse_text(text or "", delim="\t")
         if not raw:
@@ -1325,19 +1367,32 @@ class Api:
         return {"opts": self._ib().set_source(bid, raw, "paste"), "raw": raw}
 
     @safe
-    def inbox_source_xlsx(self, bid):
+    def inbox_source_xlsx(self, bid, token=None, sheet=None):
         self._editable()
-        res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
-        if not res:
-            return {"ok": False, "cancelled": True}
-        path = res[0] if isinstance(res, (list, tuple)) else res
+        raw, pick = self._read_xlsx(token, sheet)
+        if pick or raw is None:
+            return pick or {"ok": False, "cancelled": True}
+        if not raw:
+            raise db.DbError("고른 시트에 내용이 없습니다.")
+        name = os.path.basename(self._last_xlsx)
+        return {"opts": self._ib().set_source(bid, raw, "xlsx", name + (f" › {sheet}" if sheet else "")), "raw": raw}
+
+    def _read_xlsx(self, token, sheet):
+        """파일 하나 고르기 → (rows, None) / 시트가 여럿이면 (None, 고르기 정보) / 취소면 (None, None)."""
+        if token:
+            path = self._xlsx_path(token)
+        else:
+            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
+            if not res:
+                return None, None
+            path = res[0] if isinstance(res, (list, tuple)) else res
+        self._last_xlsx = path
         try:
-            raw = roster.parse_xlsx(path)
+            if token:
+                return roster.parse_xlsx(path, sheet), None
+            return self._xlsx_pick(path)
         except Exception:
             raise db.DbError("xlsx 파일을 열지 못했습니다. Excel에서 열려 있으면 닫고 다시 시도해 주세요.")
-        if not raw:
-            raise db.DbError("첫 번째 시트에 내용이 없습니다.")
-        return {"opts": self._ib().set_source(bid, raw, "xlsx", os.path.basename(path)), "raw": raw}
 
     # ----- 스캔 PDF -----
     @safe
@@ -1419,8 +1474,14 @@ class Api:
 
     @safe
     def inbox_preview(self, bid, opts):
-        rows = self._ib().preview(bid, opts or {})
-        return {"rows": rows}
+        """opts.roles가 없으면(방향·머리글을 바꿈) 열 역할을 다시 짐작해 함께 돌려준다."""
+        opts = dict(opts or {})
+        out = {}
+        if opts.get("structure", "multi") == "multi" and opts.get("roles") is None:
+            out["roles"], out["neis"] = self._ib().guess(bid, opts)
+            opts["roles"] = out["roles"]
+        out["rows"] = self._ib().preview(bid, opts)
+        return out
 
     @safe
     def inbox_import(self, bid, opts):

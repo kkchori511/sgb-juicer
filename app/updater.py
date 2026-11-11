@@ -28,6 +28,10 @@ API_LIST = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=30"
 # 앱은 [지금 업데이트]를 누를 때 이 절을 보여 주고 '확인했어요'를 직접 쳐야 진행한다.
 WARN_HEAD = "업데이트 전 꼭 읽기"
 CONFIRM_WORD = "확인했어요"
+# 예비 경로: 일부 학교·통신사 망은 GitHub 릴리스 파일 서버(release-assets.githubusercontent.com)를 막는다.
+# 릴리스 때 CI가 같은 exe를 GitHub Pages(gh-pages 브랜치, 최신 1개)에도 올린다. 어디서 받든 SHA-256으로 같은 파일인지 확인한다.
+MIRROR = f"https://{GITHUB_REPO.split('/')[0]}.github.io/{GITHUB_REPO.split('/')[1]}/SGB-Juicer-{{version}}.exe"
+RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases/latest"
 
 
 def warning_of(body: str) -> str:
@@ -152,34 +156,85 @@ def check() -> dict:
     }
 
 
-def download(info: dict, progress=None) -> str:
+def _sha256(path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _fetch(url, dest: Path, size_hint=0, progress=None):
+    """dest로 받는다. 이미 받은 부분이 있으면 이어 받는다(서버가 Range를 받지 않으면 처음부터)."""
+    done = dest.stat().st_size if dest.exists() else 0
+    headers = {"Range": f"bytes={done}-"} if done else {}
+    with requests.get(url, stream=True, timeout=(15, 60), headers=headers) as res:
+        if done and res.status_code != 206:
+            done = 0
+        res.raise_for_status()
+        total = done + int(res.headers.get("Content-Length") or 0) or int(size_hint or 0)
+        with open(dest, "ab" if done else "wb") as f:
+            for chunk in res.iter_content(1 << 16):
+                f.write(chunk)
+                done += len(chunk)
+                if progress and total:
+                    progress(done, total)
+
+
+def _why(e) -> str:
+    """기록용 짧은 원인(주소에 붙은 서명 값은 남기지 않는다)."""
+    if isinstance(e, requests.HTTPError) and e.response is not None:
+        return f"HTTP {e.response.status_code}"
+    if isinstance(e, requests.exceptions.SSLError):
+        return "SSLError(인증서·보안 장비)"
+    if isinstance(e, requests.Timeout):
+        return "Timeout(응답 없음)"
+    if isinstance(e, requests.ConnectionError):
+        return "ConnectionError(연결 막힘·끊김)"
+    return e.__class__.__name__
+
+
+def download(info: dict, progress=None, tries=3, wait=1.0) -> str:
+    """GitHub 릴리스 파일 → 안 되면 예비 경로(GitHub Pages). 경로마다 끊기면 이어 받기로 몇 번 다시 시도한다."""
+    import time
+
     url = info.get("url") or ""
     if not url.startswith(f"https://github.com/{GITHUB_REPO}/releases/download/"):
         raise UpdateError("업데이트 주소가 올바르지 않습니다.")
-    if not re.fullmatch(r"[0-9a-fA-F]{64}", info.get("sha256") or ""):
+    sha = (info.get("sha256") or "").lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", sha):
         raise UpdateError("검증값(SHA-256)이 없어 자동 업데이트하지 않습니다. 릴리스 페이지에서 직접 내려받아 주세요.")
     dest = current_exe().with_name(current_exe().name + ".new")
-    h = hashlib.sha256()
-    done = 0
-    try:
-        with requests.get(url, stream=True, timeout=60) as res:
-            res.raise_for_status()
-            total = int(res.headers.get("Content-Length") or info.get("size") or 0)
-            with open(dest, "wb") as f:
-                for chunk in res.iter_content(1 << 16):
-                    f.write(chunk)
-                    h.update(chunk)
-                    done += len(chunk)
-                    if progress and total:
-                        progress(done, total)
-    except (requests.RequestException, OSError) as e:
-        if dest.exists():
-            dest.unlink()
-        raise UpdateError(f"새 버전을 내려받지 못했습니다: {e.__class__.__name__}") from e
-    if h.hexdigest() != info["sha256"].lower():
-        dest.unlink()
-        raise UpdateError("내려받은 파일 검증(SHA-256)에 실패했습니다. 다시 시도해 주세요.")
-    return str(dest)
+    sources = [("GitHub 릴리스", url)]
+    if re.fullmatch(r"[0-9A-Za-z.\-]+", info.get("version") or ""):
+        sources.append(("예비 경로", MIRROR.format(version=info["version"])))
+    why = []
+    for label, src in sources:
+        try:
+            dest.unlink(missing_ok=True)
+        except OSError as e:
+            raise UpdateError(f"이전에 받다 만 파일을 지우지 못했습니다({e.__class__.__name__}).") from e
+        for i in range(tries):
+            try:
+                _fetch(src, dest, info.get("size"), progress)
+                break
+            except (requests.RequestException, OSError) as e:
+                why.append(f"{label} {i + 1}회: {_why(e)}")
+                if isinstance(e, requests.HTTPError) and e.response is not None and e.response.status_code == 404:
+                    break  # 없는 파일: 다시 해도 같다
+                if i + 1 < tries:
+                    time.sleep(wait)
+        else:
+            continue
+        if dest.exists() and _sha256(dest) == sha:
+            if why:
+                log("내려받기: " + "; ".join(why) + f" → {label}에서 받음")
+            return str(dest)
+        why.append(f"{label}: 검증(SHA-256) 실패")
+    dest.unlink(missing_ok=True)
+    log("내려받기 실패: " + "; ".join(why))
+    raise UpdateError("새 버전을 내려받지 못했습니다. 지금 인터넷망이 GitHub 파일 서버를 막고 있을 수 있어요. "
+                      "다른 인터넷(휴대폰 핫스폿 등)에서 다시 시도하거나, 릴리스 페이지에서 직접 받아 exe를 바꿔 주세요.")
 
 
 def current_exe() -> Path:

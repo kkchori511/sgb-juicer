@@ -12,7 +12,7 @@
   <header class="topbar">
     <div class="top-left">
       <button type="button" class="icon-btn" id="menuToggle" title="메뉴 접기/펼치기" aria-label="메뉴 접기/펼치기">☰</button>
-      <button type="button" class="brand" id="verBtn" title="앱 정보"><img src="face.png" alt="" class="brand-face"><span class="app-title">생기부 착즙기</span> <span class="app-ver" id="verText">v0.1</span> <span class="beta">베타</span></button>
+      <button type="button" class="brand" id="verBtn" title="앱 정보"><img src="icon.png" alt="" class="brand-icon"><span class="app-title">생기부 착즙기</span> <span class="app-ver" id="verText">v0.1</span> <span class="beta">베타</span></button>
       <select id="yearSelect" class="year-select" title="학년도"></select>
       <span class="archived-badge" id="archivedBadge" hidden>보관·조회 전용</span>
     </div>
@@ -400,7 +400,9 @@
               <li><b>새 자료 묶음</b>: 이름과 <b>대상 명렬·보낼 항목</b>을 정합니다.</li>
               <li><b>① 가져오기</b>: 엑셀 칸을 드래그해 복사한 뒤 [엑셀 붙여넣기], 또는 xlsx·스캔 PDF.
                 <ul>
-                  <li><b>여러 학생에게</b>: 학생이 행인지 열인지, 학번·이름 줄, 첫 줄이 날짜·회차 제목인지 고릅니다(대부분 자동). 셀 하나가 기록 한 건이 됩니다.</li>
+                  <li><b>여러 학생에게</b>: 학생이 행인지 열인지, 첫 줄이 머리글인지 고르고, 열마다 역할(학번·학년·반·번호·반/번호·이름·학적변동·내용·안 씀)을 고릅니다(머리글을 읽어 자동으로 채움). 내용 열의 셀 하나가 기록 한 건이 됩니다.</li>
+                  <li><b>나이스 파일</b>: 나이스에서 내려받은 파일은 자동으로 알아보고 학년·반/번호·성명·특기사항 열을 맞춥니다. 반/번호(1/1)는 반·번호로 나눠 명렬과 맞추고, 학생개인번호는 학번이 아니라서 쓰지 않습니다. 학적변동이 재학이 아니면 확인을 받습니다.</li>
+                  <li><b>시트가 여러 개인 엑셀</b>: 읽을 시트를 고르는 창이 뜹니다(명렬은 여러 시트를 한꺼번에 고를 수 있음).</li>
                   <li><b>한 학생에게 여러 건</b>: 학생을 고르고 읽는 순서(행 우선/열 우선)를 정합니다.</li>
                   <li>왼쪽 원본 미리보기의 색과 오른쪽 '만들어질 기록'을 확인하고 [확정하고 매칭으로].</li>
                 </ul>

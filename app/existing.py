@@ -31,7 +31,14 @@ ROLES = ("student_no", "name", "grade", "class_no", "number", "clsnum", "gradecl
 
 
 def _norm(h):
-    return re.sub(r"[\s()\[\]]", "", h or "")
+    # 나이스 파일 머리글에는 줄바꿈이 '_x000D_' 글자로 남아 있다(예: '학적변동_x000D_\n구분')
+    return re.sub(r"_x000D_|[\s()\[\]]", "", h or "")
+
+
+def is_neis(header) -> bool:
+    """나이스 내려받기·올리기 파일: 학생개인번호·반/번호·성명 머리글이 함께 있다."""
+    hs = {_norm(h) for h in header or []}
+    return {"학생개인번호", "반/번호", "성명"} <= hs
 
 
 def header_role(cell):

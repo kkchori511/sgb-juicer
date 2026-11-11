@@ -101,12 +101,41 @@ def seed():
     bid = ok(api.inbox_create("과학의 날 행사", hr, "autonomy"), "인박스")["id"]
     src = ok(api.inbox_source_text(bid, "학번\t이름\t내용\n20301\t김철수\t과학의 날 포스터 제작에 참여함.\n20306\t한별\t과학 퀴즈 진행을 도움."), "인박스")
     ok(api.inbox_import(bid, {"structure": "multi", **src["opts"]}), "인박스")
+    ok(api.inbox_create("공통수학1 세특(나이스 파일)", math, "subject"), "인박스")
+    _demo_xlsx(year, names)
     return year
+
+
+def _demo_xlsx(year, names):
+    """시험용 엑셀(가짜 학생): 나이스 내려받기 형식 세특(시트 3개)과 반별 명렬(시트 2개). 자료 폴더 안 '시험용 엑셀'에 만든다."""
+    from openpyxl import Workbook
+
+    out = os.path.join(DATA, "시험용 엑셀")
+    os.makedirs(out, exist_ok=True)
+    wb = Workbook()
+    wb.active.title = "안내"
+    wb.active.append(["시험용 가짜 파일입니다."])
+    ws = wb.create_sheet("과목별세부능력및특기사항")
+    ws.append(["학년도", "학기", "학년", "학생개인번호", "과목", "과목코드", "반/번호", "성명", "학적변동_x000D_\n구분", "세부능력 및 특기사항", "영재·발명교육 기록사항"])
+    for i, n in enumerate(names[:5]):
+        ws.append([str(year), "1", "2", f"{year}0001{i:02d}", "공통수학1", "0003000012", f"3/{i + 1}", n,
+                   "자퇴" if i == 2 else "재학", f"다항식의 연산 단원에서 {n} 학생이 스스로 질문을 만들어 풀이함.", ""])
+    wb.create_sheet("빈 시트")
+    wb.save(os.path.join(out, "나이스_세특_시험용.xlsx"))
+    wb = Workbook()
+    wb.active.title = "1반"
+    for r in (["학번", "이름"], ["20101", "가나다"], ["20102", "라마바"]):
+        wb.active.append(r)
+    ws = wb.create_sheet("2반")
+    for r in (["학번", "이름"], ["20201", "사아자"], ["20202", "차카타"]):
+        ws.append(r)
+    wb.save(os.path.join(out, "반별_명렬_시험용.xlsx"))
 
 
 if __name__ == "__main__":
     y = seed()
     print(f"데모 자료: {DATA} ({y}학년도)", flush=True)
+    print(f"시험용 엑셀: {os.path.join(DATA, '시험용 엑셀')}", flush=True)
     from app.main import main
 
     sys.argv = [os.path.join(ROOT, "run.py")]  # pywebview는 실행 파일 폴더를 앱 루트로 본다(app/web/index.html 찾기)

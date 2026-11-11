@@ -18,7 +18,7 @@ from contextlib import contextmanager
 
 from .paths import data_dir
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 KINDS = ("homeroom", "subject", "club")
 ROLES = ("homeroom", "subject")  # 담임 / 비담임
 
@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS inbox_rows (
     source_ref TEXT DEFAULT '',      -- 원본 위치(예: 3행, C4셀, 1~2쪽)
     ext_no TEXT DEFAULT '',          -- 원본에서 읽은 학번
     ext_name TEXT DEFAULT '',        -- 원본에서 읽은 이름
+    ext TEXT DEFAULT '{}',           -- 원본에서 읽은 학년·반·번호·반/번호·학적변동(JSON, v11)
     student_no TEXT,                 -- 연결한 학생
     state TEXT NOT NULL DEFAULT 'none', -- confirmed / suggested / none / excluded
     exclude_reason TEXT DEFAULT '',
@@ -237,6 +238,8 @@ class YearDb:
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(inbox_rows)")}
         if "pages" not in cols:
             self._conn.execute("ALTER TABLE inbox_rows ADD COLUMN pages TEXT DEFAULT ''")
+        if "ext" not in cols:  # v11: 인박스 열 역할(학년·반·번호·반/번호·학적변동)
+            self._conn.execute("ALTER TABLE inbox_rows ADD COLUMN ext TEXT DEFAULT '{}'")
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(records)")}
         if "pos" not in cols:
             self._conn.execute("ALTER TABLE records ADD COLUMN pos INTEGER")

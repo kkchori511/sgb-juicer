@@ -74,7 +74,7 @@ def detect(raw: list[list[str]]) -> dict:
     for orient in ("rows", "cols"):
         g = raw if orient == "rows" else _transpose(raw)
         width = max(len(r) for r in g)
-        for header in (True, False):
+        for header in (False, True):  # 같은 점수면 머리글 없음(첫 줄 학생을 빼먹지 않게)
             body = g[1:] if header else g
             if not body:
                 continue
@@ -85,7 +85,84 @@ def detect(raw: list[list[str]]) -> dict:
                 best = (score, {"orient": orient, "header": header, "no_idx": nos[0] if nos else None, "name_idx": names[0] if names else None})
     out = best[1]
     out["found"] = best[0] >= 1
+    g = raw if out["orient"] == "rows" else _transpose(raw)
+    roles, neis, header = guess_roles(g, out["header"], out["no_idx"], out["name_idx"])
+    out.update(roles=roles, neis=neis, header=header)
+    pos = {r: int(j) for j, r in reversed(list(roles.items()))}
+    out["no_idx"], out["name_idx"] = pos.get("student_no"), pos.get("name")
+    out["found"] = out["found"] or any(r in ID_ROLES for r in roles.values())
     return out
+
+
+# 인박스 열 역할(화면에서 고르는 것). 학번·학년·반·번호·반/번호·이름은 학생 찾기, 내용은 기록, 학적변동은 안내.
+ROLES = ("student_no", "grade", "class_no", "number", "clsnum", "name", "change", "content")
+ID_ROLES = ("student_no", "grade", "class_no", "number", "clsnum", "name")
+
+
+def guess_roles(g, header, no_idx=None, name_idx=None):
+    """머리글·칸 모양으로 열 역할을 짐작한다 → ({'열번호': 역할}, 나이스 파일인지, 첫 줄 머리글인지).
+    나이스 파일(학생개인번호·반/번호·성명)은 학년·반/번호·성명·학적변동·특기사항 칸만 쓴다(학생개인번호는 학번이 아님)."""
+    from . import existing
+
+    if not g:
+        return {}, False, bool(header)
+    # 첫 줄이 머리글인지는 표 모양 추정(detect)을 따른다. 머리글이 없으면 빈 줄을 앞에 붙여 본문을 머리글로 오해하지 않게 한다.
+    header = bool(header)
+    ex = existing.detect(g if header else [[""] * max(len(r) for r in g)] + g)
+    cols = ex["columns"]
+    roles = {}
+    for role in ("student_no", "name", "grade", "class_no", "number", "clsnum", "change"):
+        if cols.get(role) is not None:
+            roles[int(cols[role])] = role
+    if cols.get("clsany") is not None and "clsnum" not in roles.values():
+        roles[int(cols["clsany"])] = "clsnum"
+    for idx, role in ((no_idx, "student_no"), (name_idx, "name")):  # 칸 모양으로 찾은 학번·이름(머리글이 다른 뜻이면 쓰지 않음)
+        if idx is not None and role not in roles.values() and int(idx) not in roles and not (header and existing.header_role(g[0][int(idx)] if int(idx) < len(g[0]) else "")):
+            roles[int(idx)] = role
+    neis = header and existing.is_neis(g[0])
+    width = max(len(r) for r in g)
+    body = g[1:] if header else g
+    if neis:
+        content = [int(cols["content"])] if cols.get("content") is not None else []
+    else:
+        skip = {j for j, c in enumerate(g[0]) if header and existing.header_role(c) in ("ignore", "title", "date")}
+        content = [j for j in range(width) if j not in roles and j not in skip and any(j < len(r) and r[j] for r in body)]
+    for j in content:
+        roles[j] = "content"
+    return {str(j): r for j, r in sorted(roles.items())}, neis, header
+
+
+def _role_cols(opts, g, header):
+    """opts의 열 역할 → {역할: [열번호]}. 역할을 정하지 않은 예전 묶음은 짐작한다."""
+    roles = opts.get("roles")
+    if roles is None:
+        roles = guess_roles(g, header, _int(opts.get("no_idx")), _int(opts.get("name_idx")))[0]
+    out = {}
+    for j, r in roles.items():
+        if r in ROLES:
+            out.setdefault(r, []).append(int(j))
+    return {r: sorted(v) for r, v in out.items()}
+
+
+def _int(v):
+    return int(v) if v not in (None, "") else None
+
+
+def cls_text(ext):
+    """읽은 학년·반·번호를 보기 좋게: '1학년 1반 1번'."""
+    from . import existing
+
+    if not ext:
+        return ""
+    g, c, n = ext.get("grade"), ext.get("class_no"), ext.get("number")
+    if ext.get("cls"):
+        opts = existing.class_options(ext["cls"], "clsnum")
+        if opts:
+            _, c, n = opts[0]
+        else:
+            return ext["cls"]
+    parts = [f"{g}학년" if g else "", f"{c}반" if c else "", f"{n}번" if n else ""]
+    return " ".join(p for p in parts if p)
 
 
 def _header_like(line):
@@ -128,27 +205,68 @@ def interpret(raw, opts, school_year):
     orient = opts.get("orient", "rows")
     g = raw if orient == "rows" else _transpose(raw)
     width = max(len(r) for r in g)
-    no_idx = opts.get("no_idx")
-    name_idx = opts.get("name_idx")
-    no_idx = int(no_idx) if no_idx not in (None, "") else None
-    name_idx = int(name_idx) if name_idx not in (None, "") else None
+    cols = _role_cols(opts, g, header)
     labels = g[0] if header else [""] * width
     start = 1 if header else 0
-    content_cols = [j for j in range(width) if j not in (no_idx, name_idx)]
+    first = lambda role: (cols.get(role) or [None])[0]
+    content_cols = cols.get("content", [])
+
+    def num(v):
+        v = re.sub(r"[^\d]", "", v)
+        return int(v) if v else None
+
     for li, i in enumerate(range(start, len(g))):
         line = g[i]
         get = lambda j: (line[j].strip() if j is not None and j < len(line) else "")
-        ext_no = re.sub(r"\s", "", get(no_idx))
-        ext_name = re.sub(r"\s", "", get(name_idx))
+        ext_no = re.sub(r"\s", "", get(first("student_no")))
+        ext_name = re.sub(r"\s", "", get(first("name")))
+        ext = {k: v for k, v in (("grade", num(get(first("grade")))), ("class_no", num(get(first("class_no")))),
+                                 ("number", num(get(first("number")))), ("cls", get(first("clsnum"))),
+                                 ("change", get(first("change")))) if v}
         for k, j in enumerate(content_cols, 1):
             v = get(j)
             if not v:
                 continue
             lab = (labels[j] if j < len(labels) else "").strip()
             ref = f"{col_name(j)}{i + 1}" if orient == "rows" else f"{col_name(i)}{j + 1}"
-            out.append({"line": li + 1, "source_ref": ref, "ext_no": ext_no, "ext_name": ext_name,
+            out.append({"line": li + 1, "source_ref": ref, "ext_no": ext_no, "ext_name": ext_name, "ext": ext, "ext_cls": cls_text(ext),
                         "label": lab or f"{k}회", "date": label_date(lab, school_year), "content": v})
     return out
+
+
+def match_ext(ext_no, ext_name, ext, members):
+    """학번·이름에 학년·반·번호(반/번호 칸 포함)까지 써서 학생을 찾는다. 학적변동이 재학이 아니면 확인을 받는다."""
+    from . import existing
+
+    ext = ext or {}
+    if not any(ext.get(k) for k in ("grade", "class_no", "number", "cls")):
+        sno, state, note = match_one(ext_no, ext_name, members)
+    else:
+        grade = ext.get("grade")
+        e = {"student_no": ext_no, "name": ext_name}
+        if ext.get("cls"):
+            e["class_opts"] = [(o[0] if o[0] is not None else grade, o[1], o[2]) for o in existing.class_options(ext["cls"], "clsnum")]
+            if not e["class_opts"] and grade:
+                e["grade"] = grade
+        else:
+            e.update(grade=grade, class_no=ext.get("class_no"), number=ext.get("number"))
+        sno, state, note = existing.match_row(e, members)
+        m = next((x for x in members if x["student_no"] == sno), None)
+        if m and not m["active"]:
+            sno, state, note = None, "none", f"{m['name']}: 비활성 학생(명렬에서 다시 활성화하거나 제외)"
+    change = (ext.get("change") or "").strip()
+    if change and change != "재학":
+        note = (note + " · " if note else "") + f"학적변동: {change} — 가져올지 확인해 주세요"
+        if state == "confirmed":
+            state = "suggested"
+    return sno, state, note
+
+
+def _ext(row):
+    try:
+        return json.loads(row.get("ext") or "{}")
+    except (TypeError, ValueError):
+        return {}
 
 
 def match_one(ext_no, ext_name, members):
@@ -263,6 +381,14 @@ class Inbox:
         raw = b["meta"].get("raw") or []
         return interpret(raw, opts, self.d.year)
 
+    def guess(self, bid, opts):
+        raw = self.batch(bid)["meta"].get("raw") or []
+        if not raw:
+            return {}, False
+        g = raw if opts.get("orient", "rows") == "rows" else _transpose(raw)
+        roles, neis, _ = guess_roles(g, bool(opts.get("header")))
+        return roles, neis
+
     def confirm_import(self, bid, opts):
         b = self.batch(bid)
         if b["stage"] == "sent":
@@ -274,8 +400,8 @@ class Inbox:
         structure = opts.get("structure", "multi")
         if structure == "single" and not opts.get("student_no"):
             raise DbError("기록을 넣을 학생을 골라 주세요.")
-        if structure == "multi" and opts.get("no_idx") in (None, "") and opts.get("name_idx") in (None, ""):
-            raise DbError("학번 줄이나 이름 줄을 골라 주세요. 학생을 알 수 없으면 '한 학생에게 여러 건'을 고르세요.")
+        if structure == "multi" and not any(r["ext_no"] or r["ext_name"] or r["ext_cls"] for r in recs):
+            raise DbError("학번·이름(또는 학년·반·번호) 열을 골라 주세요. 학생을 알 수 없으면 '한 학생에게 여러 건'을 고르세요.")
         meta = b["meta"]
         meta["opts"] = opts
         members = self.d.members(b["group_id"])
@@ -285,11 +411,12 @@ class Inbox:
                 if structure == "single":
                     sno, state, note = str(opts["student_no"]), "confirmed", "고른 학생"
                 else:
-                    sno, state, note = match_one(r["ext_no"], r["ext_name"], members)
+                    sno, state, note = match_ext(r["ext_no"], r["ext_name"], r.get("ext"), members)
                 c.execute(
-                    """INSERT INTO inbox_rows(batch_id, ord, source_ref, ext_no, ext_name, student_no, state, note, line, label, date, content)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (int(bid), k, r["source_ref"], r["ext_no"], r["ext_name"], sno, state, note, r["line"], r["label"], r["date"], r["content"]),
+                    """INSERT INTO inbox_rows(batch_id, ord, source_ref, ext_no, ext_name, ext, student_no, state, note, line, label, date, content)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (int(bid), k, r["source_ref"], r["ext_no"], r["ext_name"], json.dumps(r.get("ext") or {}, ensure_ascii=False),
+                     sno, state, note, r["line"], r["label"], r["date"], r["content"]),
                 )
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False), structure=structure, stage="match")
         return len(recs)
@@ -406,6 +533,7 @@ class Inbox:
         for r in rows:
             m = names.get(r["student_no"]) if r["student_no"] else None
             r["matched_name"] = m["name"] if m else ""
+            r["ext_cls"] = cls_text(_ext(r))
             r["dup"] = bool(r["student_no"] and len(lines.get(r["student_no"], ())) > 1)
             r["cands"] = cands.get(r["id"], [])
             r["text"] = r["used_text"] if r["used_text"] is not None else r["content"]
@@ -481,7 +609,7 @@ class Inbox:
             for r in self._rows(bid):
                 if keep_manual and r["state"] in ("confirmed", "excluded"):
                     continue
-                sno, state, note = match_one(r["ext_no"], r["ext_name"], members)
+                sno, state, note = match_ext(r["ext_no"], r["ext_name"], _ext(r), members)
                 c.execute("UPDATE inbox_rows SET student_no=?, state=?, note=?, exclude_reason='' WHERE id=?", (sno, state, note, r["id"]))
             self._touch(c, bid)
 

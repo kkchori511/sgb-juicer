@@ -76,6 +76,7 @@ code { background: var(--surface-2); border: 1px solid var(--border); padding: 1
 .app-title { font-size: 18px; font-weight: 800; white-space: nowrap; }
 .brand { display: flex; align-items: center; gap: 6px; padding: 3px 12px 3px 4px; border-radius: 999px; white-space: nowrap; }
 .brand-face { width: 30px; height: 30px; border-radius: 50%; }
+.brand-icon { width: 30px; height: 30px; border-radius: 7px; }
 .app-ver { font-size: 13px; font-weight: 800; color: var(--text-2); }
 .about-face { width: 96px; height: 96px; border-radius: 50%; display: block; margin: 0 auto 8px; }
 .about-maker { font-weight: 800; margin-top: 4px; }
@@ -422,6 +423,27 @@ textarea.tall { min-height: 300px; height: calc(100vh - 470px); resize: vertical
 .grid-prev .c-head { background: #eceff3; font-weight: 700; color: var(--text-2); }
 .grid-prev .c-skip { color: #c0c7d0; }
 .grid-prev .c-l0 { background: #fff1d6; } .grid-prev .c-l1 { background: #e3f6e8; } .grid-prev .c-l2 { background: #f6e3f3; } .grid-prev .c-l3 { background: #e3f1f6; }
+/* 인박스 열 역할: 고른 열은 머리에 역할 표시, 안 쓰는 열은 흐리게 */
+.grid-prev .c-off { color: #b8c0ca; background: #f7f8fa; }
+.grid-prev th.c-off { opacity: .6; }
+.role-badge { display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 6px; font-size: 11px; font-weight: 800; color: #1f2937; background: #e5e7eb; }
+.r-student_no { background: #c7dcff !important; } .r-grade { background: #cdeff0 !important; } .r-class_no { background: #d5f0d0 !important; }
+.r-number { background: #fde7c4 !important; } .r-clsnum { background: #e2dcff !important; } .r-name { background: #ffd6de !important; }
+.r-change { background: #eceff3 !important; } .r-content { background: #fff3b0 !important; }
+.grid-prev td.c-id.r-change { font-weight: 400; }
+.role-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; margin: 4px 0 8px; }
+.role-cell { display: flex; align-items: center; gap: 6px; margin: 0; padding: 4px 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--input); font-size: 13px; }
+.role-cell.off { opacity: .65; }
+.role-cell .role-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.role-cell select { width: auto; min-width: 84px; padding: 2px 4px; font-weight: 700; }
+.neis-note { margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: #e8f1ff; color: #1e3a8a; font-weight: 600; }
+.small-note { font-size: 12px; margin: 2px 0 6px; }
+/* 엑셀 시트 고르기 */
+.sheet-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; max-height: 50vh; overflow: auto; text-align: left; }
+.sheet-pick { display: block; margin: 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.sheet-pick input { margin-right: 6px; }
+.sheet-pick.empty { opacity: .5; cursor: default; }
+.sheet-first { font-size: 12px; color: var(--muted); margin: 2px 0 0 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prev-box { max-height: calc(100vh - 430px); min-height: 200px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .mk-list { font-size: 13.5px; }
 .mk-list .mk { padding: 5px 8px; border-bottom: 1px solid var(--border); }

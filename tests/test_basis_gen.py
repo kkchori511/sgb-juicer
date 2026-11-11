@@ -37,7 +37,7 @@ def ok(r):
 
 
 def test_migration():
-    """v9 파일을 새 버전으로 열면: 열기 전에 형식변경전 백업, 자료 건수 그대로, 형식 10, outlines 표 생김."""
+    """v9 파일을 새 버전으로 열면: 열기 전에 형식변경전 백업, 자료 건수 그대로, 형식 11, outlines 표 생김."""
     src = os.path.join(ROOT, "tests", "fixtures", "v9_sample.sqlite")
     dst = db.year_path(2026)
     shutil.copy(src, dst)
@@ -51,7 +51,7 @@ def test_migration():
     assert copy.exists() and (olds[0] / backup.DONE).exists()
     assert db.file_schema_version(copy) == 9  # 바꾸기 전 그대로
     assert counts(copy) == before
-    assert d.get_meta("schema_version") == str(db.SCHEMA_VERSION) == "10"
+    assert d.get_meta("schema_version") == str(db.SCHEMA_VERSION) == "11"
     d._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     assert counts(dst) == before, (counts(dst), before)  # 자료 건수가 줄지 않음
     assert d.q("SELECT COUNT(*) n FROM outlines")[0]["n"] == 0

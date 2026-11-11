@@ -35,16 +35,35 @@ def parse_text(text: str, delim: str | None = None) -> list[list[str]]:
     return _clean(rows)
 
 
-def parse_xlsx(path: str) -> list[list[str]]:
+def parse_xlsx(path: str, sheet=None) -> list[list[str]]:
+    """sheet: 시트 이름(없으면 첫 번째 시트)."""
     from openpyxl import load_workbook
 
     wb = load_workbook(path, read_only=True, data_only=True)
     try:
-        ws = wb.worksheets[0]
+        if sheet is not None and sheet not in wb.sheetnames:
+            raise ValueError(f"시트를 찾지 못했습니다: {sheet}")
+        ws = wb[sheet] if sheet is not None else wb.worksheets[0]
         rows = []
         for r in ws.iter_rows(values_only=True):
             rows.append([_cell(v) for v in r])
         return _clean(rows)
+    finally:
+        wb.close()
+
+
+def xlsx_sheets(path: str) -> list[dict]:
+    """시트 목록: [{name, rows(내용 있는 줄 수), first(첫 줄 미리보기)}]. 숨긴 시트도 보여 준다."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path, read_only=True, data_only=True)
+    try:
+        out = []
+        for ws in wb.worksheets:
+            rows = _clean([[_cell(v) for v in r] for r in ws.iter_rows(values_only=True)])
+            first = " | ".join(c for c in (rows[0] if rows else [])[:6] if c)
+            out.append({"name": ws.title, "rows": len(rows), "first": first[:80]})
+        return out
     finally:
         wb.close()
 

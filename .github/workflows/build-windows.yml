@@ -44,6 +44,8 @@ jobs:
           python tests/test_basis_gen.py
           python tests/test_close_bulk.py
           python tests/test_fill_tidy.py
+          python tests/test_update_download.py
+          python tests/test_inbox_columns.py
 
       - name: Version info
         shell: pwsh
@@ -122,3 +124,38 @@ jobs:
           }
           gh release upload "$env:RELEASE_TAG" "dist/SGB-Juicer.exe#생기부착즙기.exe" --repo "$env:GH_REPO" --clobber
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  mirror:
+    # 예비 경로: 일부 학교·통신사 망은 release-assets.githubusercontent.com을 막는다.
+    # 같은 exe를 gh-pages 브랜치(GitHub Pages)에 최신 1개만 올린다(기록을 매번 덮어써 저장소가 커지지 않게).
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download executable
+        uses: actions/download-artifact@v4
+        with:
+          name: sgb-juicer-windows
+          path: dist
+
+      - name: Publish to gh-pages
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          ver="${TAG#v}"
+          mkdir site && cd site
+          cp "../dist/생기부착즙기.exe" "SGB-Juicer-$ver.exe"
+          touch .nojekyll
+          echo "<!doctype html><meta charset=utf-8><title>생기부 착즙기</title><p>생기부 착즙기 v$ver 예비 내려받기: <a href=\"SGB-Juicer-$ver.exe\">SGB-Juicer-$ver.exe</a></p>" > index.html
+          sha256sum "SGB-Juicer-$ver.exe"
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "mirror $TAG"
+          git push -f "https://x-access-token:${TOKEN}@github.com/${REPO}.git" gh-pages

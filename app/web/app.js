@@ -235,6 +235,19 @@
     return p.then((v) => { ok.disabled = false; return v && inp.value.trim() === TYPED_WORD; });
   }
 
+  // 엑셀 시트 고르기: 내용 있는 시트가 여럿일 때. multi면 여러 개(명렬), 아니면 하나. 고른 시트 이름(배열) 또는 null.
+  async function pickSheets(info, multi) {
+    const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const firstFull = info.sheets.reduce((best, x, i) => (x.rows > (info.sheets[best] || { rows: 0 }).rows ? i : best), -1); // 줄이 가장 많은 시트
+    const items = info.sheets.map((x, i) => `<label class="sheet-pick${x.rows ? '' : ' empty'}"><input type="${multi ? 'checkbox' : 'radio'}" name="shPick" value="${i}"${x.rows ? '' : ' disabled'}${(multi ? x.rows : i === firstFull) ? ' checked' : ''}>`
+      + `<b>${esc(x.name)}</b> <span class="muted">${x.rows ? `${x.rows}줄` : '빈 시트'}</span>${x.first ? `<div class="sheet-first">${esc(x.first)}</div>` : ''}</label>`).join('');
+    const html = `<div><b>${esc(info.file)}</b>에 시트가 여러 개 있습니다. ${multi ? '읽을 시트를 모두 고르세요(시트마다 명렬 하나로 읽습니다).' : '읽을 시트를 하나 고르세요.'}</div><div class="sheet-list">${items}</div>`;
+    const ok = await modal(html, true, true, '읽기', '취소');
+    const picked = [...document.querySelectorAll('input[name=shPick]:checked')].map((x) => info.sheets[+x.value].name);
+    if (!ok || !picked.length) return null;
+    return picked;
+  }
+
   function openSheet(build) {
     const box = $('sheetBox');
     box.innerHTML = '';
@@ -816,8 +829,17 @@
     async function addFiles() {
       const r = await call('roster_from_xlsx');
       if (!r) return;
-      if (r.errors && r.errors.length) alertBox('읽지 못한 파일이 있습니다.\n' + r.errors.join('\n'));
-      await addParsed(r.files, r.files.length === 1 ? r.files[0].file : `파일 ${r.files.length}개`, false);
+      const files = [...r.files];
+      const errors = [...(r.errors || [])];
+      for (const a of r.ask || []) { // 시트가 여러 개인 파일: 시트를 골라 다시 읽기
+        const sheets = await pickSheets(a, true);
+        if (!sheets) continue;
+        const x = await call('roster_from_xlsx', a.token, sheets);
+        if (x) { files.push(...x.files); errors.push(...(x.errors || [])); }
+      }
+      if (errors.length) alertBox('읽지 못한 파일이 있습니다.\n' + errors.join('\n'));
+      if (!files.length) return;
+      await addParsed(files, files.length === 1 ? files[0].file : `파일 ${files.length}개`, false);
     }
     // 다른 담당의 명렬(활성 학생만, 전출 등 비활성 학생은 빼고)을 한 묶음으로
     async function addCopy() {
@@ -2436,7 +2458,11 @@
         const readBtn = el('button', { type: 'button', class: 'primary', text: '열·학생 연결 확인 →' });
         readBtn.addEventListener('click', async () => { lastText = ta.value; const r = await call('existing_parse', gid, item, ta.value, false); if (r) preview(r); });
         foot.append(el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }),
-          el('button', { type: 'button', text: '📂 xlsx 불러오기', onclick: async () => { const r = await call('existing_parse', gid, item, null, true); if (r) { lastText = ''; preview(r); } } }), readBtn);
+          el('button', { type: 'button', text: '📂 xlsx 불러오기', onclick: async () => {
+            let r = await call('existing_parse', gid, item, null, true);
+            if (r && r.sheets) { const sh = await pickSheets(r, false); r = sh ? await call('existing_parse', gid, item, null, true, r.token, sh[0]) : null; }
+            if (r) { lastText = ''; preview(r); }
+          } }), readBtn);
         setTimeout(() => ta.focus(), 50);
       };
       const preview = async (pz) => {
@@ -3589,7 +3615,12 @@
         el('p', { text: '자료를 가져오세요. 엑셀에서 학생 칸과 내용 칸을 드래그해 복사하면 셀마다 기록 한 건으로 나눕니다.' }),
         el('div', { class: 'src-btns' }, [
           el('button', { type: 'button', class: 'primary', text: '📋 엑셀 붙여넣기(클립보드)', onclick: async () => { const c = await api.read_clipboard(); const t = c && c.ok ? c.text : ''; if (!t.trim()) { toast('클립보드가 비어 있습니다. 아래 칸에 직접 붙여넣어도 됩니다.'); ta.focus(); return; } loadSource(() => call('inbox_source_text', b.id, t)); } }),
-          el('button', { type: 'button', text: '📂 xlsx 불러오기', onclick: () => loadSource(() => call('inbox_source_xlsx', b.id)) }),
+          el('button', { type: 'button', text: '📂 xlsx 불러오기', onclick: () => loadSource(async () => {
+            const r = await call('inbox_source_xlsx', b.id);
+            if (!r || !r.sheets) return r;
+            const sh = await pickSheets(r, false);
+            return sh ? call('inbox_source_xlsx', b.id, r.token, sh[0]) : null;
+          }) }),
           el('button', { type: 'button', text: '🖨 스캔 PDF (CLOVA OCR)', onclick: () => startScanPick(b) }),
         ]),
         ta,
@@ -3604,22 +3635,21 @@
       const g = o.orient === 'cols' ? IB.raw[0].map((_, j) => IB.raw.map((r) => r[j] || '')) : IB.raw.map((r) => r);
       const width = Math.max(...g.map((r) => r.length));
       const first = g[o.header ? 1 : 0] || [];
-      return Array.from({ length: width }, (_, j) => [j, `${o.orient === 'cols' ? `${j + 1}행` : `${colName(j)}열`}: ${(first[j] || '').slice(0, 8)}`]);
+      const head = o.header ? g[0] || [] : first;
+      return Array.from({ length: width }, (_, j) => [j, `${o.orient === 'cols' ? `${j + 1}행` : `${colName(j)}열`} ${(head[j] || '').replace(/_x000D_/g, '').replace(/\s+/g, ' ').slice(0, 12)}`]);
     };
-    const pick = (key, label) => el('label', {}, [label, el('select', { onchange: (e) => { o[key] = e.target.value === '' ? null : +e.target.value; renderBatch(); } },
-      [el('option', { value: '', text: '(없음)' }), ...lineOpts().map(([v, t]) => el('option', { value: v, text: t, selected: o[key] === v }))])]);
     const ctrl = el('div', { class: 'map-row' }, [seg('structure', [['multi', '여러 학생에게'], ['single', '한 학생에게 여러 건']])]);
     if (o.structure === 'single') {
       ctrl.append(el('label', {}, ['학생', el('select', { onchange: (e) => { o.student_no = e.target.value; renderBatch(); } }, [el('option', { value: '', text: '학생 고르기' }), ...members.map((x) => el('option', { value: x.student_no, text: `${x.student_no} ${x.name}`, selected: o.student_no === x.student_no }))])]),
         el('span', { text: '읽는 순서' }), seg('order', [['row', '행 우선(→)'], ['col', '열 우선(↓)']]));
     } else {
       ctrl.append(seg('orient', [['rows', '한 행이 한 학생'], ['cols', '한 열이 한 학생']]),
-        el('button', { type: 'button', text: '가로↔세로 바꾸기', onclick: () => { o.orient = o.orient === 'cols' ? 'rows' : 'cols'; o.no_idx = null; o.name_idx = null; renderBatch(); } }),
-        pick('no_idx', '학번'), pick('name_idx', '이름'));
+        el('button', { type: 'button', text: '가로↔세로 바꾸기', onclick: () => { o.orient = o.orient === 'cols' ? 'rows' : 'cols'; o.no_idx = null; o.name_idx = null; o.roles = null; renderBatch(); } }));
     }
-    ctrl.append(el('label', {}, [el('input', { type: 'checkbox', checked: !!o.header, onchange: (e) => { o.header = e.target.checked; renderBatch(); } }), '첫 줄은 날짜·회차 제목']));
+    ctrl.append(el('label', {}, [el('input', { type: 'checkbox', checked: !!o.header, onchange: (e) => { o.header = e.target.checked; o.roles = null; renderBatch(); } }), '첫 줄은 머리글(날짜·회차 제목)']));
     body.appendChild(ctrl);
-    if (o.structure === 'multi' && o.found === false && o.no_idx == null && o.name_idx == null) body.appendChild(el('div', { class: 'warn', text: '학번·이름 줄을 자동으로 찾지 못했습니다. 위에서 직접 고르거나, 한 학생의 자료라면 [한 학생에게 여러 건]을 고르세요.' }));
+    const roleBox = el('div', {});
+    if (o.structure === 'multi') body.appendChild(roleBox);
     const left = el('div', { class: 'prev-box' });
     const right = el('div', { class: 'prev-box mk-list' });
     const summary = el('span', {});
@@ -3638,14 +3668,20 @@
       const r = await call('inbox_preview', b.id, o);
       if (!r) return;
       IB.preview = r.rows;
+      if (o.structure === 'multi') {
+        if (!o.roles) { o.roles = r.roles || {}; o.neis = !!r.neis; }
+        renderRoles(roleBox, o, lineOpts(), r.rows);
+      }
+      const roleOf = (k) => (o.structure === 'multi' && o.roles ? o.roles[String(k)] || '' : '');
       // 셀 색: 학번·이름 줄, 제목 줄, 학생별 내용, 빈 칸
       const lineOf = {};
       r.rows.forEach((x) => { lineOf[x.source_ref] = x.line; });
       const t = el('table', { class: 'grid-prev' });
       const width = Math.max(...IB.raw.map((x) => x.length));
-      t.appendChild(el('tr', {}, [el('th', { text: '' }), ...Array.from({ length: width }, (_, j) => el('th', { text: colName(j) }))]));
+      const badge = (k) => { const rl = roleOf(k); return rl ? el('span', { class: `role-badge r-${rl}`, text: IB_ROLE[rl] }) : null; };
+      t.appendChild(el('tr', {}, [el('th', { text: '' }), ...Array.from({ length: width }, (_, j) => el('th', { class: o.orient !== 'cols' && o.structure === 'multi' && !roleOf(j) ? 'c-off' : '' }, [colName(j), o.orient !== 'cols' ? badge(j) : null]))]));
       IB.raw.forEach((row, i) => {
-        const tr = el('tr', {}, [el('th', { text: String(i + 1) })]);
+        const tr = el('tr', {}, [el('th', { class: o.orient === 'cols' && o.structure === 'multi' && !roleOf(i) ? 'c-off' : '' }, [String(i + 1), o.orient === 'cols' ? badge(i) : null])]);
         for (let j = 0; j < width; j++) {
           const v = row[j] || '';
           const ref = `${colName(j)}${i + 1}`;
@@ -3653,15 +3689,16 @@
           const lineIdx = o.orient === 'cols' ? j : i;
           const posIdx = o.orient === 'cols' ? i : j;
           if (o.header && lineIdx === 0 && (o.structure === 'multi' || i === 0)) cls = 'c-head';
-          else if (o.structure === 'multi' && (posIdx === o.no_idx || posIdx === o.name_idx)) cls = 'c-id';
+          else if (o.structure === 'multi' && IB_ID_ROLES.includes(roleOf(posIdx))) cls = `c-id r-${roleOf(posIdx)}`;
           else if (ref in lineOf) cls = `c-l${(lineOf[ref] || 0) % 4}`;
+          else if (o.structure === 'multi' && !roleOf(posIdx)) cls = 'c-off';
           else if (!v) cls = 'c-skip';
           tr.appendChild(el('td', { class: cls, title: v, text: v }));
         }
         t.appendChild(tr);
       });
       left.appendChild(t);
-      r.rows.forEach((x) => right.appendChild(el('div', { class: 'mk' }, [el('b', { text: o.structure === 'single' ? (members.find((mm) => mm.student_no === o.student_no) || {}).name || '(학생 고르기)' : `${x.ext_no || '학번?'} ${x.ext_name || ''}`.trim() }),
+      r.rows.forEach((x) => right.appendChild(el('div', { class: 'mk' }, [el('b', { text: o.structure === 'single' ? (members.find((mm) => mm.student_no === o.student_no) || {}).name || '(학생 고르기)' : `${x.ext_no || x.ext_cls || '학번?'} ${x.ext_name || ''}`.trim() }),
         el('span', { class: 'tag', text: x.label }), x.date ? el('span', { class: 'muted', text: x.date + ' ' }) : null, x.content.slice(0, 70) + (x.content.length > 70 ? '…' : '')])));
       if (!r.rows.length) right.appendChild(el('p', { class: 'muted', text: '만들어질 기록이 없습니다.' }));
       const students = new Set(r.rows.map((x) => (o.structure === 'single' ? 's' : `${x.line}`))).size;
@@ -3670,6 +3707,34 @@
       summary.append(el('b', { text: `${o.structure === 'single' ? 1 : students}명 / ${r.rows.length}건 생성 예정` }), el('span', { class: 'muted', text: ` · 빈 셀 ${empty}개 제외 · 확정 전에는 항목에 아무것도 들어가지 않습니다` }));
       go.disabled = !r.rows.length || (o.structure === 'single' && !o.student_no);
     })();
+  }
+  // 인박스 열 역할: 열(한 열이 한 학생이면 행)마다 학번·학년·반·번호·반/번호·이름·학적변동·내용·안 씀
+  const IB_ROLE = { student_no: '학번', grade: '학년', class_no: '반', number: '번호', clsnum: '반/번호', name: '이름', change: '학적변동', content: '내용' };
+  const IB_ID_ROLES = ['student_no', 'grade', 'class_no', 'number', 'clsnum', 'name', 'change'];
+  function renderRoles(box, o, lines, rows) {
+    box.innerHTML = '';
+    if (o.neis) box.appendChild(el('div', { class: 'info neis-note', text: '나이스 파일로 알아봤어요. 학년·반/번호·성명·특기사항 열을 맞췄고, 반/번호(1/1)는 반·번호로 나눠 명렬과 맞춥니다. 학생개인번호는 학번이 아니라서 쓰지 않습니다.' }));
+    const roles = o.roles || {};
+    const has = (r) => Object.values(roles).includes(r);
+    if (has('student_no') && (has('grade') || has('class_no') || has('number') || has('clsnum'))) box.appendChild(el('div', { class: 'muted small-note', text: '학번과 학년·반·번호를 함께 고르면 둘 다 맞는지 확인합니다. 보통은 한쪽만 있으면 됩니다.' }));
+    const sample = rows.find((x) => x.ext_cls);
+    const grid = el('div', { class: 'role-grid' });
+    lines.forEach(([j, label]) => {
+      const cur = roles[String(j)] || '';
+      const sel = el('select', { class: cur ? `r-${cur}` : '', onchange: (e) => {
+        const v = e.target.value;
+        const next = { ...roles };
+        if (v && v !== 'content') Object.keys(next).forEach((k) => { if (next[k] === v) delete next[k]; }); // 내용 말고는 한 열만
+        if (v) next[String(j)] = v; else delete next[String(j)];
+        o.roles = next; o.neis = false;
+        renderBatch();
+      } }, [el('option', { value: '', text: '안 씀' }), ...Object.entries(IB_ROLE).map(([k, t]) => el('option', { value: k, text: t, selected: cur === k }))]);
+      grid.appendChild(el('label', { class: 'role-cell' + (cur ? '' : ' off') }, [el('span', { class: 'role-name', text: label }), sel]));
+    });
+    box.append(el('div', { class: 'col-label', text: '열 고르기 — 학생을 찾을 열(학번 또는 학년·반·번호, 이름)과 내용 열' }), grid);
+    if (sample) box.appendChild(el('div', { class: 'muted small-note', text: `읽은 예: ${sample.ext_cls}${sample.ext_name ? ' ' + sample.ext_name : ''}` }));
+    if (!Object.values(roles).some((r) => IB_ID_ROLES.includes(r) && r !== 'change')) box.appendChild(el('div', { class: 'warn', text: '학생을 찾을 열(학번·이름 또는 학년·반·번호)을 골라 주세요. 한 학생의 자료라면 [한 학생에게 여러 건]을 고르세요.' }));
+    else if (!has('content')) box.appendChild(el('div', { class: 'warn', text: '내용 열을 하나 이상 골라 주세요.' }));
   }
   async function loadSource(fn) {
     const r = await fn();
@@ -3714,7 +3779,7 @@
         r.state === 'suggested' ? el('button', { type: 'button', class: 'small', text: '확정', onclick: async () => { if (await mutate('inbox_confirm_suggested', b.id, [r.id])) loadBatch(); } }) : null]);
       const holder = el('td', {});
       const tr = el('tr', { class: r.state === 'excluded' ? 'row-excluded' : (r.state === 'none' || r.state === 'suggested') ? 'row-pending' : '' }, [
-        holder, el('td', { text: r.source_ref }), el('td', { text: `${r.ext_no || '-'} ${r.ext_name || ''}` }), el('td', {}, [sel]), stateTd,
+        holder, el('td', { text: r.source_ref }), el('td', { text: `${r.ext_no || r.ext_cls || '-'} ${r.ext_name || ''}` }), el('td', {}, [sel]), stateTd,
         el('td', {}, [el('div', { class: 'snip', text: b.source === 'scan' ? r.content : `[${r.label}${r.date ? ' ' + r.date : ''}] ${r.content}` }),
           r.pages ? el('button', { type: 'button', class: 'small', text: '원본 보기', onclick: () => showOriginal(b.id, r.pages.split(',')) }) : null]),
         el('td', {}, [r.state === 'excluded'
@@ -4790,7 +4855,8 @@
         ocrEvent(ev);
         break;
       case 'update_error':
-        $('updateText').textContent = `업데이트 실패: ${ev.message} (자세한 기록: 자료 폴더의 업데이트_기록.txt)`;
+        $('updateText').textContent = `업데이트 실패: ${ev.message} (자세한 기록: 자료 폴더의 업데이트_기록.txt) `;
+        addTo($('updateText'), el('button', { type: 'button', class: 'link', text: '릴리스 페이지 열기', onclick: () => api.open_url('https://github.com/kkchori511/sgb-juicer/releases/latest') }));
         $('updateNowBtn').disabled = false;
         break;
     }
