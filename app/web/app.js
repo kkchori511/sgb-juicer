@@ -1594,9 +1594,13 @@
   function modelName(sel) { const o = sel && sel.selectedOptions && sel.selectedOptions[0]; return o ? o.textContent : '-'; }
   function aiConfirm(title, rows, warn) {
     const html = `<div class="ai-conf"><b>${escHtml(title)}</b> — AI로 실행할까요?<table>${rows.filter(Boolean).map(([k, v]) => `<tr><th>${escHtml(k)}</th><td>${escHtml(v)}</td></tr>`).join('')}</table>`
+      + `<label class="ai-extra-label" for="aiExtra">이번 추가 요구 사항 <span class="muted">(선택 · 이번 실행에만 · 저장된 지침은 그대로)</span></label>`
+      + `<textarea id="aiExtra" rows="2" maxlength="1000" placeholder="예: 숫자는 빼 줘 / 탐구 과정을 더 강조 / 두 문장으로 짧게"></textarea>`
       + `<p class="hint">명렬의 학번·이름은 따로 보내지 않습니다. 다만 기록 본문에 적힌 이름 등은 그대로 보내지니 확인하세요. 실행하면 크레딧이 듭니다.${warn ? `<br>${escHtml(warn)}` : ''}</p></div>`;
     $('modalOk').classList.add('ai-btn');
-    return modal(html, true, true, 'AI 실행', '취소').finally(() => $('modalOk').classList.remove('ai-btn'));
+    // 반환: 취소면 null, 실행이면 { extra }(추가 요구 사항)
+    return modal(html, true, true, 'AI 실행', '취소').then((ok) => (ok ? { extra: ($('aiExtra') ? $('aiExtra').value : '').trim() } : null))
+      .finally(() => $('modalOk').classList.remove('ai-btn'));
   }
   function aiProgress(title, total, onStop) {
     let box = $('aiProg');
@@ -1657,9 +1661,17 @@
     };
   }
   // jobs: [{ label, run: () => api 결과 }] — api를 직접 불러 오류도 진행 창에서 모아 보여 준다.
-  async function aiRun({ title, rows, warn, jobs, summary, skipConfirm, before, after }) {
-    if (!skipConfirm && !(await aiConfirm(title, rows, warn))) return null;
+  async function aiRun({ title, rows, warn, jobs, summary, skipConfirm, before, after, extra }) {
+    if (!skipConfirm) {
+      const conf = await aiConfirm(title, rows, warn);
+      if (!conf) return null;
+      extra = conf.extra;
+    }
     if (before && !(await before())) return null; // [AI 실행]을 누른 뒤에만 설정을 저장(취소하면 아무것도 바뀌지 않음)
+    await api.ai_extra_set(extra || ''); // 이번 실행에만: AI 지시 끝에 덧붙임(끝나면 지움)
+    try { return await aiRunJobs({ title, jobs, summary, after }); } finally { await api.ai_extra_set(''); }
+  }
+  async function aiRunJobs({ title, jobs, summary, after }) {
     let stop = false;
     const pg = aiProgress(title, jobs.length, jobs.length > 1 ? () => { stop = true; } : null);
     const results = [];
@@ -2042,7 +2054,7 @@
   }
   function candEl(cd, locked, extra) {
     return el('div', { class: 'cand' + (cd.locked ? ' locked' : '') }, [
-      el('div', { class: 'cand-head' }, [el('b', { text: OP_LABEL[cd.op] || cd.op }), stdBadge(cd.meta), cd.created_at.slice(5, 16), cd.meta.model ? `· ${cd.meta.model}` : '',
+      el('div', { class: 'cand-head' }, [el('b', { text: OP_LABEL[cd.op] || cd.op }), stdBadge(cd.meta), cd.meta.extra ? el('span', { class: 'badge extra-badge', title: cd.meta.extra, text: `추가 요구: ${cd.meta.extra.length > 24 ? cd.meta.extra.slice(0, 24) + '…' : cd.meta.extra}` }) : null, cd.created_at.slice(5, 16), cd.meta.model ? `· ${cd.meta.model}` : '',
         cd.meta.ratios ? `· 비율 ${cd.meta.ratios.join('/')}%` : '', el('span', { class: 'spacer' }), bytesEl(cd.bytes, R.target)]),
       el('div', { class: 'cand-body', text: cd.text }),
       el('div', { class: 'rcard-foot' }, [...(extra || []), el('span', { class: 'spacer' }),
@@ -3779,14 +3791,15 @@
   async function refineRows(rows, modelIndex, btn, modelLabel) {
     if (!rows.length) return;
     const b = IB.view.batch;
-    if (!(await aiConfirm('인박스 자료 정제', [['묶음', `${b.title} → ${slotLabel(b.group_id, b.item)}`], ['대상', `${rows.length}건 (${new Set(rows.map((r) => r.student_no)).size}명)`], ['모델', modelLabel || '-']],
-      '원문은 그대로 남습니다. 정제 후보는 행마다 최근 3개까지 보관하고, 넘으면 가장 오래된 후보를 지웁니다. 새 정제 결과를 보낼 내용으로 바로 골라 둡니다.'))) return;
+    const conf = await aiConfirm('인박스 자료 정제', [['묶음', `${b.title} → ${slotLabel(b.group_id, b.item)}`], ['대상', `${rows.length}건 (${new Set(rows.map((r) => r.student_no)).size}명)`], ['모델', modelLabel || '-']],
+      '원문은 그대로 남습니다. 정제 후보는 행마다 최근 3개까지 보관하고, 넘으면 가장 오래된 후보를 지웁니다. 새 정제 결과를 보낼 내용으로 바로 골라 둡니다.');
+    if (!conf) return;
     if (btn) { btn.disabled = true; btn.classList.add('busy-btn'); }
     await jobStart();
     let out;
     try {
       const failedIds = [];
-      out = await aiRun({ title: '인박스 자료 정제', skipConfirm: true,
+      out = await aiRun({ title: '인박스 자료 정제', skipConfirm: true, extra: conf.extra,
         jobs: rows.map((r) => ({ label: `${r.name || r.student_no || ''} ${(r.content || '').slice(0, 16)}`.trim(), run: () => api.ai_inbox_row(r.id, modelIndex), onFail: () => failedIds.push(r.id) })),
         after: (o) => { out = o; o.retry = [...failedIds, ...rows.slice(o.done + o.fail).map((r) => r.id)]; } });
     } finally { await jobEnd(); if (btn && btn.isConnected) { btn.disabled = false; btn.classList.remove('busy-btn'); } }
@@ -4195,14 +4208,16 @@
     if (m) return { date: (m[1] || '').replace(/\s+/g, '').replace('.', '/'), title: m[2].trim(), content: m[3].trim() };
     const d = /^\s*(\d{1,2}\s*[/.]\s*\d{1,2})\.?\s*·\s*(.*)$/.exec(ln);
     if (d) return { date: d[1].replace(/\s+/g, '').replace('.', '/'), title: d[2].trim(), content: '' };
-    return { date: '', title: '', content: ln.trim() };
+    const c = /^\s*—\s+(.*)$/.exec(ln); // 내용만 있는 줄
+    if (c) return { date: '', title: '', content: c[1].trim() };
+    return { date: '', title: ln.trim(), content: '' }; // 구분이 없으면 제목으로(필요하면 열 바꾸기)
   }
   function outlineLineOf(r) {
     const head = [r.date.trim(), r.title.trim()].filter(Boolean).join(' · ');
     const c = r.content.trim().replace(/\s*\n\s*/g, ' ');
-    return head && c ? `${head} — ${c}` : head || c;
+    return head && c ? `${head} — ${c}` : head || (c ? `— ${c}` : '');
   }
-  // 한글·엑셀에서 복사한 표(탭으로 칸 구분) → 줄들. 열이 3개 이상이면 날짜·제목·내용(나머지), 2개면 제목·내용, 1개면 내용.
+  // 한글·엑셀에서 복사한 표(탭으로 칸 구분) → 줄들. 열이 3개 이상이면 날짜·제목·내용(나머지), 2개면 제목·내용, 1개면 제목.
   function parseOutlineTable(text) {
     return String(text || '').replace(/\r/g, '').split('\n').filter((l) => l.trim()).map((l) => {
       const c = l.split('\t').map((x) => x.trim());
@@ -4253,7 +4268,20 @@
     const syncFromRows = () => save(rows.map(outlineLineOf).filter(Boolean).join('\n'));
     const drawTable = () => {
       tbl.innerHTML = '';
-      tbl.appendChild(el('tr', {}, [el('th', { text: '날짜(월/일)' }), el('th', { text: '제목' }), el('th', { text: '활동 내용' }), el('th', {})]));
+      // 열 머리: [⇄](오른쪽 열과 내용 바꾸기)·[비우기](이 열 내용 지우기) — 둘 다 [되돌리기] 가능
+      const COLS = [['date', '날짜(월/일)'], ['title', '제목'], ['content', '활동 내용']];
+      const colOp = (msg, fn) => {
+        const before = rows.map((r) => ({ ...r }));
+        fn();
+        syncFromRows(); drawTable();
+        actionToast(msg, '되돌리기', () => { rows = before; syncFromRows(); drawTable(); toast('되돌렸습니다.'); }, 20000);
+      };
+      tbl.appendChild(el('tr', {}, [...COLS.map(([k, label], ci) => el('th', {}, [el('div', { class: 'o-colhead' }, [
+        el('span', { text: label }),
+        ro ? null : el('button', { type: 'button', class: 'link small', title: `이 열을 비웁니다(모든 줄의 ${label})`, text: '비우기', onclick: () => colOp(`'${label}' 열을 비웠습니다.`, () => rows.forEach((r) => { r[k] = ''; })) }),
+        ro || ci === COLS.length - 1 ? null : el('button', { type: 'button', class: 'o-swap', title: `'${label}' 열과 '${COLS[ci + 1][1]}' 열의 내용을 서로 바꿉니다`, text: '⇄',
+          onclick: () => colOp(`'${label}'과 '${COLS[ci + 1][1]}' 열을 바꿨습니다.`, () => rows.forEach((r) => { const k2 = COLS[ci + 1][0]; [r[k], r[k2]] = [r[k2], r[k]]; })) }),
+      ].filter(Boolean))])), el('th', {})]));
       rows.forEach((r, i) => {
         const inp = (k, ph) => {
           const x = el(k === 'content' ? 'textarea' : 'input', { type: 'text', rows: 1, value: r[k], placeholder: ph, disabled: ro, class: `o-${k}` });
@@ -4362,7 +4390,7 @@
         if (!rows.length) rows = [{ date: '', title: '', content: '' }];
         drawTable();
         tools.append(pasteTable, addRow);
-        body.append(tbl, el('p', { class: 'hint', text: '한글·엑셀 표를 복사해 칸에 붙여넣거나 [📋 표 붙여넣기]를 누르면 날짜·제목·활동 내용 칸에 맞춰 들어갑니다(열이 2개면 제목·내용).' }));
+        body.append(tbl, el('p', { class: 'hint', text: '한글·엑셀 표를 복사해 칸에 붙여넣거나 [📋 표 붙여넣기]를 누르면 날짜·제목·활동 내용 칸에 맞춰 들어갑니다(열이 2개면 제목·내용, 1개면 제목). 칸이 어긋나면 열 머리의 [⇄]로 옆 열과 바꾸고, [비우기]로 한 열을 지웁니다(둘 다 되돌리기 가능).' }));
       } else {
         ta.value = text;
         tools.append(

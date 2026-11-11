@@ -46,6 +46,20 @@ def tidy():
     assert "발표" in r["new_words"] and "포스터" not in r["new_words"], r["new_words"]
     assert not api.outline_tidy(hr, "behavior", "x")["ok"]
     assert new_words("과학의 날", "과학의 날") == []
+    # 이번 추가 요구 사항: 이번 실행에만 지시 끝에 붙고, 지우면 빠짐
+    seen = []
+    openrouter.chat = lambda key, model, system, user, privacy=False: (seen.append(system) or "3/1 · 입학식 — 참석", 0.0)
+    ok(api.ai_extra_set("날짜는 빼 줘"))
+    ok(api.outline_tidy(hr, "autonomy", "입학식 참석"))
+    assert "[이번 추가 요구 사항" in seen[-1] and "날짜는 빼 줘" in seen[-1] and "항상 우선한다" in seen[-1]
+    ok(api.ai_extra_set(""))
+    ok(api.outline_tidy(hr, "autonomy", "입학식 참석"))
+    assert "[이번 추가 요구 사항" not in seen[-1]
+    # 결과 후보 기록(meta)에 남음
+    ok(api.ai_extra_set("짧게"))
+    assert api._xm({"model": "m"}) == {"model": "m", "extra": "짧게"}
+    ok(api.ai_extra_set(""))
+    assert api._xm({"model": "m"}) == {"model": "m"}
     print("FILL TIDY OK")
 
 

@@ -824,3 +824,12 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 }
 .ib-item.active .t, .gcard.active .g-name { color: var(--sel); }
 .ib-item, .gcard, .tv-tag { transition: background-color 0.12s, box-shadow 0.12s, transform 0.12s; }
+
+/* AI 실행 확인 창: 이번 추가 요구 사항 */
+.ai-conf .ai-extra-label { display: block; font-weight: 700; margin: 10px 0 4px; }
+.ai-conf #aiExtra { width: 100%; resize: vertical; }
+.badge.extra-badge { background: #f5f3ff; border-color: #c4b5fd; color: #5b21b6; }
+.o-colhead { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.o-colhead .link { padding: 0 2px; font-weight: 600; color: var(--muted); }
+.o-colhead .link:hover { color: var(--danger); }
+.o-swap { margin-left: auto; padding: 1px 8px; font-size: 13px; border-radius: 999px; }

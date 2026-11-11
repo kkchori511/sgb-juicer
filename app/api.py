@@ -81,6 +81,7 @@ class Api:
         self._update_info = None
         self._run_cost = 0.0
         self._ai_keys = set()
+        self._ai_extra = ""  # 이번 실행에만 쓰는 추가 요구 사항(ai_extra_set)
         self._ai_lock = threading.Lock()
         self._ocr_stop = threading.Event()
         self._jobs = 0  # 화면에서 진행 중인 일괄 작업(일괄 종합·인박스 정제 등)
@@ -837,7 +838,22 @@ class Api:
             raise db.DbError("OpenRouter API 키가 없습니다. 설정에서 넣어 주세요.")
         return cfg, model
 
+    # 이번 실행에만 쓰는 교사의 추가 요구 사항(AI 실행 확인 창에서 입력). 저장된 프롬프트는 바꾸지 않는다.
+    @safe
+    def ai_extra_set(self, text=None):
+        self._ai_extra = (text or "").strip()[:1000]
+        return {}
+
+    def _xm(self, meta):
+        """결과 기록(meta)에 이번 추가 요구 사항을 남긴다."""
+        x = getattr(self, "_ai_extra", "")
+        return {**(meta or {}), "extra": x} if x else meta
+
     def _call_ai(self, key, model, system, user, privacy):
+        x = getattr(self, "_ai_extra", "")
+        if x:
+            system = (system + "\n\n[이번 추가 요구 사항 — 교사가 이번 실행에만 준 요청]\n<요청>\n" + x + "\n</요청>\n"
+                      "- 위 요청을 반영하되, 앞의 규칙(학번·이름 쓰지 않기, 분량, 없는 사실 지어내지 않기, 원문 보존, 출력 형식)이 항상 우선한다.")
         text, cost = openrouter.chat(key, model, system, user, privacy)
         if not text.strip():
             raise openrouter.LlmError("AI가 빈 결과를 돌려주었습니다. 다시 시도하거나 다른 모델을 고르세요.")
@@ -877,7 +893,7 @@ class Api:
         try:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, r["content"], cfg["privacy_block"])
             meta = {"model": model, "op": op, "prompt": pr["prompt"], "example": pr["example"], "record_ids": [r["id"]]}
-            nid, dropped = rec.add_result(r["group_id"], r["item"], r["student_no"], op, text, meta, cost, record_id=r["id"])
+            nid, dropped = rec.add_result(r["group_id"], r["item"], r["student_no"], op, text, self._xm(meta), cost, record_id=r["id"])
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
         finally:
             self._release(key)
@@ -915,7 +931,7 @@ class Api:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, user, cfg["privacy_block"])
             meta = {"model": model, "op": "synth", "prompt": pr["prompt"], "example": pr["example"], "target": target,
                     "record_ids": [r["id"] for r in chosen], "ratios": [round(q * 100, 1) for q in ratios], "sum_check": check, **std_meta}
-            nid, dropped = rec.add_result(gid, item, sno, "synth", text, meta, cost)
+            nid, dropped = rec.add_result(gid, item, sno, "synth", text, self._xm(meta), cost)
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost, "ratios": meta["ratios"]})
         finally:
             self._release(key)
@@ -974,7 +990,7 @@ class Api:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"] + rule, pr["example"], target),
                                        f"(학생관찰기록 없음 — {what}으로만 작성)", cfg["privacy_block"])
             meta.update({"model": model, "op": "synth", "prompt": pr["prompt"], "example": pr["example"], "target": target})
-            nid, dropped = rec.add_result(gid, item, sno, "synth", text, meta, cost)
+            nid, dropped = rec.add_result(gid, item, sno, "synth", text, self._xm(meta), cost)
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
         finally:
             self._release(key)
@@ -1129,7 +1145,7 @@ class Api:
         try:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"], pr["example"], target), f["text"], cfg["privacy_block"])
             meta = {"model": model, "op": "polish", "prompt": pr["prompt"], "example": pr["example"], "target": target, "from": "final"}
-            nid, dropped = rec.add_result(gid, item, sno, "polish", text, meta, cost)
+            nid, dropped = rec.add_result(gid, item, sno, "polish", text, self._xm(meta), cost)
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
         finally:
             self._release(key)
@@ -1463,7 +1479,7 @@ class Api:
         self._guard(key)
         try:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"], pr["example"], 0), r["content"], cfg["privacy_block"])
-            cid = ib.add_cand(r["id"], text, {"model": model, "op": "refine", "prompt": pr["prompt"], "example": pr["example"]}, cost)
+            cid = ib.add_cand(r["id"], text, self._xm({"model": model, "op": "refine", "prompt": pr["prompt"], "example": pr["example"]}), cost)
             ib.use_cand(r["id"], cid)  # 새 후보를 바로 '보낼 내용'으로(다른 후보·원문으로 바꿀 수 있음)
             return {"id": cid, "cost": cost, "run_cost": self._run_cost}
         finally:
