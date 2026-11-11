@@ -49,6 +49,40 @@ def tidy():
     print("FILL TIDY OK")
 
 
+def outage():
+    """OpenRouter 장애·속도 제한 구분(code) — 화면은 이 code면 남은 건을 멈추고 안내 창을 띄운다."""
+    import importlib
+    import requests
+    orr = importlib.reload(openrouter)  # 위에서 바꿔 둔 chat을 원래대로
+    orr.time.sleep = lambda s: None
+
+    class R:
+        def __init__(self, code, body=None): self.status_code, self.ok, self._b = code, code < 400, body or {}
+        def json(self): return self._b
+    seq = []
+    def post(*a, **k):
+        x = seq.pop(0)
+        if isinstance(x, Exception):
+            raise x
+        return x
+    orr.requests.post = post
+    def err(items):
+        seq[:] = items
+        try:
+            orr.chat("sk", "m", "s", "u")
+        except orr.LlmError as e:
+            return e.code, str(e)
+        return None, "ok"
+    assert err([requests.ConnectionError()] * 3)[0] == "service_down"
+    assert err([R(503)] * 3)[0] == "service_down"
+    assert err([R(429)] * 3)[0] == "rate_limited"
+    assert err([R(401, {"error": {"message": "bad key"}})])[0] is None  # 키 문제는 장애가 아님
+    seq[:] = [R(502), R(200, {"choices": [{"message": {"content": "좋음"}}], "usage": {"cost": 0.1}})]
+    assert orr.chat("sk", "m", "s", "u") == ("좋음", 0.1)  # 한 번 실패 뒤 성공
+    print("OUTAGE OK")
+
+
 if __name__ == "__main__":
     main()
     tidy()
+    outage()

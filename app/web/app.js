@@ -1605,7 +1605,10 @@
     const t0 = Date.now();
     const count = el('div', { class: 'ai-prog-count', text: 'AI에 보내는 중…' });
     const time = el('b', { text: '0:00' });
-    const bar = el('div', { class: 'ai-bar' }, [el('span', {})]);
+    // 막대: 끝난 건(파랑)·실패(빨강)·지금 처리 중(빗금이 흐름). 위에 '지금 처리 중 n / 전체 N'
+    const segDone = el('span', { class: 'seg-done' }), segFail = el('span', { class: 'seg-fail' }), segCur = el('span', { class: 'seg-cur' });
+    const bar = el('div', { class: 'ai-bar2' }, [segDone, segFail, segCur]);
+    const barLabel = el('div', { class: 'ai-bar-label', text: `지금 처리 중 1 / 전체 ${total}` });
     let stopped = false;
     const stopBtn = onStop ? el('button', { type: 'button', class: 'btn-danger', title: '지금 처리 중인 건은 끝까지 처리되고(결과·비용 유지), 남은 건은 실행하지 않습니다', text: '다음 건부터 중지',
       onclick: () => { stopped = true; stopBtn.disabled = true; stopBtn.textContent = '중지 예약됨 — 지금 건이 끝나면 멈춥니다'; onStop(); } }) : null;
@@ -1613,7 +1616,7 @@
     const foot = el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), stopBtn]);
     const spin = el('div', { class: 'ai-spin' });
     const wait = el('div', { class: 'muted' }, ['경과 ', time, ' · 멈춘 것이 아니니 기다려 주세요. AI 응답은 보통 수십 초, 느리면 몇 분 걸릴 수 있습니다.']);
-    box.appendChild(el('div', { class: 'ai-prog-card', role: 'dialog', 'aria-live': 'polite' }, [el('h2', { text: title }), spin, count, total > 1 ? bar : null, wait, result, foot]));
+    box.appendChild(el('div', { class: 'ai-prog-card', role: 'dialog', 'aria-live': 'polite' }, [el('h2', { text: title }), spin, count, barLabel, bar, wait, result, foot]));
     box.hidden = false;
     box.setAttribute('aria-modal', 'true');
     $('app').inert = true; $('sheet').inert = true; $('modal').inert = true; // 진행 중 배경 조작·단축키 막기
@@ -1624,8 +1627,12 @@
     const timer = setInterval(tick, 500);
     return {
       set(done, fail, label) {
-        count.textContent = total > 1 ? `${Math.min(done + fail + 1, total)} / ${total}건 처리 중 · 완료 ${done}${fail ? ` · 실패 ${fail}` : ''}${label ? `\n지금: ${label}` : ''}` : `AI에 보내는 중…${label ? ` (${label})` : ''}`;
-        bar.firstChild.style.width = `${Math.round(((done + fail) / total) * 100)}%`;
+        const cur = Math.min(done + fail + 1, total);
+        count.textContent = total > 1 ? `완료 ${done}${fail ? ` · 실패 ${fail}` : ''}${label ? `\n지금: ${label}` : ''}` : `AI에 보내는 중…${label ? ` (${label})` : ''}`;
+        barLabel.textContent = `지금 처리 중 ${cur} / 전체 ${total}`;
+        segDone.style.width = `${(done / total) * 100}%`;
+        segFail.style.width = `${(fail / total) * 100}%`;
+        segCur.style.width = done + fail < total ? `${100 / total}%` : '0';
       },
       // 실패가 있거나 요약을 보여야 하면 창을 남기고 [확인]을 기다린다. 아니면 바로 닫는다.
       finish(errors, summary, ratio) {
@@ -1633,7 +1640,11 @@
         tick();
         if (!errors.length && !summary) { box.hidden = true; unblock(); return Promise.resolve(); }
         spin.remove(); wait.remove();
-        bar.firstChild.style.width = `${Math.round((stopped && ratio !== undefined ? ratio : 1) * 100)}%`;
+        const handled = Math.round((ratio !== undefined ? ratio : 1) * total);
+        segCur.style.width = '0';
+        segFail.style.width = `${(errors.length / total) * 100}%`;
+        segDone.style.width = `${(Math.max(handled - errors.length, 0) / total) * 100}%`;
+        barLabel.textContent = `처리 ${handled} / 전체 ${total}`;
         count.textContent = summary || '끝났습니다.';
         if (errors.length) result.appendChild(el('div', { class: 'danger-text', text: `실패 ${errors.length}건\n${errors.join('\n')}` }));
         foot.innerHTML = '';
@@ -1653,20 +1664,32 @@
     const pg = aiProgress(title, jobs.length, jobs.length > 1 ? () => { stop = true; } : null);
     const results = [];
     const errors = [];
-    let done = 0, fail = 0;
+    let done = 0, fail = 0, down = null;
     for (const j of jobs) {
       if (stop) break;
       pg.set(done, fail, j.label);
       let r;
       try { r = await j.run(); } catch (e) { r = { ok: false, error: String(e) }; }
       if (r && r.ok !== false) { done += 1; results.push(r); setCredits(r); if (j.onDone) j.onDone(r); }
-      else { fail += 1; errors.push(`${j.label ? `${j.label}: ` : ''}${(r && r.error) || '처리하지 못했습니다.'}`); if (j.onFail) j.onFail(r); }
+      else {
+        fail += 1; errors.push(`${j.label ? `${j.label}: ` : ''}${(r && r.error) || '처리하지 못했습니다.'}`); if (j.onFail) j.onFail(r);
+        if (r && (r.code === 'service_down' || r.code === 'rate_limited')) { down = r.code; stop = true; } // 장애·속도 제한: 남은 건은 보내지 않는다
+      }
     }
     const out = { done, fail, stopped: stop, skipped: jobs.length - done - fail, results, errors };
     if (after) after(out);
     const msg = summary ? summary(out) : (jobs.length > 1 && (fail || stop) ? `완료 ${done}건 · 실패 ${fail}건${out.skipped ? ` · 중지로 건너뜀 ${out.skipped}건` : ''}` : '');
     await pg.finish(errors, msg, (done + fail) / jobs.length);
+    if (down) await aiDownBox(down, out.skipped);
     return out;
+  }
+  // OpenRouter 장애(연결 실패·서버 오류)나 계속되는 속도 제한: 남은 건을 멈췄다고 알리고 상태 페이지를 열 수 있게
+  async function aiDownBox(code, skipped) {
+    const rest = skipped ? `<br>남은 ${skipped}건은 보내지 않았습니다(크레딧 쓰지 않음). 나중에 다시 실행하세요.` : '';
+    const html = code === 'rate_limited'
+      ? `<b>⚠ AI 요청이 너무 많아 잠시 막혔습니다(속도 제한).</b><br>잠시 뒤 다시 시도하거나, 위쪽 모델 선택에서 다른 모델(유료 모델 등)을 고르세요. 무료 모델은 제한이 큽니다.${rest}`
+      : `<b>⚠ 지금 OpenRouter(AI 서비스)에 연결되지 않습니다.</b><br>OpenRouter 사이트에 장애가 있거나 학교 인터넷 연결이 끊겼을 수 있습니다. 인터넷이 되는지 확인하고, 아래 [OpenRouter 상태 보기]로 사이트 상태를 확인해 보세요.${rest}`;
+    if (await modal(html, true, true, 'OpenRouter 상태 보기', '확인')) api.open_url('https://status.openrouter.ai');
   }
   const DROP_WARN = '후보가 3개 차 있으면 잠기지 않은 가장 오래된 후보가 지워집니다.';
 

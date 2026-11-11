@@ -609,12 +609,10 @@ input.sec-in { width: 130px; height: 28px; padding: 2px 6px; font-size: 13px; di
 /* v0.15.1 (Codex V15·V16): 선택 표시는 상태 색(초록·파랑)과 겹치지 않게 짙은 회색 + ▶ */
 :root { --sel: #334155; }
 .gcard.active { border-color: var(--sel); box-shadow: 0 0 0 3px rgba(51, 65, 85, 0.22); }
-.gcard.active .g-name::before { content: '▶ '; color: var(--sel); }
 .gtab.active { background: var(--sel); border-color: var(--sel); }
 .gtab.active.is-done { background: var(--sel) !important; border-color: var(--sel) !important; color: #fff; }
 .gtab.active.is-done::before { color: #86efac; }
 .ib-item.active { border-color: var(--sel); box-shadow: 0 0 0 2px rgba(51, 65, 85, 0.25); }
-.ib-item.active .t::after { content: ' ◀ 선택됨'; font-size: 12px; color: var(--sel); font-weight: 700; }
 .ib-item.active.is-done { box-shadow: 0 0 0 2px rgba(51, 65, 85, 0.25); }
 .steps-bar span.active { background: var(--sel); color: #fff; }
 .steps-bar span.skipped { background: var(--surface-2); color: var(--muted); }
@@ -663,7 +661,6 @@ input.sec-in { width: 130px; height: 28px; padding: 2px 6px; font-size: 13px; di
 .tv-tag .cnt { margin-left: auto; font-size: 12px; color: var(--muted); }
 .tv-tag.zero { color: var(--muted); }
 .tv-tag.active { background: #e2e8f0; border-color: var(--sel); box-shadow: inset 3px 0 0 var(--sel); font-weight: 800; }
-.tv-tag.active::before { content: '▶'; font-size: 10px; color: var(--sel); }
 .tv-sep { border-top: 1px solid var(--border); margin: 8px 0; }
 .tv-class { --gc: #475569; border-left: 5px solid var(--gc); border-radius: var(--radius-sm); margin-bottom: 12px; background: var(--surface); }
 .tv-class-head { display: flex; align-items: center; gap: 8px; width: 100%; border: none; border-radius: 0; background: color-mix(in srgb, var(--gc) 12%, white); color: color-mix(in srgb, var(--gc) 75%, black); font-weight: 800; padding: 6px 10px; text-align: left; position: sticky; top: -10px; z-index: 3; }
@@ -808,3 +805,22 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 .outline-tbl .o-content { width: 100%; min-height: 34px; resize: vertical; }
 .outline-body { margin: 8px 0; }
 .added-line mark, .cmp-text mark { background: #fde68a; border-radius: 3px; padding: 0 1px; }
+
+/* AI 진행 막대: 끝난 건·실패·지금 처리 중(빗금이 흐름) */
+.ai-bar-label { font-weight: 800; font-size: 15px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.ai-bar2 { display: flex; height: 12px; border-radius: 999px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--border); margin: 6px 0 4px; }
+.ai-bar2 span { display: block; height: 100%; transition: width 0.3s; width: 0; }
+.ai-bar2 .seg-done { background: var(--st-closed); }
+.ai-bar2 .seg-fail { background: var(--danger); }
+.ai-bar2 .seg-cur { background: repeating-linear-gradient(45deg, #7c3aed 0 8px, #c4b5fd 8px 16px); background-size: 22px 22px; animation: aibar 0.8s linear infinite; }
+@keyframes aibar { from { background-position: 0 0; } to { background-position: 22px 0; } }
+
+/* 선택 표시: 글자(▶·선택됨) 대신 '눌린 버튼' 효과 — 바탕을 한 단계 어둡게(원래 색 위에 겹침), 짙은 테두리, 안쪽 그림자 */
+.ib-item.active, .gcard.active, .tv-tag.active {
+  border-color: var(--sel) !important; border-width: 2px;
+  background-image: linear-gradient(rgba(51, 65, 85, 0.09), rgba(51, 65, 85, 0.09));
+  box-shadow: inset 0 2px 5px rgba(15, 23, 42, 0.22) !important;
+  transform: translateY(1px);
+}
+.ib-item.active .t, .gcard.active .g-name { color: var(--sel); }
+.ib-item, .gcard, .tv-tag { transition: background-color 0.12s, box-shadow 0.12s, transform 0.12s; }

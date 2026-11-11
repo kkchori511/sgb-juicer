@@ -14,7 +14,15 @@ _models_lock = threading.Lock()
 
 
 class LlmError(Exception):
-    pass
+    """code: 'service_down'(연결 실패·시간 초과·서버 오류 — OpenRouter 장애일 수 있음), 'rate_limited'(속도 제한이 계속됨).
+    화면은 이 둘이면 남은 건을 보내지 않고 멈춘 뒤 안내 창을 띄운다."""
+
+    def __init__(self, msg, code=None):
+        super().__init__(msg)
+        self.code = code
+
+
+DOWN = (500, 502, 503, 504, 520, 521, 522, 523, 524)
 
 
 def normalize_model_id(text: str) -> str:
@@ -119,13 +127,16 @@ def chat(key: str, model: str, system: str, user: str, privacy_block: bool = Fal
                 f"{BASE}/chat/completions", headers=_headers(key), json=payload, timeout=300
             )
         except requests.RequestException as e:
-            last = LlmError(f"OpenRouter에 연결하지 못했습니다: {e.__class__.__name__}")
+            last = LlmError(f"OpenRouter에 연결하지 못했습니다({e.__class__.__name__}). 인터넷 연결이나 OpenRouter 상태를 확인해 주세요.", "service_down")
             time.sleep(2 * (attempt + 1))
             continue
-        if res.status_code in (429, 502, 503) and attempt < 2:
-            last = LlmError(f"OpenRouter HTTP {res.status_code}")
-            time.sleep(3 * (attempt + 1))
-            continue
+        if res.status_code == 429 or res.status_code in DOWN:
+            if attempt < 2:
+                time.sleep(3 * (attempt + 1))
+                continue
+            if res.status_code == 429:
+                raise LlmError("속도 제한이 계속됩니다(HTTP 429). 잠시 뒤 다시 시도하거나 다른 모델을 고르세요(무료 모델은 제한이 큽니다).", "rate_limited")
+            raise LlmError(f"OpenRouter 서버가 응답하지 않습니다(HTTP {res.status_code}). 잠시 뒤 다시 시도하거나 OpenRouter 상태를 확인해 주세요.", "service_down")
         try:
             body = res.json()
         except ValueError:
