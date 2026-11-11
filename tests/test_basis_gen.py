@@ -170,10 +170,45 @@ def test_update_warning():
     assert not r["ok"] and "확인했어요" in r["error"], r
 
 
+def test_publish_locked():
+    """Windows에서 폴더 이름 바꾸기가 막혀도(WinError 5) 다시 시도·복사로 백업을 완성한다."""
+    import pathlib
+    real = pathlib.Path.rename
+    calls = {"n": 0}
+
+    def flaky(self, target):  # 처음 두 번 막힘 → 다시 시도로 통과
+        if self.name.startswith(".작성중_") and calls["n"] < 2:
+            calls["n"] += 1
+            raise PermissionError(5, "액세스가 거부되었습니다")
+        return real(self, target)
+
+    def locked(self, target):  # 계속 막힘 → 복사로 게시
+        if self.name.startswith(".작성중_"):
+            raise PermissionError(5, "액세스가 거부되었습니다")
+        return real(self, target)
+
+    old_sleep = backup.time.sleep
+    backup.time.sleep = lambda s: None
+    try:
+        for fn in (flaky, locked):
+            pathlib.Path.rename = fn
+            name = backup.make("업데이트전")
+            pathlib.Path.rename = real
+            p = backup_dir() / name
+            assert (p / backup.DONE).exists() and (p / "2026학년도.sqlite").exists(), list(p.iterdir())
+            assert not (backup_dir() / f".작성중_{name}").exists()
+            assert name in [b["name"] for b in backup.list_backups() if not b["legacy"]]
+        assert calls["n"] == 2
+    finally:
+        pathlib.Path.rename = real
+        backup.time.sleep = old_sleep
+
+
 if __name__ == "__main__":
     test_migration()
     test_prune()
     test_outline_gen()
     test_rules()
     test_update_warning()
+    test_publish_locked()
     print("test_basis_gen OK")

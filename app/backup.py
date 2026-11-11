@@ -9,6 +9,7 @@
 import datetime as dt
 import shutil
 import sqlite3
+import time
 
 from . import db
 from .paths import backup_dir, data_dir
@@ -34,6 +35,26 @@ def _new_name(reason=""):
     return name
 
 
+def _publish(tmp, dest, tries=20, wait=0.5):
+    """작성 중 폴더를 게시 이름으로 바꾼다. Windows에서는 백신·검색 색인이 막 만든 파일을 잡고 있으면
+    폴더 이름 바꾸기가 '액세스 거부'(WinError 5)로 막힌다. 잠시 다시 시도하고, 그래도 안 되면 복사로 게시한다.
+    복사는 완료 표시를 맨 마지막에 써서, 도중에 실패하면 지운다."""
+    for i in range(tries):
+        try:
+            tmp.rename(dest)
+            return
+        except OSError:
+            if i + 1 < tries:
+                time.sleep(wait)
+    try:
+        shutil.copytree(tmp, dest, ignore=shutil.ignore_patterns(DONE))
+        (dest / DONE).write_text("ok", encoding="utf-8")
+    except BaseException:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+    shutil.rmtree(tmp, ignore_errors=True)  # 못 지운 것은 prune이 1시간 뒤 정리
+
+
 def make(reason="", protect=()) -> str:
     """임시 폴더에 다 만든 뒤 이름을 바꿔 게시한다. 도중에 실패하면 목록에 남지 않는다."""
     years = db.list_years()
@@ -50,7 +71,7 @@ def make(reason="", protect=()) -> str:
             if src.is_dir() and any(src.iterdir()):
                 shutil.copytree(src, tmp / "스캔" / str(y))
         (tmp / DONE).write_text("ok", encoding="utf-8")  # 다 만들어진 백업 표시
-        tmp.rename(backup_dir() / name)
+        _publish(tmp, backup_dir() / name)
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
@@ -111,7 +132,7 @@ def before_migration() -> str:
             if sc.is_dir() and any(sc.iterdir()):
                 shutil.copytree(sc, tmp / "스캔" / str(y))
         (tmp / DONE).write_text("ok", encoding="utf-8")
-        tmp.rename(backup_dir() / name)
+        _publish(tmp, backup_dir() / name)
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
         raise

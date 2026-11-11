@@ -1622,7 +1622,11 @@ class Api:
         def run():
             try:
                 self._emit({"type": "update_progress", "stage": "backup"})
-                backup.make("업데이트전")
+                try:
+                    backup.make("업데이트전")
+                except OSError as e:
+                    updater.log(f"업데이트전 백업 실패: {e}")
+                    raise updater.UpdateError("업데이트 전 백업을 만들지 못했습니다. 백신이나 다른 프로그램이 자료 파일을 쓰는 중일 수 있어요. 잠시 뒤 다시 시도해 주세요.") from e
                 path = updater.download(info, lambda d, t: self._emit({"type": "update_progress", "stage": "download", "done": d, "total": t}))
                 # 새 버전을 자동으로 켜지 않는다(학교 보안 프로그램이 막을 수 있음). exe만 바꿔 두고 다시 시작을 안내한다.
                 # 이 앱은 실행 잠금을 그대로 쥐고 계속 쓸 수 있다.
