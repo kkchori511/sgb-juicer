@@ -208,3 +208,22 @@ def standards_rule(text: str, level: str, scale: int, only: bool) -> str:
                 "- 성취수준에 맞는 표현 수위로 쓴다. 높을수록 심화·적용·주도성을, 낮을수록 기본 개념 이해와 노력·성장 가능성을 중심으로 쓰며, 부정적 표현은 피한다.\n"
                 "- 성취수준 기호(A~E)나 등급을 문장에 쓰지 않는다.\n")
     return out
+
+
+# ---------- 활동 개요 다듬기(AI) ----------
+def outline_tidy_prompt():
+    return ("너는 학교 활동 개요 목록을 정리한다. 내용을 새로 쓰지 않는다.\n"
+            "- 한 줄에 활동 하나가 되게 나눈다. 날짜가 있으면 '월/일 · 활동 제목 — 활동 내용' 모양으로, 날짜가 없으면 '활동 제목 — 활동 내용'으로 쓴다.\n"
+            "- 맞춤법·띄어쓰기·어색한 끊김만 고친다. 표 머리글·쪽 번호·빈 칸 같은 군더더기 줄은 뺀다.\n"
+            "- 원문에 없는 활동·사실·날짜·낱말을 더하지 않는다. 확실하지 않으면 원문 표현을 그대로 둔다.\n"
+            "- 결과 목록만 출력한다. 번호·머리말·설명을 붙이지 않는다.")
+
+
+def new_words(before: str, after: str) -> list[str]:
+    """after에 있고 before에는 없는 낱말(두 글자 이상). 공백을 뺀 원문에 들어 있으면 있는 것으로 본다."""
+    hay = re.sub(r"\s+", "", before or "")
+    out = []
+    for w in re.findall(r"[가-힣A-Za-z0-9]{2,}", after or ""):
+        if w not in hay and w not in out:
+            out.append(w)
+    return out

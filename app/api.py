@@ -18,7 +18,7 @@ import webview
 from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, existing, export, ocr, openrouter, prompts, roster, scan, stdformat, updater, weights
 from .records import Records, items_of
 from .inbox import Inbox
-from .standards import Outlines, Standards, avoid_rule, check_level, outline_rule, read_hwpx_text, read_pdf_text, similarity, standards_rule
+from .standards import Outlines, Standards, avoid_rule, new_words, outline_tidy_prompt, check_level, outline_rule, read_hwpx_text, read_pdf_text, similarity, standards_rule
 from .paths import data_dir
 from .textutil import count_bytes
 
@@ -741,6 +741,17 @@ class Api:
         self._rec().set_closed(gid, item, sno, bool(closed))
         return {}
 
+    @safe
+    def close_info(self, gid, item):
+        return self._rec().close_info(gid, item)
+
+    @safe
+    def close_many(self, gid, item, snos, closed, year=None):
+        """일괄 마감/해제. 반환 done(바꾼 학번)·skipped([학번, 이유]) — 화면에서 [되돌리기]는 done만 반대로."""
+        self._editable(year)
+        done, skipped = self._rec().close_many(gid, item, snos or [], bool(closed))
+        return {"done": done, "skipped": skipped}
+
     # ---------- 문단 이동 ----------
     @safe
     def move_targets(self, gid, item, sno):
@@ -996,6 +1007,24 @@ class Api:
         return Outlines(self._db()).get(gid, item)
 
     @safe
+    def outline_tidy(self, gid, item, text, model_index=None):
+        """활동 개요를 AI로 다듬기(저장하지 않음): 한 줄에 활동 하나, 맞춤법만. 없는 내용은 더하지 않게 하고,
+        원문에 없던 낱말은 new_words로 알려 화면에서 확인하게 한다."""
+        self._editable()
+        Outlines(self._db())._check(gid, item)
+        if not (text or "").strip():
+            raise db.DbError("다듬을 내용이 없습니다.")
+        cfg, model = self._model(model_index)
+        key = ("outline", int(gid), item)
+        self._guard(key)
+        try:
+            out, cost = self._call_ai(cfg["openrouter_key"].strip(), model, outline_tidy_prompt(), text[:20000], cfg["privacy_block"])
+        finally:
+            self._release(key)
+        out = "\n".join(ln.rstrip() for ln in (out or "").replace("\r", "").split("\n") if ln.strip())
+        return self._ai_out({"cost": cost, "text": out, "new_words": new_words(text, out)})
+
+    @safe
     def outline_save(self, gid, item, text, source=None, year=None):
         self._editable(year)
         Outlines(self._db()).save(gid, item, text, source)
@@ -1039,6 +1068,26 @@ class Api:
                 "ai_headers": [lines[i].strip() for i in ai_headers], "check": [lines[i].strip() for i in check],
                 "missing": [lines[i].strip() for i in missing], "gaps": [ln for _, ln in stdformat.gaps(lines, roles)],
                 "content_lines": sum(1 for r in roles if r not in (None, "header", "label"))}
+
+    @safe
+    def standards_fill_gaps(self, gid, text, model_index=None):
+        """수식이 빠진 빈 곳만 AI로 채우거나 앞뒤를 잇는다(저장하지 않음). 원문 글자를 지우거나 바꾼 줄은 버린다."""
+        self._editable()
+        g = self._db().group(gid)
+        if g["kind"] != "subject":
+            raise db.DbError("성취기준은 과목에서만 씁니다.")
+        gl = stdformat.gap_lines(text)
+        if not gl:
+            return {"text": text, "changed": [], "rejected": [], "gaps": 0}
+        cfg, model = self._model(model_index)
+        key = ("stdformat", int(gid))
+        self._guard(key)
+        try:
+            answer, cost = self._call_ai(cfg["openrouter_key"].strip(), model, stdformat.fill_prompt(), stdformat.fill_user(gl[:200]), cfg["privacy_block"])
+        finally:
+            self._release(key)
+        out, changed, rejected = stdformat.apply_fill(text, gl[:200], answer)
+        return self._ai_out({"cost": cost, "text": out, "changed": changed, "rejected": rejected, "gaps": len(gl)})
 
     @safe
     def standards_get(self, gid):
@@ -1446,7 +1495,13 @@ class Api:
     def export_preview(self, gid, item, only_closed=False, order="no"):
         rec = self._rec()
         g, target = rec.slot(gid, item)
-        return {"rows": rec.export_rows(gid, item, bool(only_closed), order), "target": target}
+        return {"rows": rec.export_rows(gid, item, bool(only_closed), order), "target": target,
+                "paired": bool(item == "subject" and rec.pair_groups(gid))}
+
+    @safe
+    def export_combined(self, gid, only_closed=False, order="no"):
+        """1·2학기 합산 과목 합쳐 보기(보기 전용)."""
+        return self._rec().export_combined(gid, bool(only_closed), order)
 
     @safe
     def export_copy(self, gid, item, only_closed, order, scope, header):

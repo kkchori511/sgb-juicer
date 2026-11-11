@@ -87,6 +87,12 @@ def seed():
     ok(api.edit_final(math, "subject", "20302", "수학 교양서를 읽고 함수의 활용 사례를 발표함."), "최종안")
     ok(api.set_closed(math, "subject", "20302", True), "마감")
     ok(api.set_active(sci, ["20402"], False), "비활성")
+    # 1·2학기 합산 과목(공통수학1 + 공통수학2, 1500바이트 함께 씀): 검토·내보내기 '1·2학기 합쳐 보기' 확인용
+    math2 = ok(api.add_group({"kind": "subject", "name": "공통수학2", "semester": 2}), "과목")["id"]
+    ok(api.roster_apply(math2, mine[:5] + others, "add"), "명렬")
+    ok(api.update_group(math2, {"pair_id": math, "pair_total": 1500}), "합산 연결")
+    ok(api.edit_final(math, "subject", "20301", "다항식의 연산 원리를 친구에게 설명하며 개념을 정리함."), "최종안")
+    ok(api.edit_final(math2, "subject", "20301", "경우의 수 단원에서 문제를 스스로 만들어 풀이를 발표함."), "최종안")
     # 활동 개요(자율·진로)와 성취기준(공통수학1): 기록 없는 학생 '기준 자료로 생성' 확인용
     ok(api.outline_save(hr, "autonomy", "3월 학급 자치회 구성 — 학급 규칙 정하기, 1인 1역할 정하기\n4월 과학의 날 행사 — 탐구 포스터 제작, 발표\n6월 학교 축제 — 학급 부스 기획·운영\n9월 학교폭력 예방 캠페인 — 표어 만들기, 캠페인 활동", "붙여넣기"), "활동 개요")
     ok(api.outline_save(hr, "career", "3월 진로 검사 — 흥미·적성 검사 후 결과 해석\n5월 진로 체험의 날 — 관심 직업 탐색 보고서 작성\n10월 학과 탐색 — 관심 학과 교육과정 조사·발표", "붙여넣기"), "활동 개요")

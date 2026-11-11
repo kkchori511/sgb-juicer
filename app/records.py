@@ -919,6 +919,51 @@ class Records:
                 (1 if closed else 0, 1 if closed else 0, int(gid), item, str(sno)),
             )
 
+    def close_info(self, gid, item):
+        """일괄 마감 창: 학생마다 상태·최종안 바이트·목표·확인 사항."""
+        _, target = self.slot(gid, item)
+        sts = self.status_map(gid, item)
+        out = []
+        for m in self.d.members(gid):
+            o = sts.get(m["student_no"], {})
+            pc = self._pair_cols(gid, item, m["student_no"], target)
+            fb = o.get("final_bytes")
+            notes = []
+            if o.get("stale"):
+                notes.append("채택 후 기록 변경")
+            if fb and pc.get("target") and fb > pc["target"]:
+                notes.append("목표 분량 초과")
+            if pc.get("pair_total") and fb and (pc.get("first_bytes") or 0) + fb > pc["pair_total"]:
+                notes.append("1·2학기 합산 초과")
+            out.append({"student_no": m["student_no"], "name": m["name"], "grade": m["grade"], "class_no": m["class_no"], "number": m["number"],
+                        "active": bool(m["active"]), "status": o.get("status", "none"), "final_bytes": fb, "notes": notes, **pc})
+        return {"target": target, "students": out}
+
+    def close_many(self, gid, item, snos, closed):
+        """여러 학생 마감/해제를 한 번에. 최종안이 없거나 비활성인 학생은 건너뛴다. 반환: (바꾼 학번, 건너뛴 [학번, 이유])."""
+        self.slot(gid, item)
+        active = {m["student_no"]: bool(m["active"]) for m in self.d.members(gid)}
+        done, skipped = [], []
+        with self.d.tx() as c:
+            for sno in dict.fromkeys(str(x) for x in snos):
+                if sno not in active:
+                    skipped.append([sno, "명렬에 없음"])
+                    continue
+                f = c.execute("SELECT text, closed FROM finals WHERE group_id=? AND item=? AND student_no=?", (int(gid), item, sno)).fetchone()
+                if closed and not active[sno]:
+                    skipped.append([sno, "비활성"])
+                    continue
+                if closed and not (f and (f["text"] or "").strip()):
+                    skipped.append([sno, "최종안 없음"])
+                    continue
+                if not f or bool(f["closed"]) == bool(closed):
+                    skipped.append([sno, "이미 마감" if closed else "마감 아님"])
+                    continue
+                c.execute("UPDATE finals SET closed=?, closed_at=CASE WHEN ? THEN datetime('now','localtime') ELSE NULL END WHERE group_id=? AND item=? AND student_no=?",
+                          (1 if closed else 0, 1 if closed else 0, int(gid), item, sno))
+                done.append(sno)
+        return done, skipped
+
     # ---------- 내보내기 ----------
     def export_rows(self, gid, item, only_closed=False, order="no"):
         _, target = self.slot(gid, item)
@@ -939,6 +984,53 @@ class Records:
         else:
             rows.sort(key=lambda r: r["student_no"])
         return rows
+
+
+    def pair_groups(self, gid):
+        """1·2학기 합산 과목이면 (1학기 담당, 2학기 담당, 합산 바이트). 아니면 None."""
+        g = self.d.group(gid)
+        if g["kind"] != "subject":
+            return None
+        if g.get("pair_id") and g.get("pair_total") and g["semester"] == 2:
+            p = self.d.group(g["pair_id"])
+            if p["kind"] == "subject" and p["semester"] == 1:
+                return p, g, int(g["pair_total"])
+        if g["semester"] == 1:
+            s2 = next((x for x in self.d.groups() if x.get("pair_id") == g["id"] and x.get("pair_total") and x["semester"] == 2 and x["kind"] == "subject"), None)
+            if s2:
+                return g, s2, int(s2["pair_total"])
+        return None
+
+    def export_combined(self, gid, only_closed=False, order="no"):
+        """1·2학기 합산 과목을 한 학생 한 줄로: 1학기 최종안, 빈 줄 하나, 2학기 최종안(생기부 조회 화면처럼).
+        only_closed면 두 학기 모두 마감한 학생만. 바이트는 두 최종안의 합(빈 줄은 세지 않음)."""
+        pg = self.pair_groups(gid)
+        if not pg:
+            raise DbError("1·2학기 합산으로 연결된 과목이 아닙니다.")
+        g1, g2, total = pg
+        fin = lambda g: {f["student_no"]: f for f in self.d.q("SELECT * FROM finals WHERE group_id=? AND item='subject'", (g["id"],))}
+        f1, f2 = fin(g1), fin(g2)
+        mem = {}
+        for g in (g1, g2):
+            for m in self.d.members(g["id"]):
+                if m["active"]:
+                    mem.setdefault(m["student_no"], m)
+        rows = []
+        for sno, m in mem.items():
+            a, b = f1.get(sno), f2.get(sno)
+            t1, t2 = (a["text"] if a else "") or "", (b["text"] if b else "") or ""
+            c1, c2 = bool(a and a["closed"]), bool(b and b["closed"])
+            if only_closed and not (c1 and c2):
+                continue
+            b1, b2 = count_bytes(t1) if t1 else 0, count_bytes(t2) if t2 else 0
+            rows.append({"student_no": sno, "name": m["name"], "grade": m["grade"], "class_no": m["class_no"], "number": m["number"],
+                         "text1": t1, "text2": t2, "text": "\n\n".join(x.strip() for x in (t1, t2) if x.strip()),
+                         "closed1": c1, "closed2": c2, "closed": c1 and c2, "bytes1": b1, "bytes2": b2, "bytes": b1 + b2, "total": total})
+        if order == "name":
+            rows.sort(key=lambda r: (r["name"], r["student_no"]))
+        else:
+            rows.sort(key=lambda r: r["student_no"])
+        return {"first": g1["label"], "second": g2["label"], "total": total, "rows": rows}
 
 
 def _result_out(r):

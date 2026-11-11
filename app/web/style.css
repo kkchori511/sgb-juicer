@@ -381,7 +381,7 @@ textarea.tall { min-height: 300px; height: calc(100vh - 470px); resize: vertical
 .sum-line { font-weight: 800; margin-top: 8px; }
 .sum-line.bad { color: var(--danger); }
 .prompt-cols textarea { font-size: 14px; }
-.exp-text { white-space: pre-wrap; max-width: 760px; font-size: 13.5px; }
+.exp-text { white-space: pre-wrap; font-size: 13.5px; }
 
 /* 세로로 긴 화면·좁은 창: 결과 칸을 아래로 */
 @media (max-aspect-ratio: 1/1), (max-width: 1180px) {
@@ -764,3 +764,47 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 .basis-picks button.on, .basis-acts button.small.on { background: #ede9fe; border-color: #7c3aed; color: #5b21b6; }
 .basis-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .basis-lines { margin: 6px 0 0 18px; line-height: 1.7; }
+
+/* 검토·내보내기 표: 짧은 열은 글자 길이만큼, 남는 너비는 최종안. 머리 칸 끝을 끌어 너비 조정 */
+.exp-tbl { width: 100%; }
+.exp-tbl th { position: relative; white-space: nowrap; }
+.exp-tbl th.exp-fit:not(.sized) { width: 1%; }
+.exp-tbl td { white-space: nowrap; }
+.exp-tbl td:has(> .exp-text) { white-space: normal; }
+.col-grip { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; z-index: 1; }
+.col-grip:hover, .col-resizing .col-grip:active { background: rgba(100, 116, 139, 0.35); }
+.col-resizing, .col-resizing * { cursor: col-resize !important; user-select: none; }
+
+/* 현황판 담당 제목 줄: 눌러서 표 접기, 옆에 항목별 마감 현황 */
+.dash-tbl-head { cursor: pointer; flex-wrap: wrap; user-select: none; }
+.dash-tbl-head:hover h2 { color: var(--accent-hover); }
+.dash-fold { color: var(--muted); font-size: 0.85em; }
+.dg-sum { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--muted); background: #fff; border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; }
+.dg-sum.all { color: var(--st-closed); background: color-mix(in srgb, var(--st-closed) 12%, white); border-color: var(--st-closed); } /* 모두 마감: 파랑 */
+.dg-sum.open { color: color-mix(in srgb, var(--st-progress) 80%, black); background: color-mix(in srgb, var(--st-progress) 12%, white); border-color: var(--st-progress); } /* 미마감: 입력 중 노랑 */
+.dg-sum.open .bar-fill { background: var(--st-progress); }
+.dg-bar { display: inline-block; width: 56px; height: 6px; margin: 0; }
+.dg-bar .bar-fill { display: block; height: 100%; }
+
+/* 되돌릴 수 없는 작업 확인('확인했어요' 입력) */
+.typed-conf { display: flex; flex-direction: column; gap: 8px; }
+.typed-warn { color: var(--danger); font-weight: 700; margin: 4px 0 0; }
+#typedConfInp { width: 100%; }
+/* 백업 목록 */
+#backupTable .bk-when { white-space: nowrap; font-weight: 700; font-variant-numeric: tabular-nums; }
+#backupTable .bk-act { text-align: right; white-space: nowrap; }
+#backupTable tr.bk-special td:first-child { box-shadow: inset 3px 0 0 var(--st-closed); }
+.tbl tr.is-off td { color: var(--muted); }
+.small-note { font-size: 12px; font-weight: 400; margin-top: 2px; }
+
+/* 활동 개요 입력 방식(표 / 붙여넣기) */
+.mode-seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 999px; overflow: hidden; }
+.mode-seg button { border: none; border-radius: 0; padding: 4px 12px; font-size: 13px; background: var(--input); }
+.mode-seg button.on { background: var(--accent); color: #fff; }
+.outline-tbl td { vertical-align: top; }
+.outline-tbl .o-date { width: 80px; }
+.outline-tbl .o-title { width: 100%; min-width: 160px; }
+.outline-tbl td:nth-child(3) { width: 60%; }
+.outline-tbl .o-content { width: 100%; min-height: 34px; resize: vertical; }
+.outline-body { margin: 8px 0; }
+.added-line mark, .cmp-text mark { background: #fde68a; border-radius: 3px; padding: 0 1px; }

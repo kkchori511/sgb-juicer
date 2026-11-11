@@ -209,3 +209,58 @@ def verify(lines, roles, result):
 def gaps(lines, roles):
     """수식이 빠진 듯한 줄(번호, 원문)."""
     return [(i, ln.strip()) for i, (ln, r) in enumerate(zip(lines, roles)) if r not in (None, "header") and GAP_RE.search(ln)]
+
+
+# ---------- 수식 빈칸 채우기(AI) ----------
+# 원문 글자는 그대로 두고, 수식이 빠져 비어 보이는 곳만 말로 채우거나 앞뒤를 잇는다(덧붙이기만).
+
+def gap_lines(text):
+    """수식이 빠진 듯한 줄(번호, 줄)."""
+    return [(i, ln) for i, ln in enumerate((text or "").replace("\r", "").split("\n")) if ln.strip() and GAP_RE.search(ln)]
+
+
+def fill_prompt():
+    return ("너는 교육과정 성취기준 문서에서 복사할 때 수식이 빠져 비어 보이는 곳을 고친다.\n"
+            "입력은 '번호<TAB>줄' 목록이다. 줄마다 수식이 있던 자리(두 칸 이상 빈 곳, 홀로 남은 조사 등)를 찾아\n"
+            "수식을 쓰지 말고 짧은 말(예: '다항식', '이차함수의 그래프', '두 점 사이의 거리')로 채우거나, 앞뒤가 자연스럽게 이어지게 낱말을 덧붙인다.\n"
+            "- 원문 글자는 하나도 지우거나 바꾸지 않는다. 덧붙이기만 한다(빈칸 공백은 줄여도 된다).\n"
+            "- 확실하지 않으면 그 줄은 원문 그대로 둔다. 수식·기호(x, y, ², √ 등)는 쓰지 않는다.\n"
+            "반드시 JSON 객체 하나만 출력한다. 예: {\"3\":\"고친 줄\",\"7\":\"고친 줄\"}")
+
+
+def fill_user(gl):
+    return "\n".join(f"{i}\t{ln.strip()}" for i, ln in gl)
+
+
+def only_added(before, after):
+    """after가 before의 글자를 순서대로 모두 담고 있는지(공백 제외) = 덧붙이기만 했는지."""
+    a = re.sub(r"\s+", "", before or "")
+    b = re.sub(r"\s+", "", after or "")
+    j = 0
+    for ch in b:
+        if j < len(a) and ch == a[j]:
+            j += 1
+    return j == len(a) and len(b) >= len(a)
+
+
+def apply_fill(text, gl, answer):
+    """AI 답을 반영한 새 글과 바뀐 줄 목록. 원문을 지우거나 바꾼 줄은 쓰지 않는다(rejected)."""
+    import json
+    m = re.search(r"\{.*\}", answer or "", re.S)
+    try:
+        data = json.loads(m.group(0)) if m else {}
+    except ValueError:
+        data = {}
+    lines = (text or "").replace("\r", "").split("\n")
+    changed, rejected = [], []
+    for i, ln in gl:
+        new = data.get(str(i))
+        if not isinstance(new, str) or not new.strip() or new.strip() == ln.strip():
+            continue
+        lead = ln[: len(ln) - len(ln.lstrip())]
+        if only_added(ln, new):
+            lines[i] = lead + new.strip()
+            changed.append({"line": i, "before": ln.strip(), "after": new.strip()})
+        else:
+            rejected.append({"line": i, "before": ln.strip(), "after": new.strip()})
+    return "\n".join(lines), changed, rejected
