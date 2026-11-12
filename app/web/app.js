@@ -16,10 +16,10 @@
 
   const PANEL_TITLES = {
     dashboard: '현황판', inbox: '자료 인박스', records: '항목별 기록', tagrec: '태그별 기록', export: '검토·내보내기',
-    roster: '명렬·담당 관리', tags: '태그 관리', standards: '성취기준·활동 개요', settings: '설정', notice: '유의 사항', guide: '사용 안내',
+    roster: '명렬·담당 관리', tags: '태그 관리', prompts: '프롬프트', standards: '성취기준·활동 개요', settings: '설정', notice: '유의 사항', guide: '사용 안내',
   };
   const HELP = { dashboard: 'g-dashboard', inbox: 'g-inbox', records: 'g-records', tagrec: 'g-tagrec', export: 'g-export',
-    roster: 'g-roster', tags: 'g-settings', standards: 'g-standards', settings: 'g-settings', notice: 'g-flow' };
+    roster: 'g-roster', tags: 'g-settings', prompts: 'g-settings', standards: 'g-standards', settings: 'g-settings', notice: 'g-flow' };
   function openGuide(anchor) {
     showPanel('guide');
     const target = document.getElementById(anchor || 'g-flow');
@@ -295,6 +295,7 @@
     if (name === 'records') renderRecordsPanel();
     if (name === 'export') renderExport();
     if (name === 'tags') renderTags();
+    if (name === 'prompts') renderPrompts();
     if (name === 'tagrec') renderTagView(true);
     if (name === 'inbox') renderInbox();
     if (name === 'standards') renderStandards();
@@ -338,6 +339,7 @@
     if (panel === 'records') renderRecordsPanel();
     if (panel === 'export') renderExport();
     if (panel === 'tags') renderTags();
+    if (panel === 'prompts') renderPrompts();
     if (panel === 'tagrec') renderTagView();
     if (panel === 'inbox') { IB.bid = null; renderInbox(); }
     if (panel === 'standards') { SD.gid = null; renderStandards(); }
@@ -1093,7 +1095,6 @@
     if (name === 'data') loadBackups();
     if (name === 'year') renderRoleCards($('roleCardsSettings'), ys.role, changeRole);
     if (name === 'sched') { renderTargets(); renderSchedTable(); }
-    if (name === 'prompt') renderPrompts();
   }
   function renderSettings() {
     $('cfgPath').textContent = info.config_path;
@@ -1614,14 +1615,25 @@
   // 모든 AI 버튼은 바로 실행하지 않고 확인을 한 번 받는다. 실행 중에는 진행 창(건수·경과 시간·여러 건이면 중지)을 띄운다.
   const escHtml = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   function modelName(sel) { const o = sel && sel.selectedOptions && sel.selectedOptions[0]; return o ? o.textContent : '-'; }
-  function aiConfirm(title, rows, warn) {
-    const html = `<div class="ai-conf"><b>${escHtml(title)}</b> — AI로 실행할까요?<table>${rows.filter(Boolean).map(([k, v]) => `<tr><th>${escHtml(k)}</th><td>${escHtml(v)}</td></tr>`).join('')}</table>`
+  // kind: 프롬프트를 고르는 작업이면 'synth'(종합·생성) / 'refine'(기록 정제) / 'polish'(다듬기). 없으면 고정 프롬프트 작업.
+  async function aiConfirm(title, rows, warn, kind) {
+    let pick = '';
+    let opts = '';
+    if (kind) {
+      const r = await loadPromptList();
+      if (r) {
+        pick = r.picks[kind] || '';
+        opts = r.prompts.map((x) => `<option value="${escHtml(x.id)}"${x.id === pick ? ' selected' : ''}>${escHtml(x.name)}</option>`).join('');
+      }
+    }
+    const html = `<div class="ai-conf"><b>${escHtml(title)}</b> — AI로 실행할까요?<table>${rows.filter(Boolean).map(([k, v]) => `<tr><th>${escHtml(k)}</th><td>${escHtml(v)}</td></tr>`).join('')}`
+      + (opts ? `<tr><th>프롬프트</th><td><select id="aiPrompt">${opts}</select> <span class="muted">(${escHtml(P.data.kinds[kind])} · 고친 것은 메뉴 › 프롬프트)</span></td></tr>` : '') + '</table>'
       + `<label class="ai-extra-label" for="aiExtra">이번 추가 요구 사항 <span class="muted">(선택 · 이번 실행에만 · 저장된 지침은 그대로)</span></label>`
       + `<textarea id="aiExtra" rows="2" maxlength="1000" placeholder="예: 숫자는 빼 줘 / 탐구 과정을 더 강조 / 두 문장으로 짧게"></textarea>`
       + `<p class="hint">명렬의 학번·이름은 따로 보내지 않습니다. 다만 기록 본문에 적힌 이름 등은 그대로 보내지니 확인하세요. 실행하면 크레딧이 듭니다.${warn ? `<br>${escHtml(warn)}` : ''}</p></div>`;
     $('modalOk').classList.add('ai-btn');
-    // 반환: 취소면 null, 실행이면 { extra }(추가 요구 사항)
-    return modal(html, true, true, 'AI 실행', '취소').then((ok) => (ok ? { extra: ($('aiExtra') ? $('aiExtra').value : '').trim() } : null))
+    // 반환: 취소면 null, 실행이면 { extra(추가 요구 사항), prompt(고른 프롬프트 id), kind }
+    return modal(html, true, true, 'AI 실행', '취소').then((ok) => (ok ? { extra: ($('aiExtra') ? $('aiExtra').value : '').trim(), prompt: $('aiPrompt') ? $('aiPrompt').value : '', kind: kind || '' } : null))
       .finally(() => $('modalOk').classList.remove('ai-btn'));
   }
   function aiProgress(title, total, onStop) {
@@ -1683,15 +1695,16 @@
     };
   }
   // jobs: [{ label, run: () => api 결과 }] — api를 직접 불러 오류도 진행 창에서 모아 보여 준다.
-  async function aiRun({ title, rows, warn, jobs, summary, skipConfirm, before, after, extra }) {
+  async function aiRun({ title, rows, warn, jobs, summary, skipConfirm, before, after, extra, kind, prompt }) {
     if (!skipConfirm) {
-      const conf = await aiConfirm(title, rows, warn);
+      const conf = await aiConfirm(title, rows, warn, kind);
       if (!conf) return null;
       extra = conf.extra;
+      prompt = conf.prompt;
     }
     if (before && !(await before())) return null; // [AI 실행]을 누른 뒤에만 설정을 저장(취소하면 아무것도 바뀌지 않음)
-    await api.ai_extra_set(extra || ''); // 이번 실행에만: AI 지시 끝에 덧붙임(끝나면 지움)
-    try { return await aiRunJobs({ title, jobs, summary, after }); } finally { await api.ai_extra_set(''); }
+    await api.ai_extra_set(extra || '', prompt || '', kind || ''); // 이번 실행에만: 추가 요구 사항·고른 프롬프트(끝나면 지움)
+    try { return await aiRunJobs({ title, jobs, summary, after }); } finally { await api.ai_extra_set('', '', ''); }
   }
   async function aiRunJobs({ title, jobs, summary, after }) {
     let stop = false;
@@ -2029,7 +2042,7 @@
     return { manual: '직접 입력', existing: '이미 쓴 생기부', 'existing-bulk': '일괄 넣기', 'record-bulk': '일괄 입력' }[src] || '직접 입력';
   }
   function candInfo(cd) {
-    alertBox(`작업: ${OP_LABEL[cd.op]}\n모델: ${cd.meta.model || '-'}\n만든 때: ${cd.created_at}\n비용: ${fmtCredit(cd.cost)} 크레딧${cd.meta.ratios ? `\n비율: ${cd.meta.ratios.join(' / ')}%` : ''}${cd.meta.record_ids ? `\n근거 기록: ${cd.meta.record_ids.length}건` : ''}${cd.meta.level ? `\n성취수준: ${cd.meta.level}` : ''}\n\n[지침]\n${cd.meta.prompt || '-'}${cd.meta.example ? `\n\n[예시]\n${cd.meta.example}` : ''}${cd.meta.standards_text ? `\n\n[쓴 성취기준]\n${cd.meta.standards_text}` : ''}`);
+    alertBox(`작업: ${OP_LABEL[cd.op]}\n모델: ${cd.meta.model || '-'}${cd.meta.prompt_name ? `\n프롬프트: ${cd.meta.prompt_name}` : ''}${cd.meta.extra ? `\n추가 요구 사항: ${cd.meta.extra}` : ''}\n만든 때: ${cd.created_at}\n비용: ${fmtCredit(cd.cost)} 크레딧${cd.meta.ratios ? `\n비율: ${cd.meta.ratios.join(' / ')}%` : ''}${cd.meta.record_ids ? `\n근거 기록: ${cd.meta.record_ids.length}건` : ''}${cd.meta.level ? `\n성취수준: ${cd.meta.level}` : ''}\n\n[지침]\n${cd.meta.prompt || '-'}${cd.meta.example ? `\n\n[예시]\n${cd.meta.example}` : ''}${cd.meta.standards_text ? `\n\n[쓴 성취기준]\n${cd.meta.standards_text}` : ''}`);
   }
   function recordCard(r, locked) {
     const isSel = R.selected.has(r.id);
@@ -2087,7 +2100,7 @@
   async function aiRecord(r, btn) {
     const what = r.kind === 'existing' ? '기존 완성문 다듬기' : '학생관찰기록 정제';
     const out = await busyRun(btn, `rec${r.id}`, () => aiRun({
-      title: what,
+      title: what, kind: r.kind === 'existing' ? 'polish' : 'refine',
       rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['대상', `${r.kind === 'existing' ? '기존 완성문' : `${r.seq}회 기록`}${r.title ? ` · ${r.title}` : ''} (${r.bytes}B)`], ['모델', modelName($('recModel'))]],
       warn: DROP_WARN,
       jobs: [{ run: () => api.ai_record(r.id, $('recModel').value) }],
@@ -2097,13 +2110,15 @@
     loadStudent(true);
   }
 
-  function tagPicker(selected) {
+  // list: 태그 목록(없으면 항목별 기록 화면의 목록)
+  function tagPicker(selected, list) {
     const box = el('div', { class: 'tagpick' });
     const set = new Set(selected || []);
+    const all = () => list || (R.view && R.view.tags) || [];
     const draw = () => {
       box.innerHTML = '';
-      (R.view.tags || []).forEach((t) => box.appendChild(el('button', { type: 'button', class: (set.has(t.id) ? 'on' : '') + tagC(t.id), text: t.name, onclick: () => { if (set.has(t.id)) set.delete(t.id); else set.add(t.id); draw(); } })));
-      if (!(R.view.tags || []).length) box.appendChild(el('span', { class: 'muted', text: '태그가 없습니다. 메뉴의 [태그]에서 만드세요.' }));
+      all().forEach((t) => box.appendChild(el('button', { type: 'button', class: (set.has(t.id) ? 'on' : '') + tagC(t.id), text: t.name, onclick: () => { if (set.has(t.id)) set.delete(t.id); else set.add(t.id); draw(); } })));
+      if (!all().length) box.appendChild(el('span', { class: 'muted', text: '태그가 없습니다. 메뉴의 [태그]에서 만드세요.' }));
     };
     draw();
     box.value = () => [...set];
@@ -2194,9 +2209,6 @@
   }
   async function openSynth() {
     const recs = R.view.records.filter((r) => R.selected.has(r.id));
-    const pr = await call('prompts_get');
-    if (!pr) return;
-    const p = pr.prompts[R.slot.item].synth;
     openSheet((box) => {
       const inputs = {};
       let sumCheck = !!R.view.weight_sum_check;
@@ -2230,18 +2242,15 @@
       const stdTa = hasStd ? el('textarea', { class: 'fill', rows: 7, value: R.view.standards.text }) : null;
       const stdBox = hasStd ? el('div', { hidden: true }, [el('div', { class: 'col-label', text: '이번에 쓸 성취기준 (필요한 부분만 남겨도 됩니다)' }), stdTa]) : null;
       if (stdChk) stdChk.addEventListener('change', () => { stdBox.hidden = !stdChk.checked; });
-      const pp = el('textarea', { class: 'fill', rows: 9, value: p.prompt });
-      const pe = el('textarea', { class: 'fill', rows: 9, value: p.example, placeholder: '원하는 결과 모양의 문장(비우면 지침만 보냄)' });
       runBtn.addEventListener('click', async () => {
         const wm = {};
         recs.forEach((r) => { wm[r.id] = inputs[r.id].value; });
         const std = stdChk && stdChk.checked ? { text: stdTa.value, level: stdLvl.value } : null;
         const out = await busyRun(runBtn, `synth${R.sno}`, () => aiRun({
-          title: '선택 기록 종합',
+          title: '선택 기록 종합', kind: 'synth',
           rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['기록', `${recs.length}건 (${recs.reduce((a, r) => a + r.bytes, 0)}B)`], ['목표', `${R.target}B`], ['모델', modelName(model)],
             std ? ['성취기준', `사용 · 성취수준 ${std.level || '없음'}`] : null],
-          warn: `${DROP_WARN}${pp.value !== p.prompt || pe.value !== p.example ? ' 고친 종합 지침·예시는 실행할 때 이 항목의 프롬프트로 저장됩니다.' : ''}`,
-          before: async () => (pp.value === p.prompt && pe.value === p.example) || !!(await call('prompts_save', R.slot.item, 'synth', pp.value, pe.value)),
+          warn: DROP_WARN,
           jobs: [{ run: () => api.ai_synth(R.slot.group_id, R.slot.item, R.sno, recs.map((r) => r.id), wm, model.value, sumCheck, std) }],
         }));
         if (!out || !out.done) return;
@@ -2260,8 +2269,7 @@
             stdChk ? el('label', { title: R.view.standards.text.trim() ? '' : '성취기준 메뉴에서 먼저 넣으세요' }, [stdChk, '성취기준 사용']) : null,
             stdChk ? el('label', {}, ['성취수준', stdLvl]) : null]),
           stdBox,
-          el('div', { class: 'two-col', style: 'margin-top:8px' }, [el('div', {}, [el('div', { class: 'col-label', text: '종합 지침' }), pp]), el('div', {}, [el('div', { class: 'col-label', text: '예시 (있으면 반드시 따름)' }), pe])]),
-          el('p', { class: 'hint', text: '여기서 고친 지침·예시는 [종합 실행]을 승인할 때 이 항목의 종합 프롬프트로 저장됩니다. AI에는 명렬의 학번·이름 없이 기록 내용과 비율만 보냅니다(본문에 적힌 이름은 그대로 갑니다).' }),
+          el('p', { class: 'hint', text: '쓸 프롬프트는 [종합 실행]을 누르면 나오는 확인 창에서 고릅니다(지침·예시 고치기는 메뉴 › 프롬프트). AI에는 명렬의 학번·이름 없이 기록 내용과 비율만 보냅니다(본문에 적힌 이름은 그대로 갑니다).' }),
         ]),
         el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }), runBtn]),
       );
@@ -2297,7 +2305,7 @@
     polishBtn.addEventListener('click', async () => {
       if (!(await flushFinal())) return;
       const out = await busyRun(polishBtn, `synth${R.sno}`, () => aiRun({
-        title: '최종안 다듬기',
+        title: '최종안 다듬기', kind: 'polish',
         rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['최종안', `${bytesOf(ta.value)}B → 목표 ${R.target}B`], ['모델', modelName($('recModel'))]],
         warn: `${DROP_WARN} 최종안 자체는 바뀌지 않고 후보로 만듭니다.`,
         jobs: [{ run: () => api.ai_polish_final(R.slot.group_id, R.slot.item, R.sno, $('recModel').value) }],
@@ -3165,8 +3173,9 @@
     const name = TV.tag === 0 ? '태그 없음' : (d.tags.find((t) => t.id === TV.tag) || {}).name;
     const editable = d.records.filter(tvEditable).length;
     const shown = Math.min(TV.limit, d.records.length);
-    sum.append(el('b', { text: name }), ` · ${d.students}명 ${d.records.length}건`,
-      el('span', { class: 'muted', text: ` (고칠 수 있음 ${editable}건 · 읽기 전용 ${d.records.length - editable}건) · ${shown}/${d.records.length}건 표시` }));
+    addTo(sum, el('b', { text: name }), ` · ${d.students}명 ${d.records.length}건`,
+      el('span', { class: 'muted', text: ` (고칠 수 있음 ${editable}건 · 읽기 전용 ${d.records.length - editable}건) · ${shown}/${d.records.length}건 표시` }),
+      editable ? el('button', { type: 'button', class: 'small', text: `이 조건 모두 선택 (${editable}건)`, title: '지금 필터에 맞는 기록 중 고칠 수 있는 것을 모두 고릅니다(더 보기 아래 기록 포함)', onclick: () => tvSelectAll(true) }) : null);
     if (TV.bulk) {
       const b = TV.bulk;
       sum.append(el('span', { class: 'tv-bulk-note' }, [`최근 일괄 작업: ${b.text} `, el('button', { type: 'button', class: 'link', text: '되돌리기', onclick: () => tvBulkUndo() })]));
@@ -3272,7 +3281,7 @@
     const can = tvEditable(r);
     const who = `${r.name} · ${tvSrcLabel(r)}${r.seq ? ` · ${r.seq}회` : r.kind === 'existing' ? ' · 기존 완성문' : ''}`;
     const card = el('div', { class: 'tv-rec' + (can ? '' : ' locked') + (TV.sel.has(r.id) ? ' sel' : ''), 'data-rid': r.id });
-    const cb = can ? el('input', { type: 'checkbox', checked: TV.sel.has(r.id), title: '여러 기록 태그 작업에 고르기', 'aria-label': `${who} 기록 고르기` }) : null;
+    const cb = can ? el('input', { type: 'checkbox', class: 'tv-pick', checked: TV.sel.has(r.id), title: '여러 기록 태그 작업에 고르기', 'aria-label': `${who} 기록 고르기` }) : null;
     if (cb) cb.addEventListener('change', () => { cb.checked ? TV.sel.add(r.id) : TV.sel.delete(r.id); card.classList.toggle('sel', cb.checked); tvRenderBulk(); });
     const metaStr = () => [r.kind === 'existing' ? '기존 완성문' : (r.seq ? `${r.seq}회` : ''), st.draft.date, st.draft.title].filter(Boolean).join(' · ') || '(활동명·날짜 없음)';
     const metaText = el('span', { class: 'tv-meta', text: metaStr() });
@@ -3346,7 +3355,34 @@
     addSel.addEventListener('change', () => tvBulkRun(addSel, 'add', n));
     rmSel.addEventListener('change', () => tvBulkRun(rmSel, 'remove', n));
     bar.append(el('b', { text: `선택 ${n}명 ${recs.length}건` }), el('span', { class: 'muted', text: '(고칠 수 있는 기록만 고를 수 있습니다)' }), addSel, rmSel,
-      el('button', { type: 'button', text: '선택 해제', onclick: () => { TV.sel.clear(); document.querySelectorAll('#tvMain .tv-rec.sel').forEach((c) => { c.classList.remove('sel'); const x = c.querySelector('input[type=checkbox]'); if (x) x.checked = false; }); tvRenderBulk(); } }));
+      el('button', { type: 'button', text: '선택 해제', onclick: () => tvSelectAll(false) }),
+      el('button', { type: 'button', class: 'danger-text', text: `선택 기록 삭제`, onclick: () => tvBulkDelete(recs, n) }));
+  }
+  // 이 조건(태그·필터)의 고칠 수 있는 기록 모두 고르기 / 모두 풀기 — 아직 그리지 않은(더 보기 아래) 기록도 포함
+  function tvSelectAll(on) {
+    TV.sel.clear();
+    if (on) TV.data.records.filter(tvEditable).forEach((r) => TV.sel.add(r.id));
+    document.querySelectorAll('#tvMain .tv-rec').forEach((c) => {
+      const pick = TV.sel.has(+c.dataset.rid);
+      c.classList.toggle('sel', pick);
+      const x = c.querySelector('input.tv-pick');
+      if (x) x.checked = pick;
+    });
+    tvRenderBulk();
+    if (on) toast(`${TV.sel.size}건을 골랐습니다. 아래 줄에서 태그를 더하거나 빼거나 지울 수 있습니다.`);
+  }
+  // 고른 기록 지우기(되돌릴 수 없음 → '확인했어요')
+  async function tvBulkDelete(recs, n) {
+    if (!(await leaveOk())) return;
+    const msg = [`고른 기록 ${n}명 ${recs.length}건을 지웁니다.`,
+      '· 기록에 딸린 정제 후보도 함께 지워집니다.',
+      '· 이미 만든 최종안 문장은 자동으로 바뀌지 않습니다(다시 만들기 표시가 붙습니다).'].join('\n');
+    if (!(await typedConfirm(msg, '선택 기록 삭제'))) return;
+    const r = await tvOp(() => mutate('delete_records', recs.map((x) => x.id), TYPED_WORD, TV.year));
+    if (!r) return;
+    TV.sel.clear(); TV.bulk = null;
+    toast(`${r.students}명 ${r.deleted}건을 지웠습니다.`);
+    await renderTagView(true);
   }
   // 일괄 태그: 목록을 다시 불러오지 않고 바뀐 기록만 고친다(개별 되돌리기·제외 예정 표시 유지)
   function tvApplyStates(states) {
@@ -3440,34 +3476,59 @@
     });
   }
 
-  // ---------- 프롬프트 설정 ----------
-  const P = { data: null, item: 'career', op: 'synth' };
+  // ---------- 프롬프트 목록(메뉴 › 프롬프트) ----------
+  const P = { data: null, id: 'default' };
+  async function loadPromptList() {
+    const r = await call('prompt_list');
+    if (r) P.data = r;
+    return r;
+  }
   async function renderPrompts() {
-    const r = await call('prompts_get');
+    const r = await loadPromptList();
     if (!r) return;
-    P.data = r;
-    const items = ys.role === 'homeroom' ? ['autonomy', 'career', 'behavior', 'subject', 'club'] : ['subject', 'club'];
-    if (!items.includes(P.item)) P.item = items[0];
-    const sel = $('prItem');
-    sel.innerHTML = '';
-    items.forEach((k) => sel.appendChild(el('option', { value: k, text: r.items[k], selected: k === P.item })));
-    const ops = $('prOps');
-    ops.innerHTML = '';
-    Object.entries(r.ops).forEach(([k, v]) => ops.appendChild(el('button', { type: 'button', class: 'seg' + (k === P.op ? ' active' : ''), text: v, onclick: () => { P.op = k; renderPrompts(); } })));
-    const cur = r.prompts[P.item][P.op];
+    if (!r.prompts.some((x) => x.id === P.id)) P.id = r.prompts[0].id;
+    const list = $('prList');
+    list.innerHTML = '';
+    const usedBy = (id) => Object.entries(r.picks).filter(([, v]) => v === id).map(([k]) => r.kinds[k]);
+    r.prompts.forEach((x) => {
+      const uses = usedBy(x.id);
+      list.appendChild(el('button', { type: 'button', class: 'pr-item' + (x.id === P.id ? ' active' : ''), onclick: async () => { await flushPending(); P.id = x.id; renderPrompts(); } },
+        [el('b', { text: x.name }), x.builtin ? el('span', { class: 'tag', text: '기본' }) : null,
+          uses.length ? el('div', { class: 'muted small-note', text: `지금 선택: ${uses.join(', ')}` }) : null]));
+    });
+    const cur = r.prompts.find((x) => x.id === P.id);
+    $('prName').value = cur.name;
+    $('prName').disabled = !!cur.builtin;
+    $('prName').title = cur.builtin ? '기본 프롬프트는 이름을 바꿀 수 없습니다(복사해서 새로 만들면 바꿀 수 있음)' : '';
     $('prPrompt').value = cur.prompt;
     $('prExample').value = cur.example;
-    const def = r.defaults[P.item][P.op];
-    $('prState').textContent = cur.prompt === def.prompt && cur.example === def.example ? '기본값 사용 중' : '개인 프롬프트';
+    $('prResetBtn').hidden = !cur.builtin;
+    $('prDelBtn').hidden = !!cur.builtin;
+    $('prState').textContent = cur.builtin ? (cur.prompt === r.defaults[cur.id] && !cur.example ? '기본값 사용 중' : '기본에서 고침') : '';
   }
   function savePrompt() {
     $('prState').textContent = '저장 중…';
-    const item = P.item, op = P.op, prompt = $('prPrompt').value, example = $('prExample').value;
-    saveLater(`prompt:${item}:${op}`, async () => {
-      const r = await mutate('prompts_save', item, op, prompt, example);
-      if (r && P.item === item && P.op === op) $('prState').textContent = '개인 프롬프트 · 저장됨';
+    const entry = { id: P.id, name: $('prName').value, prompt: $('prPrompt').value, example: $('prExample').value };
+    saveLater(`prompt:${entry.id}`, async () => {
+      const r = await mutate('prompt_save', entry);
+      if (r && P.id === entry.id) {
+        $('prState').textContent = '저장됨';
+        const it = P.data && P.data.prompts.find((x) => x.id === entry.id);
+        if (it) { Object.assign(it, { name: it.builtin ? it.name : entry.name, prompt: entry.prompt, example: entry.example }); }
+        const btn = document.querySelector('#prList .pr-item.active b');
+        if (btn && it) btn.textContent = it.name;
+      }
       return r;
     }, 600);
+  }
+  async function newPrompt(copyOf) {
+    await flushPending();
+    const src = copyOf ? P.data.prompts.find((x) => x.id === copyOf) : null;
+    const r = await mutate('prompt_save', src ? { name: `${src.name} 복사본`.slice(0, 60), prompt: src.prompt, example: src.example } : { name: '새 프롬프트', prompt: '', example: '' });
+    if (!r) return;
+    P.id = r.id;
+    await renderPrompts();
+    $('prName').focus(); $('prName').select();
   }
 
   // =====================================================================
@@ -3797,8 +3858,14 @@
     body.appendChild(el('div', { class: 'sheet-foot' }, [
       el('button', { type: 'button', text: '← 가져오기 다시', onclick: async () => { if (!(await confirmBox('가져오기 단계로 돌아가면 지금 매칭 결과는 다시 만들어집니다.', '돌아가기'))) return; if (await mutate('inbox_stage', b.id, 'import')) { SC.starts = null; loadBatch(); } } }),
       el('span', { class: 'spacer' }),
-      pending ? el('span', { class: 'danger-text', style: 'font-weight:700', text: `확인 필요 ${pending}건을 확정하거나 제외해야 다음으로 갑니다.` }) : null,
-      el('button', { type: 'button', class: 'primary', disabled: !!pending, text: '다음: AI 정제(선택)', onclick: async () => { if (await mutate('inbox_stage', b.id, 'refine')) loadBatch(); } }),
+      pending ? el('span', { class: 'danger-text', style: 'font-weight:700', text: `확인 필요 ${pending}건은 넘어가면 넣지 않습니다.` }) : null,
+      el('button', { type: 'button', class: 'primary', text: '다음: AI 정제(선택)', onclick: async () => {
+        if (pending) {
+          const msg = `확인이 필요한 ${pending}건(추천 ${c.suggested}·찾지 못함 ${c.none})은 내용을 넣지 않습니다.\n이 행들은 '제외(매칭 미확인)'로 바뀌고, 매칭 단계로 돌아와 [제외 취소]하면 되살릴 수 있습니다.\n\n계속할까요?`;
+          if (!(await confirmBox(msg, '넣지 않고 다음으로'))) return;
+        }
+        if (await mutate('inbox_stage', b.id, 'refine', !!pending)) loadBatch();
+      } }),
     ]));
   }
   function excludeRows(ids) {
@@ -3842,29 +3909,40 @@
         ...r.cands.map((cd, i) => el('button', { type: 'button', class: !usingOrig && r.used_text === cd.text ? 'on' : '', text: `정제 ${i + 1}`, onclick: async () => { if (await mutate('inbox_use_cand', r.id, cd.id)) loadBatch(); } }))]);
       const btn = el('button', { type: 'button', class: 'small ai-btn', text: r.cands.length ? '다시 정제' : '정제(AI)' });
       btn.addEventListener('click', () => refineRows([r], model.value, btn, modelName(model)));
+      // 정제 결과 칸: 정제한 내용을 골랐을 때만 보이고, 원문을 쓰면 비워 둔다(원문이 그대로 들어간다는 안내만)
+      const refined = usingOrig ? el('div', { class: 'rcard-body rcard-empty', text: r.cands.length ? '원문을 고름 — 원문이 그대로 들어갑니다' : '정제하지 않음 — 원문이 그대로 들어갑니다' })
+        : el('div', { class: 'rcard-body', text: r.text });
       card.append(el('div', { class: 'ref-cols' }, [el('div', {}, [el('div', { class: 'muted', text: '원문' }), el('div', { class: 'rcard-body', text: r.content })]),
-        el('div', {}, [el('div', { class: 'muted', text: '보낼 내용' }), el('div', { class: 'rcard-body', text: r.text })])]), el('div', { class: 'rcard-foot' }, [pickBox, el('span', { class: 'spacer' }), btn]));
+        el('div', {}, [el('div', { class: 'muted', text: '정제 결과' }), refined])]), el('div', { class: 'rcard-foot' }, [pickBox, el('span', { class: 'spacer' }), btn]));
       body.appendChild(card);
     });
     body.appendChild(el('div', { class: 'sheet-foot' }, [
       el('button', { type: 'button', text: '← 매칭', onclick: async () => { if (await mutate('inbox_stage', b.id, 'match')) loadBatch(); } }),
       el('span', { class: 'spacer' }),
       el('span', { class: 'hint', style: 'margin:0', text: 'AI 정제는 선택입니다. 정제하지 않은 행은 원문 그대로 보냅니다.' }),
-      el('button', { type: 'button', class: 'primary', text: '다음: 보내기 검토', onclick: async () => { if (await mutate('inbox_stage', b.id, 'review')) loadBatch(); } }),
+      el('button', { type: 'button', class: 'primary', text: '다음: 보내기 검토', onclick: async () => {
+        const orig = rows.filter((r) => r.used_text === null || r.used_text === undefined);
+        if (orig.length) {
+          const picked = orig.filter((r) => r.cands.length).length;
+          const msg = `정제하지 않은 ${orig.length}건은 원문 그대로 들어갑니다${picked ? `(정제 후보가 있는데 원문을 고른 ${picked}건 포함)` : ''}.\n\n계속할까요?`;
+          if (!(await confirmBox(msg, '원문 그대로 다음으로'))) return;
+        }
+        if (await mutate('inbox_stage', b.id, 'review')) loadBatch();
+      } }),
     ]));
   }
   async function refineRows(rows, modelIndex, btn, modelLabel) {
     if (!rows.length) return;
     const b = IB.view.batch;
     const conf = await aiConfirm('인박스 자료 정제', [['묶음', `${b.title} → ${slotLabel(b.group_id, b.item)}`], ['대상', `${rows.length}건 (${new Set(rows.map((r) => r.student_no)).size}명)`], ['모델', modelLabel || '-']],
-      '원문은 그대로 남습니다. 정제 후보는 행마다 최근 3개까지 보관하고, 넘으면 가장 오래된 후보를 지웁니다. 새 정제 결과를 보낼 내용으로 바로 골라 둡니다.');
+      '원문은 그대로 남습니다. 정제 후보는 행마다 최근 3개까지 보관하고, 넘으면 가장 오래된 후보를 지웁니다. 새 정제 결과를 보낼 내용으로 바로 골라 둡니다.', 'refine');
     if (!conf) return;
     if (btn) { btn.disabled = true; btn.classList.add('busy-btn'); }
     await jobStart();
     let out;
     try {
       const failedIds = [];
-      out = await aiRun({ title: '인박스 자료 정제', skipConfirm: true, extra: conf.extra,
+      out = await aiRun({ title: '인박스 자료 정제', skipConfirm: true, extra: conf.extra, prompt: conf.prompt, kind: 'refine',
         jobs: rows.map((r) => ({ label: `${r.name || r.student_no || ''} ${(r.content || '').slice(0, 16)}`.trim(), run: () => api.ai_inbox_row(r.id, modelIndex), onFail: () => failedIds.push(r.id) })),
         after: (o) => { out = o; o.retry = [...failedIds, ...rows.slice(o.done + o.fail).map((r) => r.id)]; } });
     } finally { await jobEnd(); if (btn && btn.isConnected) { btn.disabled = false; btn.classList.remove('busy-btn'); } }
@@ -3905,6 +3983,7 @@
     );
     const sendBtn = el('button', { type: 'button', class: 'primary', text: `${r.students.length}명 ${r.send_rows}건 보내기` });
     const doSend = async (action) => {
+      if (!tagSet.size && !(await confirmBox('태그를 고르지 않았습니다. 태그 없이 보낼까요?\n\n보낸 뒤에도 보낸 묶음 화면의 [태그 지정]으로 이 묶음의 기록 전체에 한꺼번에 붙일 수 있습니다.', '태그 없이 보내기'))) return;
       const res = await mutate('inbox_send', b.id, action);
       if (!res) return;
       toast(`${res.students}명 ${res.records}건 보냈습니다.`);
@@ -3926,12 +4005,70 @@
       el('button', { type: 'button', text: '← 정제', onclick: async () => { if (await mutate('inbox_stage', b.id, 'refine')) loadBatch(); } }),
       el('span', { class: 'spacer' }), sendBtn]));
   }
+  // 보낸 묶음: 이 묶음으로 넣은 기록 전체(여러 학생)에 태그 붙이기·빼기(20초 되돌리기)
+  async function sentTags(b) {
+    const info = await call('inbox_sent_info', b.id);
+    if (!info) return;
+    if (!info.record_ids.length) { toast('이 항목에 남아 있는 기록이 없습니다.'); return; }
+    const all = await call('tags');
+    const names = Object.fromEntries(((all && all.tags) || []).map((t) => [String(t.id), t.name]));
+    const now = Object.entries(info.tag_counts).map(([id, n]) => `${names[id] || '?'} ${n}건`).join(', ');
+    openSheet((box) => {
+      box.style.height = 'auto';
+      box.style.width = 'min(600px, 92vw)';
+      const tags = tagPicker([], (all && all.tags) || []);
+      const run = async (mode) => {
+        const tids = tags.value();
+        if (!tids.length) { toast('태그를 고르세요.'); return; }
+        const r = await mutate('tag_records_undoable', info.record_ids, tids, mode);
+        if (!r) return;
+        closeSheet();
+        const n = new Set(r.pairs.map((p) => p[0])).size;
+        actionToast(`${n}건에 태그를 ${mode === 'add' ? '붙였습니다' : '뺐습니다'}.`, '되돌리기', async () => {
+          if (await mutate('undo_tag_records', r.pairs, mode)) toast('되돌렸습니다.');
+        }, 20000);
+      };
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `이 묶음 기록에 태그 · ${info.students}명 ${info.record_ids.length}건` })]),
+        el('p', { class: 'muted', text: now ? `지금 붙은 태그: ${now}` : '지금 붙은 태그가 없습니다.' }),
+        info.moved ? el('p', { class: 'hint', text: `다른 항목으로 옮긴 ${info.moved}건은 빼고 합니다.` }) : null,
+        tags,
+        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }),
+          el('button', { type: 'button', text: '고른 태그 빼기', onclick: () => run('remove') }),
+          el('button', { type: 'button', class: 'primary', text: '고른 태그 붙이기', onclick: () => run('add') })]));
+    });
+  }
+  // 보낸 묶음: 이 묶음으로 넣은 기록을 모든 학생에서 지우기(되돌릴 수 없음 → '확인했어요' 입력)
+  async function sentDelete(b) {
+    const info = await call('inbox_sent_info', b.id);
+    if (!info) return;
+    const n = info.deletable.length;
+    if (!n) { alertBox('지울 수 있는 기록이 없습니다(마감된 학생이거나 다른 항목으로 옮긴 기록만 남음).'); return; }
+    const lines = [`이 묶음으로 넣은 기록 ${n}건을 모든 학생에서 지웁니다.`];
+    if (info.edited) lines.push(`· 보낸 뒤 고친 기록 ${info.edited}건도 함께 지워집니다.`);
+    if (info.with_cands) lines.push(`· 정제 후보가 있는 기록 ${info.with_cands}건의 후보도 함께 지워집니다.`);
+    if (info.closed) lines.push(`· 마감된 학생 ${info.closed_students}명의 기록 ${info.closed}건은 지우지 않습니다.`);
+    if (info.moved) lines.push(`· 다른 항목으로 옮긴 ${info.moved}건은 지우지 않습니다.`);
+    lines.push(info.closed || info.moved ? '남는 기록이 있어 이 묶음은 다시 보낼 수 없습니다.' : '지운 뒤 이 묶음은 ④ 보내기 검토로 돌아가 태그 등을 고쳐 다시 보낼 수 있습니다.');
+    if (!(await typedConfirm(lines.join('\n'), '모두 삭제'))) return;
+    const r = await mutate('inbox_delete_sent', b.id, TYPED_WORD);
+    if (!r) return;
+    $('actionToast').hidden = true; // 지운 기록의 태그 되돌리기는 더 쓸 수 없음
+    toast(`${r.students}명 ${r.deleted}건을 지웠습니다.${r.reopened ? ' 보내기 검토로 돌아왔습니다.' : ''}`, 5000);
+    await refreshInboxBadge();
+    renderInboxList();
+    loadBatch();
+  }
   function renderSent(body) {
     const v = IB.view;
     const b = v.batch;
     body.append(el('div', { class: 'wsection', style: 'margin-top:0' }, [el('h3', { text: `✔ ${b.sent_at}에 ${b.sent_summary} 보냄` }),
-      el('p', { class: 'hint', text: '보낸 묶음은 다시 보낼 수 없습니다(기록 중복 방지). 보낸 기록은 항목별 기록에서 고치세요.' }),
-      el('button', { type: 'button', class: 'primary', text: '항목별 기록에서 보기', onclick: () => openRecords(b.group_id, b.item, (v.rows.find((r) => r.state === 'confirmed') || {}).student_no) })]));
+      el('p', { class: 'hint', text: '보낸 묶음은 다시 보낼 수 없습니다(기록 중복 방지). 하나씩 고칠 때는 항목별 기록에서, 이 묶음 전체는 아래 버튼으로 합니다.' }),
+      el('div', { class: 'toolbar' }, [
+        el('button', { type: 'button', class: 'primary', text: '항목별 기록에서 보기', onclick: () => openRecords(b.group_id, b.item, (v.rows.find((r) => r.state === 'confirmed') || {}).student_no) }),
+        el('button', { type: 'button', text: '🏷 이 묶음 기록에 태그 지정', onclick: () => sentTags(b) }),
+        el('span', { class: 'spacer' }),
+        el('button', { type: 'button', class: 'danger-text', text: '보낸 기록 모두 삭제', onclick: () => sentDelete(b) }),
+      ])]));
     const t = el('table', { class: 'tbl match-tbl' });
     t.appendChild(el('tr', {}, ['원본 위치', '학생', '상태', '보낸 내용'].map((h) => el('th', { text: h }))));
     v.rows.forEach((r) => t.appendChild(el('tr', { class: r.state === 'excluded' ? 'row-excluded' : '' }, [el('td', { text: r.source_ref }), el('td', { text: `${r.student_no || '-'} ${r.matched_name || r.ext_name}` }),
@@ -4710,7 +4847,7 @@
         let out = null;
         try {
           out = await aiRun({
-            title: `${basisRo(s.item)} 생성`,
+            title: `${basisRo(s.item)} 생성`, kind: 'synth',
             rows: [['담당', s.label], ['학생', `${students.length}명 (학생마다 AI를 한 번씩 부름)`], ['기준', isSub ? `성취기준 ${bytesOf(stdTa.value)}B · 학생별 성취수준` : `활동 개요 ${lines.length}개 중 공통 ${common.size}개${Object.keys(own).length ? ` · 따로 고른 학생 ${students.filter((x) => own[x.student_no]).length}명` : ''}`], ['모델', modelName(model)]],
             warn: `학생관찰기록은 쓰지 않고 ${what}만으로 만듭니다. ${DROP_WARN} 같은 담당에서 먼저 만든 다른 학생 후보(최대 3개, 학번·이름 없음)도 함께 보내 표현이 겹치지 않게 합니다.${lvChanged.length ? ` 고른 성취수준(${lvChanged.length}명)은 실행할 때 명렬에도 저장됩니다.` : ''}`,
             before: async () => {
@@ -4972,12 +5109,22 @@
       flushTagView().then((ok) => toast(ok ? '모두 저장했습니다.' : '저장하지 못한 기록이 있습니다. 빨간 기록을 확인하세요.'));
     });
     $('tagNew').addEventListener('keydown', (e) => { if (e.key === 'Enter') addTag(); });
-    $('prItem').addEventListener('change', (e) => { P.item = e.target.value; renderPrompts(); });
+    $('prName').addEventListener('input', savePrompt);
     $('prPrompt').addEventListener('input', savePrompt);
     $('prExample').addEventListener('input', savePrompt);
+    $('prNewBtn').addEventListener('click', () => newPrompt(null));
+    $('prCopyBtn').addEventListener('click', () => newPrompt(P.id));
     $('prResetBtn').addEventListener('click', async () => {
-      if (!(await typedConfirm(`'${P.data.items[P.item]} · ${P.data.ops[P.op]}'의 지침과 예시를 기본값으로 되돌립니다. 지금 쓴 지침·예시는 사라집니다.`, '되돌리기'))) return;
-      if (await mutate('prompts_reset', P.item, P.op)) renderPrompts();
+      const cur = P.data.prompts.find((x) => x.id === P.id);
+      if (!(await typedConfirm(`'${cur.name}'의 지침과 예시를 기본값으로 되돌립니다. 지금 쓴 지침·예시는 사라집니다(필요하면 먼저 [복사해서 새로]).`, '되돌리기'))) return;
+      await flushPending();
+      if (await mutate('prompt_reset', P.id)) renderPrompts();
+    });
+    $('prDelBtn').addEventListener('click', async () => {
+      const cur = P.data.prompts.find((x) => x.id === P.id);
+      if (!(await typedConfirm(`프롬프트 '${cur.name}'을(를) 지웁니다. 지운 프롬프트는 되살릴 수 없습니다. 이미 만든 결과에는 영향이 없습니다.`, '삭제'))) return;
+      await flushPending();
+      if (await mutate('prompt_delete', P.id)) { P.id = 'default'; renderPrompts(); }
     });
     document.addEventListener('keydown', (e) => {
       if (panel !== 'records' || !$('sheet').hidden || !$('modal').hidden || ($('aiProg') && !$('aiProg').hidden) || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;

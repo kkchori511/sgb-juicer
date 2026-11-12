@@ -61,7 +61,14 @@ def test_flow():
     v = ok(api.inbox_view(bid))
     assert v["counts"] == {"confirmed": 2, "suggested": 1, "none": 1, "excluded": 0}, v["counts"]
     assert v["rows"][0]["content"] == "첫 줄\n둘째 줄"
-    assert not api.inbox_stage(bid, "refine")["ok"]  # 확인 필요 남음
+    assert not api.inbox_stage(bid, "refine")["ok"]  # 확인 필요 남음(화면 확인 없이)
+    # 확인을 받고 넘어가면 확인 필요 행은 '제외(매칭 미확인)' → 매칭으로 돌아와 제외 취소하면 되살아남
+    ok(api.inbox_stage(bid, "refine", True))
+    vv = ok(api.inbox_view(bid))
+    assert vv["counts"] == {"confirmed": 2, "suggested": 0, "none": 0, "excluded": 2} and {r["exclude_reason"] for r in vv["rows"] if r["state"] == "excluded"} == {"매칭 미확인"}
+    ok(api.inbox_stage(bid, "match"))
+    ok(api.inbox_exclude([r["id"] for r in vv["rows"] if r["state"] == "excluded"], "", False))
+    assert ok(api.inbox_view(bid))["counts"] == {"confirmed": 2, "suggested": 1, "none": 1, "excluded": 0}
     assert not api.inbox_send(bid)["ok"]
     ok(api.inbox_confirm_suggested(bid))
     none_row = [r for r in ok(api.inbox_view(bid))["rows"] if r["state"] == "none"][0]
@@ -104,6 +111,26 @@ def test_flow():
     assert ok(api.inbox_import(b2, {"structure": "single", "order": "col", "student_no": "20302"}))["count"] == 3
     ok(api.inbox_stage(b2, "review")); ok(api.inbox_send(b2))
     assert [r["content"] for r in ok(api.student_view(hr, "behavior", "20302"))["records"]] == ["a", "c", "b"]
+
+    # 보낸 묶음 단위: 태그 한꺼번에(되돌리기), 모두 삭제(마감·옮긴 기록 빼고), 남은 게 없으면 다시 보내기 가능
+    info = ok(api.inbox_sent_info(bid))
+    assert len(info["record_ids"]) == 3 and info["students"] == 2 and info["tag_counts"] == {str(tag): 3} and info["with_cands"] == 0, info
+    t2 = ok(api.add_tag("과학"))["id"]
+    tr = ok(api.tag_records_undoable(info["record_ids"], [t2], "add"))
+    assert ok(api.inbox_sent_info(bid))["tag_counts"][str(t2)] == 3
+    ok(api.undo_tag_records(tr["pairs"], "add"))
+    assert str(t2) not in ok(api.inbox_sent_info(bid))["tag_counts"]
+    ok(api.set_closed(hr, "career", "20303", True))  # 마감된 학생 기록은 지우지 않음
+    info = ok(api.inbox_sent_info(bid)); assert info["closed"] == 1 and len(info["deletable"]) == 2
+    assert not api.inbox_delete_sent(bid, "확인")["ok"]  # '확인했어요'를 쳐야 함
+    d1 = ok(api.inbox_delete_sent(bid, "확인했어요"))
+    assert d1["deleted"] == 2 and not d1["reopened"] and ok(api.inbox_view(bid))["batch"]["stage"] == "sent"
+    assert [r["source"] for r in ok(api.student_view(hr, "career", "20301"))["records"]] == []
+    ok(api.set_closed(hr, "career", "20303", False))
+    d2 = ok(api.inbox_delete_sent(bid, "확인했어요"))
+    assert d2["deleted"] == 1 and d2["reopened"]
+    vb = ok(api.inbox_view(bid))["batch"]; assert vb["stage"] == "review" and not vb["sent_at"]
+    assert ok(api.inbox_send(bid))["records"] == 3  # 다시 보내기
 
     # 대상 명렬을 바꾸면 다시 매칭
     sub = ok(api.add_group({"kind": "subject", "name": "수학", "semester": 1}))["id"]

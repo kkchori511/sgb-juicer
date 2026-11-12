@@ -40,6 +40,7 @@
       <div class="nav-sep"></div>
       <button type="button" class="nav" data-panel="roster"><i>👥</i><span>명렬·담당 관리</span></button>
       <button type="button" class="nav" data-panel="tags" title="태그 이름 추가·변경·삭제"><i>🏷️</i><span>태그 관리</span></button>
+      <button type="button" class="nav" data-panel="prompts" title="AI에 줄 지침(프롬프트) 목록을 만들고 고칩니다"><i>💬</i><span>프롬프트</span></button>
       <button type="button" class="nav" data-panel="standards"><i>📚</i><span>성취기준·활동 개요</span></button>
       <button type="button" class="nav" data-panel="settings"><i>⚙️</i><span>설정</span></button>
       <div class="nav-sep"></div>
@@ -155,6 +156,30 @@
           <table class="tbl" id="tagTable" style="margin-top:12px"></table>
         </div>
       </section>
+      <section class="panel" data-panel-content="prompts">
+        <div class="card">
+          <div class="card-head"><h2>프롬프트</h2><span class="tag">목록을 만들고, AI를 실행할 때 확인 창에서 골라 씁니다</span></div>
+          <p class="hint">AI에 줄 지침과 예시를 프롬프트마다 저장합니다. AI 실행 확인 창에서 이번에 쓸 프롬프트를 고르고, 작업(종합·생성 / 기록 정제 / 다듬기)마다 마지막에 고른 것을 기억합니다. 분량·출력 형식·성취기준·다른 학생과 겹치지 않기 규칙과 '학번·이름은 보내지 않음'은 앱이 자동으로 붙입니다.</p>
+          <div class="pr-wrap">
+            <aside class="pr-list"><div class="pr-items" id="prList"></div><button type="button" class="primary" id="prNewBtn">+ 새 프롬프트</button></aside>
+            <div class="pr-edit">
+              <div class="map-row">
+                <label class="grow">이름 <input type="text" id="prName" maxlength="60"></label>
+                <span class="muted" id="prState"></span>
+                <button type="button" id="prCopyBtn">복사해서 새로</button>
+                <button type="button" id="prResetBtn">기본값으로 되돌리기</button>
+                <button type="button" class="danger-text" id="prDelBtn">삭제</button>
+              </div>
+              <div class="two-col prompt-cols">
+                <div><div class="col-label">지침(프롬프트)</div><textarea id="prPrompt" class="tall"></textarea></div>
+                <div><div class="col-label">예시 <span class="muted">(비우면 지침만 보냄)</span></div><textarea id="prExample" class="tall" placeholder="원하는 결과 모양의 생기부 문장을 넣으세요. AI가 문체·형식을 반드시 따릅니다."></textarea></div>
+              </div>
+            </div>
+          </div>
+          <label class="check-line"><input type="checkbox" id="weightCheck" data-cfg="weight_sum_check"> 종합할 때 비중 합계 100% 검사</label>
+          <div class="hint">끄면 입력한 비중을 비율대로 맞춰 씁니다. 비중을 비워 둔 기록은 기록 길이에 비례해 나눕니다.</div>
+        </div>
+      </section>
       <section class="panel" data-panel-content="standards">
         <div class="ib-wrap">
           <aside class="ib-list" id="stdList"></aside>
@@ -181,7 +206,6 @@
           <button type="button" class="tab-btn active" data-stab="conn">연결·모델</button>
           <button type="button" class="tab-btn" data-stab="year">역할·학년도</button>
           <button type="button" class="tab-btn" data-stab="sched">분량·일정</button>
-          <button type="button" class="tab-btn" data-stab="prompt">프롬프트</button>
           <button type="button" class="tab-btn" data-stab="data">백업·자료</button>
           <button type="button" class="tab-btn" data-stab="about">앱 정보</button>
         </div>
@@ -290,26 +314,6 @@
           </div>
         </div>
 
-        <div class="stab" data-stab-content="prompt" hidden>
-          <div class="card">
-            <div class="card-head"><h2>프롬프트</h2><span class="tag">기본 프롬프트 제공 · 나만의 지침으로 바꿔 쓰세요</span></div>
-            <p class="hint">항목과 작업을 고르고 지침과 예시를 고치세요. 예시를 적어 두면 AI에 항상 함께 보내고 반드시 따르게 합니다. 분량·출력 형식 규칙과 '학번·이름은 보내지 않음'은 앱이 자동으로 지킵니다.</p>
-            <div class="map-row">
-              <label>항목 <select id="prItem"></select></label>
-              <div class="segmented" id="prOps"></div>
-              <span class="spacer"></span>
-              <span class="muted" id="prState"></span>
-              <button type="button" id="prResetBtn">기본값으로 되돌리기</button>
-            </div>
-            <div class="two-col prompt-cols">
-              <div><div class="col-label">지침(프롬프트)</div><textarea id="prPrompt" class="tall"></textarea></div>
-              <div><div class="col-label">예시 <span class="muted">(비우면 지침만 보냄)</span></div><textarea id="prExample" class="tall" placeholder="원하는 결과 모양의 생기부 문장을 넣으세요. AI가 문체·형식을 반드시 따릅니다."></textarea></div>
-            </div>
-            <label class="check-line"><input type="checkbox" id="weightCheck" data-cfg="weight_sum_check"> 종합할 때 비중 합계 100% 검사</label>
-            <div class="hint">끄면 입력한 비중을 비율대로 맞춰 씁니다. 비중을 비워 둔 기록은 기록 길이에 비례해 나눕니다.</div>
-          </div>
-        </div>
-
         <div class="stab" data-stab-content="data" hidden>
           <div class="card">
             <h2>자료 폴더</h2>
@@ -407,8 +411,9 @@
                   <li>왼쪽 원본 미리보기의 색과 오른쪽 '만들어질 기록'을 확인하고 [확정하고 매칭으로].</li>
                 </ul>
               </li>
-              <li><b>② 학생 매칭</b>: 학번·이름이 모두 맞으면 자동 <b>확정</b>, 이름만 맞거나 비슷하면 <b>추천</b>입니다. 추천은 원본과 대조한 뒤 확정하세요. 백지·다른 반 자료는 [제외]. 확인 필요가 0이어야 다음으로 갑니다. 명렬이 없으면 [명렬 등록하러 가기] 후 [매칭으로 돌아가기].</li>
-              <li><b>③ AI 정제(선택)</b>: 맞춤법·문장을 다듬고 싶을 때만. 원문과 정제 후보 중 보낼 내용을 고릅니다.</li>
+              <li><b>② 학생 매칭</b>: 학번·이름이 모두 맞으면 자동 <b>확정</b>, 이름만 맞거나 비슷하면 <b>추천</b>입니다. 추천은 원본과 대조한 뒤 확정하세요. 백지·다른 반 자료는 [제외]. 확인 필요가 남은 채 [다음]을 누르면 확인을 받고 그 행들은 넣지 않습니다(제외 — 매칭 미확인, 돌아와 [제외 취소] 가능). 명렬이 없으면 [명렬 등록하러 가기] 후 [매칭으로 돌아가기].</li>
+              <li><b>③ AI 정제(선택)</b>: 맞춤법·문장을 다듬고 싶을 때만. 원문과 정제 후보 중 보낼 내용을 고릅니다. 정제하지 않은 행은 정제 결과 칸이 비어 있고 원문이 그대로 들어갑니다(넘어갈 때 확인).</li>
+              <li><b>⑤ 보낸 뒤</b>: 보낸 묶음 화면에서 [이 묶음 기록에 태그 지정]으로 여러 학생의 기록에 한꺼번에 태그를 붙이거나 뺍니다(20초 되돌리기). [보낸 기록 모두 삭제]는 이 묶음으로 넣은 기록을 모든 학생에서 지웁니다('확인했어요' 입력, 마감·다른 항목으로 옮긴 기록은 남김). 남은 기록이 없으면 보내기 검토로 돌아가 다시 보낼 수 있습니다. 태그 없이 보내면 확인을 받습니다.</li>
               <li><b>④ 보내기 검토</b>: 보낼 항목·날짜·태그를 정하고 'N명에게 M건'을 확인한 뒤 보냅니다. 마감된 학생이 있으면 [마감 해제하고 보내기] 또는 [제외하고 보내기]. 보낸 묶음은 다시 보낼 수 없습니다(중복 방지).</li>
             </ol>
 
@@ -446,7 +451,7 @@
               <li><b>반·수업</b>: '2학년 3반'은 그 반 학생의 모든 기록, '수학(1학기) · A반' 같은 수업은 그 과목·수업의 기록만 보입니다.</li>
               <li>내용은 그 자리에서 고칩니다. 칸을 벗어나거나 Ctrl+S를 누르면 저장되고, 저장된 기록에는 [되돌리기]가 남아 이 화면에서 고치기 전 내용으로 돌아갑니다. [되돌리기]는 이 학년도에서 이 화면을 쓰는 동안 남고, 그 뒤 다른 곳에서 다시 고쳤거나 마감했으면 되돌리지 않습니다. 다른 곳에서 먼저 바뀐 기록은 덮어쓰지 않고 [내 글 복사 후 지금 내용 불러오기]를 보여 줍니다.</li>
               <li>마감된 항목과 비활성 학생의 기록은 읽기 전용입니다. 기록을 고쳐도 <b>최종안 문장은 자동으로 바뀌지 않습니다</b>. 최종안이 있으면 '최종안 확인 필요'가 뜹니다.</li>
-              <li>여러 기록을 체크해 태그를 한꺼번에 더하거나 뺄 수 있습니다(되돌리기 가능). 이 화면은 태그가 붙은 기록만 보여 주므로 학생별 미입력 현황은 현황판·항목별 기록에서 보세요.</li>
+              <li>여러 기록을 체크해 태그를 한꺼번에 더하거나 뺄 수 있습니다(되돌리기 가능). 요약 줄의 [이 조건 모두 선택]은 지금 필터에 맞는 고칠 수 있는 기록을 모두 고릅니다(더 보기 아래 포함). 예: '태그 없음'을 골라 모두 선택 → 태그 더하기. [선택 기록 삭제]는 고른 기록을 지웁니다('확인했어요' 입력, 되돌릴 수 없음). 이 화면은 태그가 붙은 기록만 보여 주므로 학생별 미입력 현황은 현황판·항목별 기록에서 보세요.</li>
               <li><b>마감 일괄</b>: 항목별 기록 위 줄의 [● 마감 일괄]에서 최종안 있는 학생을 모두 또는 골라 한꺼번에 마감하고, 마감된 학생을 골라 한꺼번에 해제합니다. 채택 후 기록이 바뀌었거나 분량을 넘은 학생은 실행 전에 알려 주고, 끝나면 [되돌리기]가 잠시 보입니다.</li>
             </ul>
 
@@ -488,7 +493,7 @@
             <ul>
               <li><b>모델 4칸</b>: 모델 ID를 넣으면 단가가 보입니다. 작업 화면 오른쪽 위에서 고릅니다.</li>
               <li><b>OpenRouter 학습 차단</b>(기본 꺼짐): 켜면 데이터를 수집·보관하지 않는 제공자에게만 보냅니다. 무료 모델 등은 쓸 수 없게 될 수 있습니다.</li>
-              <li><b>프롬프트</b>: 항목(자율·진로·행특·세특·동아리) × 작업(기록 정제·다듬기·종합)마다 지침과 예시를 고칩니다. [기본값으로 되돌리기] 가능.</li>
+              <li><b>프롬프트</b>(메뉴 › 💬 프롬프트): 지침·예시를 이름 붙여 여러 개 만들어 둡니다. 기본 3개(기본 프롬프트·기록 정제·다듬기)는 지울 수 없고 [기본값으로 되돌리기]가 됩니다. AI 실행 확인 창에서 이번에 쓸 프롬프트를 고르며, 작업(종합·생성 / 기록 정제 / 다듬기)마다 마지막에 고른 것을 기억합니다. 예전에 항목별로 고쳐 둔 프롬프트는 '(예전 설정)'으로 목록에 옮겨져 있습니다.</li>
               <li><b>분량</b>: 행동특성 및 종합의견 900바이트, 나머지 1500바이트가 기본입니다(한글 1자 = 3바이트).</li>
               <li><b>태그</b>: 메뉴 [태그]에서 만들고, 기록에는 목록에서 골라 붙입니다(표현 통일).</li>
             </ul>
@@ -498,7 +503,7 @@
               <li>모든 자료는 프로그램 옆 <code>생기부착즙기_데이터</code> 폴더에 저장되고, 바꿀 때마다 자동 저장됩니다(상단 '저장됨').</li>
               <li>앱을 켤 때 하루 한 번 자동 백업(최근 7개). 설정 &gt; 백업·자료의 목록은 <b>백업 시점 · 마지막 작업(왜 만든 백업인지) · 내용(학년도·스캔 원본)</b> 순서로 보이고, 오른쪽 [이 백업으로 복원]을 누릅니다.</li>
               <li>복원하기 전에 지금 상태를 '복원하기 직전' 백업으로 남깁니다. 잘못 복원했으면 복원 직후 나오는 [복원 되돌리기]나, 목록의 '다른 백업으로 복원하기 직전' 백업으로 다시 복원하면 됩니다.</li>
-              <li>복원·담당 삭제·학생 삭제·학년도 삭제·인박스 묶음 삭제·사용 중인 태그 삭제·키 초기화·프롬프트 기본값 되돌리기처럼 되돌릴 수 없는 작업은 <b>'확인했어요'</b>를 직접 입력해야 진행됩니다.</li>
+              <li>복원·담당 삭제·학생 삭제·학년도 삭제·인박스 묶음 삭제·사용 중인 태그 삭제·키 초기화·프롬프트 삭제·기본값 되돌리기처럼 되돌릴 수 없는 작업은 <b>'확인했어요'</b>를 직접 입력해야 진행됩니다.</li>
               <li>업데이트 직전 백업(<code>업데이트전</code>)과 자료 형식이 바뀌어 처음 켤 때 만드는 백업(<code>형식변경전</code>)은 하루 백업에 밀려 지워지지 않게 따로 최근 3개를 보관합니다. exe를 직접 바꿔 넣어도 형식변경전 백업은 만들어집니다.</li>
               <li>새 버전이 나오면 상단에 알림이 뜹니다. [지금 업데이트]를 누르면 백업 후 새 버전으로 바뀌어 다시 켜집니다. 메뉴가 없어지거나 합쳐지는 업데이트는 먼저 안내를 보여 주고, <b>'확인했어요'</b>를 직접 입력해야 진행합니다.</li>
               <li>새 학년도는 설정 &gt; 역할·학년도에서 시작합니다. 이전 학년도는 상단에서 골라 조회만 할 수 있습니다.</li>

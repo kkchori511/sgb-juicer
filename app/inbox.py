@@ -613,19 +613,73 @@ class Inbox:
                 c.execute("UPDATE inbox_rows SET student_no=?, state=?, note=?, exclude_reason='' WHERE id=?", (sno, state, note, r["id"]))
             self._touch(c, bid)
 
-    def to_stage(self, bid, stage):
+    def to_stage(self, bid, stage, exclude_pending=False):
+        """exclude_pending: 확인이 필요한 행(추천·찾지 못함)을 '제외(매칭 미확인)'로 바꾸고 넘어간다(화면에서 확인을 받은 뒤)."""
         b = self._editable_batch(bid)
         if stage not in STAGES or stage == "sent":
             raise DbError("단계가 올바르지 않습니다.")
+        pend = []
         if stage in ("refine", "review"):
-            pend = [r for r in self._rows(bid) if r["state"] in ("none", "suggested")]
-            if pend:
+            rows = self._rows(bid)
+            pend = [r for r in rows if r["state"] in ("none", "suggested")]
+            if pend and not exclude_pending:
                 raise DbError(f"확인이 필요한 행 {len(pend)}개가 남아 있습니다. 학생을 확정하거나 제외해 주세요.")
-            if not any(r["state"] == "confirmed" for r in self._rows(bid)):
-                raise DbError("보낼 행이 없습니다. 모두 제외되어 있습니다.")
+            if not any(r["state"] == "confirmed" for r in rows):
+                raise DbError("보낼 행이 없습니다. 확정된 학생이 하나도 없습니다.")
         with self.d.tx() as c:
+            for r in pend:
+                c.execute("UPDATE inbox_rows SET state='excluded', exclude_reason='매칭 미확인' WHERE id=?", (r["id"],))
             self._touch(c, bid, stage=stage)
         return b
+
+    # ---------- ⑤ 보낸 뒤: 묶음 단위 태그·삭제 ----------
+    def sent_info(self, bid):
+        """이 묶음으로 넣은 기록(source='inbox:묶음번호'). 지금도 같은 항목에 있는 것만 묶음 단위로 다룬다.
+        다른 항목으로 옮긴 기록, 마감된 학생의 기록은 지우지 않는다."""
+        b = self.batch(bid)
+        if b["stage"] != "sent":
+            raise DbError("아직 보내지 않은 묶음입니다.")
+        recs = self.d.q(
+            """SELECT r.id, r.group_id, r.item, r.student_no, r.created_at, r.updated_at,
+                      (SELECT COUNT(*) FROM results x WHERE x.record_id=r.id) AS cands
+               FROM records r WHERE r.source=? ORDER BY r.student_no, r.id""", (f"inbox:{int(bid)}",))
+        here = [r for r in recs if r["group_id"] == b["group_id"] and r["item"] == b["item"]]
+        rec = Records(self.d)
+        closed_sno = {r["student_no"] for r in here if rec.is_closed(b["group_id"], b["item"], r["student_no"])}
+        free = [r for r in here if r["student_no"] not in closed_sno]
+        tag_counts = {}
+        if here:
+            marks = ",".join("?" * len(here))
+            for t in self.d.q(f"SELECT tag_id, COUNT(*) n FROM record_tags WHERE record_id IN ({marks}) GROUP BY tag_id", tuple(r["id"] for r in here)):
+                tag_counts[str(t["tag_id"])] = t["n"]
+        return {"record_ids": [r["id"] for r in here], "deletable": [r["id"] for r in free],
+                "students": len({r["student_no"] for r in here}), "closed": sum(1 for r in here if r["student_no"] in closed_sno),
+                "closed_students": len(closed_sno), "moved": len(recs) - len(here),
+                "edited": sum(1 for r in free if (r["updated_at"] or "") > (r["created_at"] or "")),
+                "with_cands": sum(1 for r in free if r["cands"]), "tag_counts": tag_counts}
+
+    def delete_sent(self, bid):
+        """이 묶음으로 넣은 기록을 모든 학생에서 지운다(마감·옮긴 기록 빼고).
+        남은 기록이 없으면 묶음을 '④ 보내기 검토'로 되돌려 다시 보낼 수 있게 한다."""
+        b = self.batch(bid)
+        info = self.sent_info(bid)
+        ids = info["deletable"]
+        if not ids:
+            raise DbError("지울 수 있는 기록이 없습니다(마감된 학생이거나 다른 항목으로 옮긴 기록만 남음).")
+        marks = ",".join("?" * len(ids))
+        snos = {r["student_no"] for r in self.d.q(f"SELECT student_no FROM records WHERE id IN ({marks})", tuple(ids))}
+        reopened = not info["closed"] and not info["moved"]
+        with self.d.tx() as c:
+            c.execute(f"DELETE FROM results WHERE record_id IN ({marks})", tuple(ids))
+            c.execute(f"DELETE FROM records WHERE id IN ({marks})", tuple(ids))
+            for sno in snos:
+                c.execute("UPDATE finals SET stale=1 WHERE group_id=? AND item=? AND student_no=? AND text<>''", (b["group_id"], b["item"], sno))
+            if reopened:
+                self._touch(c, bid, stage="review", sent_at=None, sent_summary="")
+            else:
+                left = info["closed"] + info["moved"]
+                self._touch(c, bid, sent_summary=f"{b['sent_summary']} · {len(ids)}건 삭제(남은 {left}건)")
+        return {"deleted": len(ids), "students": len(snos), "reopened": reopened, "closed": info["closed"], "moved": info["moved"]}
 
     # ---------- ③ 정제 후보 ----------
     def _row(self, row_id):

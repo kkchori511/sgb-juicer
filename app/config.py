@@ -29,6 +29,10 @@ DEFAULTS = {
     "last_backup": "",
     # 항목×작업별 개인 프롬프트 {item: {op: {prompt, example}}} — 비어 있으면 기본값
     "prompts": {},
+    # v0.17.6 프롬프트 목록 [{id, name, prompt, example}] — None이면 처음(기본 3개 + 예전 항목별 프롬프트로 만든다)
+    "prompt_lib": None,
+    # 작업 종류(synth/refine/polish)마다 마지막에 고른 프롬프트 id
+    "prompt_pick": {},
     # 종합 비중 합계 100% 검사(기본 꺼짐)
     "weight_sum_check": False,
 }
@@ -57,6 +61,10 @@ def _normalize(cfg: dict) -> dict:
         cfg["window"] = {}
     if not isinstance(cfg.get("prompts"), dict):
         cfg["prompts"] = {}
+    if not isinstance(cfg.get("prompt_lib"), list):
+        cfg["prompt_lib"] = None
+    if not isinstance(cfg.get("prompt_pick"), dict):
+        cfg["prompt_pick"] = {}
     for k in ("privacy_block", "setup_done", "menu_collapsed", "weight_sum_check"):
         cfg[k] = bool(cfg.get(k))
     try:

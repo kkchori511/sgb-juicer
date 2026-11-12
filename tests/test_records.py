@@ -111,11 +111,26 @@ def test_all():
     res = ok(api.roster_apply(sub, api.roster_build(sub, p2["raw"], p2["header"], p2["columns"])["rows"]))
     assert res["deactivated"] == 2 and res["removed"] == 0, res  # 20302·20303 둘 다 기록 있음
 
-    # 프롬프트
-    pg = ok(api.prompts_get()); assert set(pg["prompts"]) == {"autonomy", "career", "behavior", "subject", "club"}
-    ok(api.prompts_save("career", "synth", "내 지침", "내 예시"))
-    ok(api.ai_synth(hr, "career", "20301", [r1], None)); assert SENT[-1][0].startswith("내 지침") and "내 예시" in SENT[-1][0] and "반드시" in SENT[-1][0]
-    ok(api.prompts_reset("career", "synth")); assert ok(api.prompts_get())["prompts"]["career"]["synth"]["prompt"] != "내 지침"
+    # 프롬프트 목록: 기본 3개, 새로 만들기, 실행할 때 고르기(작업별 기억), 기본은 못 지우고 되돌리기
+    from app.prompt_default import DEFAULT_TEXT
+    pl = ok(api.prompt_list())
+    assert [x["id"] for x in pl["prompts"]][:3] == ["default", "refine", "polish"] and pl["picks"] == {"synth": "default", "refine": "refine", "polish": "polish"}
+    ok(api.ai_synth(hr, "career", "20301", [r1], None))
+    assert SENT[-1][0].startswith("# 주요 업무") and "50% 이상 다르게" in SENT[-1][0]
+    nid = ok(api.prompt_save({"name": "내 종합", "prompt": "내 지침", "example": "내 예시"}))["id"]
+    ok(api.ai_extra_set("", nid, "synth")); ok(api.ai_synth(hr, "career", "20301", [r1], None)); ok(api.ai_extra_set("", "", ""))
+    assert SENT[-1][0].startswith("내 지침") and "내 예시" in SENT[-1][0] and "반드시" in SENT[-1][0]
+    assert ok(api.prompt_list())["picks"]["synth"] == nid
+    ok(api.ai_synth(hr, "career", "20301", [r1], None)); assert SENT[-1][0].startswith("내 지침")  # 마지막에 고른 것을 기억
+    ok(api.lock_result(ids[0], False)); ok(api.ai_record(r1)); assert SENT[-1][0].startswith("다음은 학생의 활동 기록")  # 정제는 정제 기본(따로 기억)
+    assert not api.prompt_delete("default")["ok"]
+    ok(api.prompt_save({"id": "default", "name": "바꾼 이름", "prompt": "고친 기본", "example": ""}))
+    d0 = [x for x in ok(api.prompt_list())["prompts"] if x["id"] == "default"][0]
+    assert d0["name"] == "기본 프롬프트" and d0["prompt"] == "고친 기본"
+    ok(api.prompt_reset("default")); assert [x for x in ok(api.prompt_list())["prompts"] if x["id"] == "default"][0]["prompt"] == DEFAULT_TEXT
+    ok(api.prompt_delete(nid)); pl = ok(api.prompt_list())
+    assert pl["picks"]["synth"] == "default" and nid not in [x["id"] for x in pl["prompts"]]
+    assert not api.prompt_save({"name": "  "})["ok"]
 
     # 태그 삭제는 기록에서도 빠짐
     ok(api.delete_tag(t1)); assert all(t["name"] != "독서" for r in ok(api.student_view(hr, "career", "20301"))["records"] for t in r["tags"])

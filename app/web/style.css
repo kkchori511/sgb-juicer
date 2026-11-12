@@ -855,3 +855,17 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 .o-colhead .link { padding: 0 2px; font-weight: 600; color: var(--muted); }
 .o-colhead .link:hover { color: var(--danger); }
 .o-swap { margin-left: auto; padding: 1px 8px; font-size: 13px; border-radius: 999px; }
+
+/* 인박스 정제: 정제하지 않은 행의 정제 결과 칸은 비우고 안내만 */
+.ref-cols .rcard-body.rcard-empty { color: var(--muted); background: transparent; border: 1px dashed var(--border); min-height: 3em; }
+
+/* 프롬프트 목록(메뉴 › 프롬프트) */
+.pr-wrap { display: grid; grid-template-columns: 240px 1fr; gap: 14px; margin-top: 8px; }
+.pr-list { display: flex; flex-direction: column; gap: 8px; }
+.pr-items { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; }
+.pr-item { text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--input); }
+.pr-item b { margin-right: 4px; }
+.pr-item.active { border-color: var(--sel, #334155); box-shadow: inset 0 0 0 1px var(--sel, #334155); background: #eef1f5; }
+.pr-edit .map-row label.grow { display: flex; align-items: center; gap: 6px; flex: 1; }
+.pr-edit .map-row label.grow input { flex: 1; }
+.ai-conf select#aiPrompt { max-width: 260px; }

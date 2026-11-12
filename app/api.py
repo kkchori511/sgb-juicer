@@ -735,6 +735,14 @@ class Api:
         return {}
 
     @safe
+    def delete_records(self, record_ids, confirm=None, year=None):
+        """태그별 기록에서 고른 기록 여러 건 삭제(되돌릴 수 없음 → '확인했어요' 입력)."""
+        self._editable(year)
+        if (confirm or "").strip() != updater.CONFIRM_WORD:
+            raise db.DbError(f"'{updater.CONFIRM_WORD}'를 입력해야 지웁니다.")
+        return self._rec().delete_records(record_ids)
+
+    @safe
     def delete_record(self, rid):
         self._editable()
         self._rec().delete_record(rid)
@@ -886,9 +894,28 @@ class Api:
 
     # 이번 실행에만 쓰는 교사의 추가 요구 사항(AI 실행 확인 창에서 입력). 저장된 프롬프트는 바꾸지 않는다.
     @safe
-    def ai_extra_set(self, text=None):
+    def ai_extra_set(self, text=None, prompt_id=None, kind=None):
+        """이번 실행에만: 추가 요구 사항과 고른 프롬프트. 고른 프롬프트는 작업 종류마다 기억한다(다음 실행의 기본)."""
         self._ai_extra = (text or "").strip()[:1000]
+        self._ai_prompt = str(prompt_id or "")
+        if prompt_id and kind in prompts.KINDS:
+            picks = dict(config.load().get("prompt_pick") or {})
+            if picks.get(kind) != prompt_id:
+                picks[kind] = str(prompt_id)
+                config.save({"prompt_pick": picks})
         return {}
+
+    def _library(self):
+        cfg = config.load()
+        lib, changed = prompts.build_library(cfg.get("prompt_lib"), cfg.get("prompts"))
+        if changed:
+            config.save({"prompt_lib": lib})
+        return lib, cfg
+
+    def _prompt(self, kind):
+        """이번 실행에 쓸 프롬프트 {id, name, prompt, example}."""
+        lib, cfg = self._library()
+        return prompts.pick(lib, cfg.get("prompt_pick"), kind, getattr(self, "_ai_prompt", ""))
 
     def _xm(self, meta):
         """결과 기록(meta)에 이번 추가 요구 사항을 남긴다."""
@@ -931,14 +958,14 @@ class Api:
         rec.check_room(r["group_id"], r["item"], r["student_no"], r["id"])
         cfg, model = self._model(model_index)
         op = "polish" if r["kind"] == "existing" else "refine"
-        pr = prompts.merged(cfg["prompts"])[r["item"]][op]
+        pr = self._prompt(op)
         target = rec.ai_target(r["group_id"], r["item"], r["student_no"]) if op == "polish" else 0
         system = prompts.build_system(pr["prompt"], pr["example"], target)
         key = ("record", r["id"])
         self._guard(key)
         try:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, r["content"], cfg["privacy_block"])
-            meta = {"model": model, "op": op, "prompt": pr["prompt"], "example": pr["example"], "record_ids": [r["id"]]}
+            meta = {"model": model, "op": op, "prompt_name": pr["name"], "prompt": pr["prompt"], "example": pr["example"], "record_ids": [r["id"]]}
             nid, dropped = rec.add_result(r["group_id"], r["item"], r["student_no"], op, text, self._xm(meta), cost, record_id=r["id"])
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
         finally:
@@ -968,14 +995,14 @@ class Api:
         cfg, model = self._model(model_index)
         check = cfg["weight_sum_check"] if sum_check is None else bool(sum_check)
         ratios = weights.compute([{"bytes": r["bytes"], "weight": r["weight"]} for r in chosen], check)
-        pr = prompts.merged(cfg["prompts"])[item]["synth"]
-        system = prompts.build_system(pr["prompt"] + std_rule, pr["example"], target)
+        pr = self._prompt("synth")
+        system = prompts.build_system(pr["prompt"] + std_rule + prompts.SYNTH_RULE, pr["example"], target)
         user = prompts.build_synth_user([{"text": r["content"], "ratio": q} for r, q in zip(chosen, ratios)], target)
         key = ("slot", int(gid), item, str(sno))
         self._guard(key)
         try:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, user, cfg["privacy_block"])
-            meta = {"model": model, "op": "synth", "prompt": pr["prompt"], "example": pr["example"], "target": target,
+            meta = {"model": model, "op": "synth", "prompt_name": pr["name"], "prompt": pr["prompt"], "example": pr["example"], "target": target,
                     "record_ids": [r["id"] for r in chosen], "ratios": [round(q * 100, 1) for q in ratios], "sum_check": check, **std_meta}
             nid, dropped = rec.add_result(gid, item, sno, "synth", text, self._xm(meta), cost)
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost, "ratios": meta["ratios"]})
@@ -1028,14 +1055,14 @@ class Api:
         rule += avoid_rule(avoid)
         meta["avoid_count"] = len(avoid)
         cfg, model = self._model(model_index)
-        pr = prompts.merged(cfg["prompts"])[item]["synth"]
+        pr = self._prompt("synth")
         key = ("slot", int(gid), item, str(sno))
         self._guard(key)
         try:
             what = "성취기준과 성취수준" if item == "subject" else "활동 개요"
-            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"] + rule, pr["example"], target),
+            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"] + rule + prompts.SYNTH_RULE, pr["example"], target),
                                        f"(학생관찰기록 없음 — {what}으로만 작성)", cfg["privacy_block"])
-            meta.update({"model": model, "op": "synth", "prompt": pr["prompt"], "example": pr["example"], "target": target})
+            meta.update({"model": model, "op": "synth", "prompt_name": pr["name"], "prompt": pr["prompt"], "example": pr["example"], "target": target})
             nid, dropped = rec.add_result(gid, item, sno, "synth", text, self._xm(meta), cost)
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
         finally:
@@ -1185,12 +1212,12 @@ class Api:
             raise db.DbError("다듬을 최종안이 없습니다.")
         rec.check_room(gid, item, sno)
         cfg, model = self._model(model_index)
-        pr = prompts.merged(cfg["prompts"])[item]["polish"]
+        pr = self._prompt("polish")
         key = ("slot", int(gid), item, str(sno))
         self._guard(key)
         try:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"], pr["example"], target), f["text"], cfg["privacy_block"])
-            meta = {"model": model, "op": "polish", "prompt": pr["prompt"], "example": pr["example"], "target": target, "from": "final"}
+            meta = {"model": model, "op": "polish", "prompt_name": pr["name"], "prompt": pr["prompt"], "example": pr["example"], "target": target, "from": "final"}
             nid, dropped = rec.add_result(gid, item, sno, "polish", text, self._xm(meta), cost)
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
         finally:
@@ -1200,28 +1227,60 @@ class Api:
     def run_cost(self):
         return {"run_cost": self._run_cost}
 
-    # ---------- 프롬프트 ----------
+    # ---------- 프롬프트 목록 ----------
     @safe
-    def prompts_get(self):
-        return {"prompts": prompts.merged(config.load()["prompts"]), "defaults": prompts.DEFAULT_PROMPTS,
-                "items": prompts.ITEM_NAMES, "ops": prompts.OP_NAMES}
+    def prompt_list(self):
+        lib, cfg = self._library()
+        picks = {k: prompts.pick(lib, cfg.get("prompt_pick"), k)["id"] for k in prompts.KINDS}
+        return {"prompts": lib, "picks": picks, "kinds": prompts.KIND_NAMES,
+                "defaults": {k: prompts.BUILTIN[k]["prompt"] for k in prompts.BUILTIN}}
 
     @safe
-    def prompts_save(self, item, op, prompt, example):
-        if item not in prompts.ITEMS or op not in prompts.OPS:
-            raise db.DbError("항목이 올바르지 않습니다.")
-        saved = config.load()["prompts"]
-        saved.setdefault(item, {})[op] = {"prompt": prompt or "", "example": example or ""}
-        config.save({"prompts": saved})
+    def prompt_save(self, entry):
+        """새로 만들기(id 없음) 또는 고치기. 기본 프롬프트는 이름을 바꾸지 않는다."""
+        import uuid
+
+        e = dict(entry or {})
+        name = (e.get("name") or "").strip()[:60]
+        if not name:
+            raise db.DbError("프롬프트 이름을 적어 주세요.")
+        lib, _ = self._library()
+        pid = str(e.get("id") or "")
+        if pid:
+            cur = next((x for x in lib if x["id"] == pid), None)
+            if not cur:
+                raise db.DbError("프롬프트를 찾지 못했습니다.")
+            if not cur["builtin"]:
+                cur["name"] = name
+            cur["prompt"] = str(e.get("prompt") or "")
+            cur["example"] = str(e.get("example") or "")
+        else:
+            pid = "p" + uuid.uuid4().hex[:10]
+            lib.append({"id": pid, "name": name, "prompt": str(e.get("prompt") or ""), "example": str(e.get("example") or ""), "builtin": False})
+        config.save({"prompt_lib": lib})
+        return {"id": pid}
+
+    @safe
+    def prompt_delete(self, pid):
+        lib, cfg = self._library()
+        if pid in prompts.BUILTIN:
+            raise db.DbError("기본 프롬프트는 지울 수 없습니다. [기본값으로 되돌리기]를 쓰세요.")
+        if not any(x["id"] == pid for x in lib):
+            raise db.DbError("프롬프트를 찾지 못했습니다.")
+        picks = {k: v for k, v in (cfg.get("prompt_pick") or {}).items() if v != pid}
+        config.save({"prompt_lib": [x for x in lib if x["id"] != pid], "prompt_pick": picks})
         return {}
 
     @safe
-    def prompts_reset(self, item, op):
-        saved = config.load()["prompts"]
-        if item in saved and op in saved[item]:
-            del saved[item][op]
-        config.save({"prompts": saved})
-        return {"prompt": prompts.DEFAULT_PROMPTS[item][op]}
+    def prompt_reset(self, pid):
+        if pid not in prompts.BUILTIN:
+            raise db.DbError("기본 프롬프트만 되돌릴 수 있습니다.")
+        lib, _ = self._library()
+        for x in lib:
+            if x["id"] == pid:
+                x.update(prompt=prompts.BUILTIN[pid]["prompt"], example=prompts.BUILTIN[pid]["example"])
+        config.save({"prompt_lib": lib})
+        return {}
 
     # ---------- 이미 쓴 생기부 일괄 넣기 ----------
     @safe
@@ -1522,9 +1581,9 @@ class Api:
         return {}
 
     @safe
-    def inbox_stage(self, bid, stage):
+    def inbox_stage(self, bid, stage, exclude_pending=False):
         self._editable()
-        self._ib().to_stage(bid, stage)
+        self._ib().to_stage(bid, stage, bool(exclude_pending))
         return {}
 
     @safe
@@ -1535,12 +1594,12 @@ class Api:
         r = ib._row(row_id)
         b = ib._editable_batch(r["batch_id"])
         cfg, model = self._model(model_index)
-        pr = prompts.merged(cfg["prompts"])[b["item"]]["refine"]
+        pr = self._prompt("refine")
         key = ("inbox", r["id"])
         self._guard(key)
         try:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"], pr["example"], 0), r["content"], cfg["privacy_block"])
-            cid = ib.add_cand(r["id"], text, self._xm({"model": model, "op": "refine", "prompt": pr["prompt"], "example": pr["example"]}), cost)
+            cid = ib.add_cand(r["id"], text, self._xm({"model": model, "op": "refine", "prompt_name": pr["name"], "prompt": pr["prompt"], "example": pr["example"]}), cost)
             ib.use_cand(r["id"], cid)  # 새 후보를 바로 '보낼 내용'으로(다른 후보·원문으로 바꿀 수 있음)
             return {"id": cid, "cost": cost, "run_cost": self._run_cost}
         finally:
@@ -1561,6 +1620,18 @@ class Api:
     @safe
     def inbox_review(self, bid):
         return self._ib().review(bid)
+
+    @safe
+    def inbox_sent_info(self, bid):
+        return self._ib().sent_info(bid)
+
+    @safe
+    def inbox_delete_sent(self, bid, confirm=None):
+        """되돌릴 수 없는 삭제: 화면에서 '확인했어요'를 입력해야 한다(서버에서도 확인)."""
+        self._editable()
+        if (confirm or "").strip() != updater.CONFIRM_WORD:
+            raise db.DbError(f"'{updater.CONFIRM_WORD}'를 입력해야 지웁니다.")
+        return self._ib().delete_sent(bid)
 
     @safe
     def inbox_send(self, bid, closed_action="block"):

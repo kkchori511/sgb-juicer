@@ -648,6 +648,25 @@ class Records:
             c.execute("DELETE FROM records WHERE id=?", (r["id"],))
             self._stale(c, r["group_id"], r["item"], r["student_no"])
 
+    def delete_records(self, rids):
+        """여러 기록을 한꺼번에 지운다(정제 후보 포함). 마감된 학생의 기록이 하나라도 있으면 아무것도 지우지 않는다."""
+        ids = sorted({int(x) for x in rids or []})
+        if not ids:
+            raise DbError("지울 기록을 고르세요.")
+        marks = ",".join("?" * len(ids))
+        rows = self.d.q(f"SELECT id, group_id, item, student_no FROM records WHERE id IN ({marks})", tuple(ids))
+        if len(rows) != len(ids):
+            raise DbError("이미 지워진 기록이 있습니다. 화면을 새로 고친 뒤 다시 골라 주세요.")
+        slots = {(r["group_id"], r["item"], r["student_no"]) for r in rows}
+        for gid, item, sno in slots:
+            self.require_open(gid, item, sno)
+        with self.d.tx() as c:
+            c.execute(f"DELETE FROM results WHERE record_id IN ({marks})", tuple(ids))
+            c.execute(f"DELETE FROM records WHERE id IN ({marks})", tuple(ids))
+            for gid, item, sno in slots:
+                self._stale(c, gid, item, sno)
+        return {"deleted": len(ids), "students": len({r["student_no"] for r in rows})}
+
     # ---------- 문단 이동 ----------
     @staticmethod
     def paragraphs(text: str) -> list[str]:

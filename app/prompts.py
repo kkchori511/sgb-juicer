@@ -1,9 +1,15 @@
-"""항목별 기본 프롬프트와 프롬프트 조립.
+"""프롬프트 목록과 프롬프트 조립.
 
-기본 프롬프트(v0.7 기본값). 선생님이 설정 > 프롬프트에서 언제든 바꿔 쓸 수 있고, 기본값도 나중에 교체할 수 있다.
-결과 형식·분량·예시 규칙은 코드에 고정하고, 지침과 예시만 사용자가 고친다.
+v0.17.6부터 프롬프트는 항목에 묶지 않고 '목록'으로 둔다(메뉴 › 프롬프트). 선생님이 만들고 고르며,
+AI 실행 확인 창에서 이번에 쓸 프롬프트를 고른다(작업 종류마다 마지막에 고른 것을 기억).
+- 기본 3개: 기본 프롬프트(종합·생성), 기록 정제(기본), 다듬기(기본). 지울 수 없고 기본값으로 되돌릴 수 있다.
+- 예전(v0.17.5까지) 항목×작업별로 고쳐 둔 프롬프트는 처음 열 때 목록에 '(예전 설정)'으로 옮긴다(설정의 원래 값도 그대로 둔다).
+결과 형식·분량·예시·성취기준 규칙은 코드에 고정하고, 지침과 예시만 사용자가 고친다.
 AI에는 학번·이름을 넣지 않는다(부르는 쪽에서 내용만 넘긴다).
 """
+import uuid
+
+from .prompt_default import DEFAULT_TEXT
 
 ITEMS = ("autonomy", "career", "behavior", "subject", "club")
 OPS = ("refine", "polish", "synth")
@@ -124,3 +130,68 @@ def build_synth_user(parts: list[dict], target_bytes: int) -> str:
         head = f"[기록 {i}] 반영 비율 {pct}%" + (f"(약 {approx}바이트)" if approx else "")
         lines.append(f"{head}\n{p['text'].strip()}")
     return "\n\n".join(lines)
+
+
+# ---------- 프롬프트 목록(v0.17.6) ----------
+KINDS = ("synth", "refine", "polish")  # 종합·생성 / 기록 정제 / 다듬기
+KIND_NAMES = {"synth": "종합·생성", "refine": "기록 정제", "polish": "다듬기"}
+BUILTIN = {
+    "default": {"name": "기본 프롬프트", "prompt": DEFAULT_TEXT, "example": ""},
+    "refine": {"name": "기록 정제(기본)", "prompt": (
+        "다음은 학생의 활동 기록(학생이 쓴 글이나 교사의 메모)이다.\n"
+        "- 맞춤법, 띄어쓰기, 어색한 문장을 바로잡고 읽기 쉬운 문단으로 정리한다.\n"
+        "- 학생이 실제로 한 활동과 생각을 살리고, 새 내용은 추가하지 않는다."), "example": ""},
+    "polish": {"name": "다듬기(기본)", "prompt": (
+        "다음은 이미 작성된 생기부 문장이다.\n"
+        "- 의미와 사실은 그대로 두고, 표현을 자연스럽고 구체적으로 다듬는다.\n"
+        "- 중복 표현을 줄이고 문장 사이 흐름을 매끄럽게 한다.\n" + _COMMON), "example": ""},
+}
+KIND_DEFAULT = {"synth": "default", "refine": "refine", "polish": "polish"}
+# 여러 학생에게 같은 자료로 쓰는 일이 많아 종합·생성에는 늘 붙인다(프롬프트를 바꿔도 유지)
+SYNTH_RULE = "\n\n[다른 학생과 겹치지 않기]\n- 같은 성취기준·활동 개요를 쓰는 다른 학생들과 표현·문장 구성이 반드시 50% 이상 다르게 작성한다."
+
+
+def _builtin(pid):
+    b = BUILTIN[pid]
+    return {"id": pid, "name": b["name"], "prompt": b["prompt"], "example": b["example"], "builtin": True}
+
+
+def build_library(saved_lib, old_prompts):
+    """저장된 목록을 정리한다. 목록이 없으면(처음) 기본 3개 + 예전에 고친 항목별 프롬프트를 옮겨 만든다.
+    → (목록, 바뀌었는지)"""
+    changed = False
+    if not isinstance(saved_lib, list):
+        lib = [_builtin(k) for k in BUILTIN]
+        for item in ITEMS:
+            for op in OPS:
+                v = ((old_prompts or {}).get(item) or {}).get(op)
+                if not isinstance(v, dict):
+                    continue
+                pr, ex = str(v.get("prompt") or ""), str(v.get("example") or "")
+                d = DEFAULT_PROMPTS[item][op]
+                if (pr.strip() and pr.strip() != d["prompt"].strip()) or ex.strip():
+                    lib.append({"id": "p" + uuid.uuid4().hex[:10], "name": f"{ITEM_NAMES[item]}·{OP_NAMES[op]} (예전 설정)",
+                                "prompt": pr or d["prompt"], "example": ex, "builtin": False})
+        return lib, True
+    lib, seen = [], set()
+    for x in saved_lib:
+        if not isinstance(x, dict) or not x.get("id") or x["id"] in seen:
+            changed = True
+            continue
+        seen.add(x["id"])
+        lib.append({"id": str(x["id"]), "name": str(x.get("name") or "이름 없음")[:60], "prompt": str(x.get("prompt") or ""),
+                    "example": str(x.get("example") or ""), "builtin": x["id"] in BUILTIN})
+    for k in BUILTIN:  # 기본은 늘 있어야 한다
+        if k not in seen:
+            lib.insert(list(BUILTIN).index(k), _builtin(k))
+            changed = True
+    return lib, changed
+
+
+def pick(lib, picks, kind, chosen=None):
+    """이번에 쓸 프롬프트: 고른 것 → 이 작업에서 마지막에 고른 것 → 작업별 기본."""
+    by = {x["id"]: x for x in lib}
+    for pid in (chosen, (picks or {}).get(kind), KIND_DEFAULT.get(kind, "default")):
+        if pid and pid in by:
+            return by[pid]
+    return by.get("default") or _builtin("default")

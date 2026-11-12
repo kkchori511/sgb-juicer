@@ -124,6 +124,16 @@ def main():
     assert c not in [r["id"] for r in ok(api.tag_view(t, {}))["records"]]
     rc = [r for r in ok(api.tag_view(t, {"inactive": True}))["records"] if r["id"] == c][0]
     assert rc["active"] is False
+    # 고른 기록 여러 건 삭제: '확인했어요'가 있어야, 마감된 학생 기록(d: 과학 20301 마감)이 섞이면 아무것도 안 지움
+    x1 = ok(api.add_record(hr, "autonomy", "20302", {"content": "지울 것 1"}))["id"]
+    x2 = ok(api.add_record(hr, "career", "20302", {"content": "지울 것 2"}))["id"]
+    assert not api.delete_records([x1, x2], "확인")["ok"]
+    assert not api.delete_records([x1, d], "확인했어요")["ok"]
+    assert x1 in {r["id"] for r in ok(api.tag_view(0, {}))["records"]}
+    d0 = ok(api.delete_records([x1, x2], "확인했어요"))
+    assert d0 == {"ok": True, "deleted": 2, "students": 1} or (d0["deleted"] == 2 and d0["students"] == 1)
+    assert not {r["id"] for r in ok(api.tag_view(0, {}))["records"]} & {x1, x2}
+    assert not api.delete_records([x1], "확인했어요")["ok"]  # 이미 지워짐
     print("TAG VIEW OK")
 
 
