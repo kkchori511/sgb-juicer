@@ -2102,8 +2102,10 @@
     R.selected = new Set(sel);
     box.appendChild(el('div', { class: 'toolbar' }, [
       el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'checkbox', checked: sel.length && sel.length === v.records.length, onchange: (e) => { R.selected = new Set(e.target.checked ? v.records.map((r) => r.id) : []); renderRecords(); } }), '전체 선택']),
+      (() => { const yet = v.records.filter((r) => !r.candidates.length && !r.original); return el('button', { type: 'button', class: 'small', disabled: !yet.length, title: '정제·다듬기 후보가 없고 AI 결과를 반영한 적도 없는 기록만 고릅니다', text: `정제 안 한 기록만 선택 (${yet.length})`, onclick: () => { R.selected = new Set(yet.map((r) => r.id)); renderRecords(); } }); })(),
       el('span', { class: 'muted', text: `선택 ${sel.length}건` }),
       el('button', { type: 'button', class: 'primary ai-btn', disabled: locked || !sel.length || pairFull(), title: pairFull() ? PAIR_FULL_TIP : '', text: `선택 기록 종합하기 (${sel.length})`, onclick: openSynth }),
+      (() => { const recs = v.records.filter((r) => R.selected.has(r.id) && r.kind !== 'existing'); return el('button', { type: 'button', class: 'ai-btn', disabled: locked || !recs.length, title: '고른 학생관찰기록을 한꺼번에 정제합니다(기존 완성문은 빼고, 다듬기는 카드에서 한 건씩)', text: `선택 기록 정제 (${recs.length})`, onclick: (e) => aiRecords(recs, e.currentTarget) }); })(),
       el('button', { type: 'button', disabled: locked || !sel.length, text: '태그 일괄 지정', onclick: bulkTag }),
       el('button', { type: 'button', disabled: locked || !sel.length, text: '다른 항목으로 이동', onclick: () => openMove(v.records.filter((r) => R.selected.has(r.id))) }),
     ]));
@@ -2228,6 +2230,20 @@
     }));
     if (!out || !out.done) return;
     toast(out.results[0].dropped ? '새 후보를 만들고 가장 오래된 후보를 지웠습니다.' : '새 후보를 만들었습니다. 기록 카드 아래에 있습니다.');
+    loadStudent(true);
+  }
+
+  // 고른 학생관찰기록 여러 건 정제(동시에 보냄). 기존 완성문은 빼고 한다.
+  async function aiRecords(recs, btn) {
+    if (!recs.length) return;
+    const out = await busyRun(btn, `recs${R.sno}`, () => aiRun({
+      title: '학생관찰기록 정제', kind: 'refine',
+      rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['대상', `기록 ${recs.length}건 (${recs.map((r) => `${r.seq}회`).join(', ')})`], ['모델', modelName($('recModel'))]],
+      warn: `기록마다 정제 후보를 하나씩 만듭니다. 기록은 [이 내용으로 기록 바꾸기]를 눌러야 바뀝니다. ${DROP_WARN}`,
+      jobs: recs.map((r) => ({ label: `${r.seq}회${r.title ? ` ${r.title}` : ''}`, run: () => api.ai_record(r.id, $('recModel').value) })),
+    }));
+    if (!out) return;
+    if (out.done) toast(`${out.done}건의 정제 후보를 만들었습니다. 기록 카드 아래에 있습니다.`);
     loadStudent(true);
   }
 
@@ -2845,7 +2861,10 @@
         el('p', { class: 'hint', text: '학생마다 기존 완성문을 그대로 최종안으로 보냅니다. 최종안이 없는 학생은 미리 체크되어 있고, 최종안이 있는 학생은 [전문 비교]로 확인한 뒤 덮어쓸 학생만 체크하세요. 마감·비활성 학생과 기존 완성문이 없는 학생은 제외됩니다. 학생 목록의 검색·필터와 관계없이 이 담당 명렬 전체가 대상입니다. 보낸 직후에는 [되돌리기]로 원래 최종안을 돌려놓을 수 있습니다.' }),
         nMulti ? el('div', { class: 'map-row' }, [el('b', { text: `기존 완성문이 여러 개인 학생 ${nMulti}명:` }), radio('latest', '마지막으로 추가한 것으로 미리 고르기'), radio('skip', '직접 고르기(고르기 전에는 제외)'),
           el('span', { class: 'hint', style: 'margin:0', text: '줄마다 보낼 것을 바꿀 수 있습니다.' })]) : null,
-        el('div', { class: 'toolbar' }, [summary]),
+        el('div', { class: 'toolbar' }, [summary, el('span', { class: 'spacer' }),
+          el('button', { type: 'button', class: 'small', title: '최종안이 아직 없는 학생만 체크합니다(덮어쓰기 없음)', text: '최종안 없는 학생만 선택', onclick: () => { studs.forEach((x) => { const c = classify(x); if (c.kind === 'new' || c.kind === 'over') pick.set(x.student_no, c.kind === 'new'); }); draw(); } }),
+          el('button', { type: 'button', class: 'small', title: '보낼 수 있는 학생을 모두 체크합니다(최종안 있는 학생은 덮어씀)', text: '전체 선택', onclick: () => { studs.forEach((x) => { const c = classify(x); if (c.kind === 'new' || c.kind === 'over') pick.set(x.student_no, true); }); draw(); } }),
+          el('button', { type: 'button', class: 'small', text: '선택 해제', onclick: () => { studs.forEach((x) => pick.set(x.student_no, false)); draw(); } })]),
         tbox,
       );
       sendBtn.addEventListener('click', () => runOnce(sendBtn, '보내는 중…', async (reqId) => {
@@ -3299,7 +3318,8 @@
     const shown = Math.min(TV.limit, d.records.length);
     addTo(sum, el('b', { text: name }), ` · ${d.students}명 ${d.records.length}건`,
       el('span', { class: 'muted', text: ` (고칠 수 있음 ${editable}건 · 읽기 전용 ${d.records.length - editable}건) · ${shown}/${d.records.length}건 표시` }),
-      editable ? el('button', { type: 'button', class: 'small', text: `이 조건 모두 선택 (${editable}건)`, title: '지금 필터에 맞는 기록 중 고칠 수 있는 것을 모두 고릅니다(더 보기 아래 기록 포함)', onclick: () => tvSelectAll(true) }) : null);
+      editable ? el('button', { type: 'button', class: 'small', text: `이 조건 모두 선택 (${editable}건)`, title: '지금 필터에 맞는 기록 중 고칠 수 있는 것을 모두 고릅니다(더 보기 아래 기록 포함)', onclick: () => tvSelectAll(true) }) : null,
+      (() => { const yet = d.records.filter((r) => tvEditable(r) && !r.has_final).length; return editable ? el('button', { type: 'button', class: 'small', disabled: !yet, title: '최종안이 아직 없는 학생(항목)의 기록만 고릅니다', text: `최종안 없는 학생 기록만 선택 (${yet}건)`, onclick: () => tvSelectAll(true, (r) => !r.has_final) }) : null; })());
     if (TV.bulk) {
       const b = TV.bulk;
       sum.append(el('span', { class: 'tv-bulk-note' }, [`최근 일괄 작업: ${b.text} `, el('button', { type: 'button', class: 'link', text: '되돌리기', onclick: () => tvBulkUndo() })]));
@@ -3483,9 +3503,9 @@
       el('button', { type: 'button', class: 'danger-text', text: `선택 기록 삭제`, onclick: () => tvBulkDelete(recs, n) }));
   }
   // 이 조건(태그·필터)의 고칠 수 있는 기록 모두 고르기 / 모두 풀기 — 아직 그리지 않은(더 보기 아래) 기록도 포함
-  function tvSelectAll(on) {
+  function tvSelectAll(on, only) {
     TV.sel.clear();
-    if (on) TV.data.records.filter(tvEditable).forEach((r) => TV.sel.add(r.id));
+    if (on) TV.data.records.filter((r) => tvEditable(r) && (!only || only(r))).forEach((r) => TV.sel.add(r.id));
     document.querySelectorAll('#tvMain .tv-rec').forEach((c) => {
       const pick = TV.sel.has(+c.dataset.rid);
       c.classList.toggle('sel', pick);
@@ -4096,6 +4116,7 @@
     body.appendChild(el('div', { class: 'toolbar' }, [
       el('label', { class: 'inline', style: 'margin:0' }, ['모델', model]),
       el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'checkbox', checked: IB.sel.size && IB.sel.size === rows.length, onchange: (e) => { IB.sel = new Set(e.target.checked ? rows.map((r) => r.id) : []); renderBatch(); } }), '전체 선택']),
+      (() => { const yet = rows.filter((r) => !(r.cands || []).length); return el('button', { type: 'button', disabled: !yet.length, title: '정제 결과가 아직 없는 행만 고릅니다', text: `정제 안 한 행만 선택 (${yet.length})`, onclick: () => { IB.sel = new Set(yet.map((r) => r.id)); renderBatch(); } }); })(),
       el('button', { type: 'button', class: 'primary ai-btn', disabled: !IB.sel.size, text: `선택 ${IB.sel.size}건 정제`, onclick: () => refineRows(rows.filter((r) => IB.sel.has(r.id)), model.value, null, modelName(model)) }),
       el('span', { class: 'spacer' }),
       el('span', { class: 'hint', style: 'margin:0', text: `${slotLabel(b.group_id, b.item)}의 '정제' 지침을 씁니다. AI에는 명렬의 학번·이름은 보내지 않습니다(본문에 적힌 이름은 그대로 갑니다).` }),
