@@ -9,7 +9,7 @@ AI에는 학번·이름을 넣지 않는다(부르는 쪽에서 내용만 넘긴
 """
 import uuid
 
-from .prompt_default import DEFAULT_TEXT, LEGACY_TEXT
+from .prompt_default import DEFAULT_TEXT, LEGACY_TEXT, POLISH_TEXT, REFINE_TEXT
 
 ITEMS = ("autonomy", "career", "behavior", "subject", "club")
 OPS = ("refine", "polish", "synth")
@@ -137,14 +137,20 @@ KINDS = ("synth", "refine", "polish")  # 종합·생성 / 기록 정제 / 다듬
 KIND_NAMES = {"synth": "종합·생성", "refine": "기록 정제", "polish": "다듬기"}
 BUILTIN = {
     "default": {"name": "기본 프롬프트", "prompt": DEFAULT_TEXT, "example": ""},
-    "refine": {"name": "기록 정제(기본)", "prompt": (
+    "refine": {"name": "기록 정제(기본)", "prompt": REFINE_TEXT, "example": ""},
+    "polish": {"name": "다듬기(기본)", "prompt": POLISH_TEXT, "example": ""},
+}
+# v0.17.6~0.17.7의 정제·다듬기 기본(고치지 않고 쓰던 사람은 새 기본으로 바꿔 준다)
+LEGACY_BUILTIN = {
+    "refine": (
         "다음은 학생의 활동 기록(학생이 쓴 글이나 교사의 메모)이다.\n"
         "- 맞춤법, 띄어쓰기, 어색한 문장을 바로잡고 읽기 쉬운 문단으로 정리한다.\n"
-        "- 학생이 실제로 한 활동과 생각을 살리고, 새 내용은 추가하지 않는다."), "example": ""},
-    "polish": {"name": "다듬기(기본)", "prompt": (
+        "- 학생이 실제로 한 활동과 생각을 살리고, 새 내용은 추가하지 않는다."),
+    "polish": (
         "다음은 이미 작성된 생기부 문장이다.\n"
         "- 의미와 사실은 그대로 두고, 표현을 자연스럽고 구체적으로 다듬는다.\n"
-        "- 중복 표현을 줄이고 문장 사이 흐름을 매끄럽게 한다.\n" + _COMMON), "example": ""},
+        "- 중복 표현을 줄이고 문장 사이 흐름을 매끄럽게 한다.\n" + _COMMON),
+    "default": LEGACY_TEXT,
 }
 KIND_DEFAULT = {"synth": "default", "refine": "refine", "polish": "polish"}
 # 여러 학생에게 같은 자료로 쓰는 일이 많아 종합·생성에는 늘 붙인다(프롬프트를 바꿔도 유지)
@@ -181,8 +187,8 @@ def build_library(saved_lib, old_prompts):
         seen.add(x["id"])
         e = {"id": str(x["id"]), "name": str(x.get("name") or "이름 없음")[:60], "prompt": str(x.get("prompt") or ""),
              "example": str(x.get("example") or ""), "builtin": x["id"] in BUILTIN}
-        if e["id"] == "default" and e["prompt"].strip() == LEGACY_TEXT.strip():  # 고치지 않고 쓰던 예전 기본 → 새 기본
-            e["prompt"] = DEFAULT_TEXT
+        if e["id"] in LEGACY_BUILTIN and e["prompt"].strip() == LEGACY_BUILTIN[e["id"]].strip():  # 고치지 않고 쓰던 예전 기본 → 새 기본
+            e["prompt"] = BUILTIN[e["id"]]["prompt"]
             changed = True
         if e["builtin"]:
             e["name"] = BUILTIN[e["id"]]["name"]

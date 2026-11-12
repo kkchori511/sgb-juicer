@@ -102,5 +102,14 @@ if __name__ == "__main__":
     assert any(r["section"] == "물리 C반" for r in ok(api.roster_copy_source(sub))["rows"])
     ok(api.set_section(sub, ["20681"], ""))
     assert {m["student_no"]: m["section"] for m in ok(api.members(sub))["members"]}["20681"] == ""
+    # 직접 입력: 여러 모양을 읽고 확인까지(고친 값은 roster_validate로 다시 확인)
+    from app import roster as R
+    got = R.parse_lines("20301 김철수\n\n2 3 2 이영희\n2학년 3반 3번 박민수\n2-3-4\t최가람\n홍길동")
+    assert [(x["line"], x["student_no"], x["grade"], x["class_no"], x["number"], x["name"]) for x in got] == [
+        (1, "20301", "", "", "", "김철수"), (3, "", "2", "3", "2", "이영희"), (4, "", "2", "3", "3", "박민수"), (5, "", "2", "3", "4", "최가람"), (6, "", "", "", "", "홍길동")]
+    dr = ok(api.roster_direct(sub, "2 3 2 이영희\n홍길동"))["rows"]
+    assert dr[0]["student_no"] == "20302" and dr[0]["line"] == 1 and dr[1]["issues"], dr
+    fixed = ok(api.roster_validate(sub, [{**dr[1], "student_no": "20399"}], True))["rows"][0]
+    assert fixed["student_no"] == "20399" and not [i for i in fixed["issues"] if "학번" in i], fixed
     ok(api.save_now())
     print("ROSTER INPUT OK")

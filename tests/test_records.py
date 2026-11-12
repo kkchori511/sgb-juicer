@@ -122,7 +122,7 @@ def test_all():
     assert SENT[-1][0].startswith("내 지침") and "내 예시" in SENT[-1][0] and "반드시" in SENT[-1][0]
     assert ok(api.prompt_list())["picks"]["synth"] == nid
     ok(api.ai_synth(hr, "career", "20301", [r1], None)); assert SENT[-1][0].startswith("내 지침")  # 마지막에 고른 것을 기억
-    ok(api.lock_result(ids[0], False)); ok(api.ai_record(r1)); assert SENT[-1][0].startswith("다음은 학생의 활동 기록")  # 정제는 정제 기본(따로 기억)
+    ok(api.lock_result(ids[0], False)); ok(api.ai_record(r1)); assert SENT[-1][0].startswith("# 역할") and "정제" in SENT[-1][0] and "고치지 않아도 되는 문장은 한 글자도 바꾸지 않습니다" in SENT[-1][0]  # 정제는 정제 기본(따로 기억)
     assert not api.prompt_delete("default")["ok"]
     ok(api.prompt_save({"id": "default", "name": "바꾼 이름", "prompt": "고친 기본", "example": ""}))
     d0 = [x for x in ok(api.prompt_list())["prompts"] if x["id"] == "default"][0]

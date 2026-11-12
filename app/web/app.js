@@ -642,6 +642,7 @@
       el('button', { type: 'button', class: 'primary edit-only', text: '📋 클립보드에서 추가', onclick: () => importFromClipboard(g) }),
       el('button', { type: 'button', class: 'edit-only', text: '📂 파일 추가(여러 개)', onclick: () => importFromXlsx(g) }),
       el('button', { type: 'button', class: 'edit-only', text: '👥 다른 담당 명렬 가져오기', onclick: () => openRosterInput(g, null, 'copy') }),
+      el('button', { type: 'button', class: 'edit-only', text: '✍️ 직접 입력', onclick: () => openRosterInput(g, null, 'direct') }),
       el('button', { type: 'button', class: 'edit-only', text: '+ 학생 한 명 추가(전입)', onclick: () => openRosterInput(g, null, 'line') }),
     );
     if (!members.length) {
@@ -773,6 +774,7 @@
       box.append(
         el('div', { class: 'sheet-head' }, [el('h2', { text: `명렬 입력 · ${g.label}` })]),
         el('div', { class: 'hint', text: '엑셀에서 학년·반·번호·이름(또는 학번·이름) 칸을 드래그해 복사한 뒤 [클립보드에서 추가]를 누르세요(이 창에서 Ctrl+V도 됩니다). 다른 범위를 복사해 또 누르면 아래에 이어 붙습니다. 파일 여러 개, 다른 담당의 명렬도 섞어 계속 이어서 넣을 수 있습니다.' }),
+        directBox(),
         el('div', { class: 'toolbar' }, [
           el('button', { type: 'button', class: 'primary', text: '📋 클립보드에서 추가', onclick: addClip }),
           el('button', { type: 'button', text: '📂 파일 추가(여러 개)', onclick: addFiles }),
@@ -793,11 +795,68 @@
       setTimeout(() => box.focus(), 50);
     });
     renderRows();
+    if (first === 'direct') setTimeout(() => { const ta = $('rosterDirect'); if (ta) ta.focus(); }, 80);
     if (first === 'clip') addClip();
     else if (first === 'file') addFiles();
     else if (first === 'line') addLine();
     else if (first === 'copy') addCopy();
 
+    // 직접 입력: 한 줄에 한 명을 적으면 바로 읽어 아래 표에 보여 주고, 표에서 칸을 고친 뒤 [아래 목록에 추가]
+    function directBox() {
+      const D = { rows: [], edited: false, seq: 0 };
+      const ta = el('textarea', { id: 'rosterDirect', class: 'roster-direct', rows: 4, placeholder: '직접 입력 — 한 줄에 한 명\n20301 김철수\n2 3 2 이영희\n2학년 3반 3번 박민수' });
+      const note = el('div', { class: 'muted small-note' });
+      const prev = el('div', { class: 'direct-prev' });
+      const addBtn = el('button', { type: 'button', class: 'primary', text: '아래 목록에 추가', disabled: true });
+      const reread = el('button', { type: 'button', class: 'small', text: '글로 다시 읽기', hidden: true, onclick: () => { D.edited = false; read(); } });
+      const draw = () => {
+        prev.innerHTML = '';
+        reread.hidden = !D.edited;
+        addBtn.disabled = !D.rows.length;
+        if (!D.rows.length) { note.textContent = ta.value.trim() ? '읽은 학생이 없습니다. 한 줄에 학번과 이름(또는 학년 반 번호 이름)을 적어 주세요.' : ''; return; }
+        const bad = D.rows.filter((r) => r.issues && r.issues.length).length;
+        note.textContent = `읽은 학생 ${D.rows.length}명${bad ? ` · 확인 필요 ${bad}명(빨간 줄)` : ''} · 칸을 눌러 직접 고칠 수 있습니다.${D.edited ? ' 직접 고친 칸이 있어 위 글을 고쳐도 다시 읽지 않습니다([글로 다시 읽기]를 누르면 고친 칸은 사라집니다).' : ''}`;
+        const t = el('table', { class: 'tbl direct-tbl' });
+        t.appendChild(el('tr', {}, ['줄', '학년', '반', '번호', '이름', '학번', '확인'].map((h) => el('th', { text: h }))));
+        D.rows.forEach((r) => {
+          const cell = (k, w) => el('td', {}, [el('input', { type: 'text', value: r[k] || '', style: `width:${w}`, oninput: (e) => { r[k] = e.target.value.trim(); D.edited = true; revalidateDirect(); } })]);
+          t.appendChild(el('tr', { class: r.issues && r.issues.length ? 'row-bad' : '' }, [el('td', { class: 'muted', text: r.line || '' }), cell('grade', '3em'), cell('class_no', '3em'), cell('number', '3em'), cell('name', '8em'), cell('student_no', '6em'),
+            el('td', { class: r.issues && r.issues.length ? 'danger-text' : 'muted', text: (r.issues || []).concat(r.notes || []).join(', ') || '✔' })]));
+        });
+        prev.appendChild(t);
+      };
+      const read = debounce(async () => {
+        if (D.edited) { draw(); return; }
+        const seq = ++D.seq;
+        const text = ta.value;
+        if (!text.trim()) { D.rows = []; draw(); return; }
+        const r = await rawCall('roster_direct', g.id, text);
+        if (seq !== D.seq || !r || r.ok === false) return;
+        D.rows = r.rows;
+        draw();
+      }, 300);
+      const revalidateDirect = debounce(async () => {
+        const seq = ++D.seq;
+        const r = await rawCall('roster_validate', g.id, D.rows.map((x) => ({ ...plainRow(x), line: x.line })), true);
+        if (seq !== D.seq || !r || r.ok === false) return;
+        r.rows.forEach((x, i) => { x.line = D.rows[i] && D.rows[i].line; });
+        const focus = document.activeElement, pos = focus && focus.closest ? [...prev.querySelectorAll('input')].indexOf(focus) : -1;
+        D.rows = r.rows;
+        draw();
+        if (pos >= 0) { const ins = prev.querySelectorAll('input'); if (ins[pos]) { ins[pos].focus(); const v = ins[pos].value; ins[pos].setSelectionRange(v.length, v.length); } }
+      }, 400);
+      const add = () => {
+        if (!D.rows.length) return;
+        pushBatch(D.rows.map((x) => ({ ...x, section: '' })), '직접 입력');
+        D.rows = []; D.edited = false; ta.value = ''; draw();
+        ta.focus();
+      };
+      addBtn.addEventListener('click', add);
+      ta.addEventListener('input', read);
+      ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); add(); } });
+      return el('div', { class: 'direct-box' }, [el('div', { class: 'col-label', text: '✍️ 직접 입력 (한 줄에 한 명 · 학번 이름 / 학년 반 번호 이름)' }), ta, note, prev,
+        el('div', { class: 'toolbar' }, [reread, el('span', { class: 'spacer' }), el('span', { class: 'muted', text: 'Ctrl+Enter' }), addBtn])]);
+    }
     function plainRow(r) { return { student_no: r.student_no, name: r.name, grade: r.grade, class_no: r.class_no, number: r.number, level: '', section: r.section || '', rename_ok: !!r.rename_ok }; }
     // 선택과목: 묶음(파일·붙여넣기)마다 수업 이름. 파일은 파일 이름이 기본, 비우면 학년-반으로 묶는다.
     const isSub = g.kind === 'subject';
@@ -2087,12 +2146,51 @@
     }
     return card;
   }
+  // ---------- 후보 문장을 최종안에 넣기 ----------
+  function splitSentences(text) {
+    return String(text || '').split(/\n+/).flatMap((p) => p.match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g) || []).map((x) => x.trim()).filter(Boolean);
+  }
+  // 최종안의 커서 자리(없으면 맨 끝)에 넣는다. 브라우저 되돌리기(Ctrl+Z)가 되도록 insertText를 쓴다.
+  function insertToFinal(text) {
+    const fd = finalDraft;
+    if (!fd || !fd.ta || !fd.ta.isConnected) { toast('최종안 칸이 보이는 화면에서 쓸 수 있습니다.'); return false; }
+    if (fd.ro || fd.ta.disabled) { toast('마감되었거나 읽기 전용이라 최종안에 넣을 수 없습니다.'); return false; }
+    const ta = fd.ta;
+    const [a, b] = ta._sel || [ta.value.length, ta.value.length];
+    ta.focus();
+    ta.setSelectionRange(a, b);
+    let ins = String(text).trim();
+    if (!ins) return false;
+    if (ta.value.slice(0, a) && !/\s$/.test(ta.value.slice(0, a))) ins = ' ' + ins;
+    if (ta.value.slice(b) && !/^\s/.test(ta.value.slice(b))) ins += ' ';
+    if (!document.execCommand('insertText', false, ins)) { ta.setRangeText(ins, a, b, 'end'); ta.dispatchEvent(new Event('input')); }
+    ta._sel = [ta.selectionStart, ta.selectionEnd];
+    return true;
+  }
+  function sentencePicker(cd) {
+    const box = el('div', { class: 'sent-pick', hidden: true });
+    const draw = () => {
+      box.innerHTML = '';
+      const fin = finalDraft && finalDraft.ta ? finalDraft.ta.value.replace(/\s+/g, ' ') : '';
+      box.appendChild(el('div', { class: 'muted small-note', text: '문장을 누르면 최종안의 커서 자리(없으면 맨 끝)에 들어갑니다. Ctrl+Z로 되돌릴 수 있습니다. 문장 일부만 필요하면 후보 글을 마우스로 골라 [최종안에 넣기]를 누르세요.' }));
+      splitSentences(cd.text).forEach((x) => {
+        const used = fin.includes(x.replace(/\s+/g, ' '));
+        box.appendChild(el('button', { type: 'button', class: 'sent-chip' + (used ? ' used' : ''), title: used ? '이미 최종안에 있는 문장' : '최종안에 넣기', text: (used ? '✔ ' : '') + x,
+          onclick: () => { if (insertToFinal(x)) draw(); } }));
+      });
+    };
+    box.toggle = () => { box.hidden = !box.hidden; if (!box.hidden) draw(); };
+    return box;
+  }
   function candEl(cd, locked, extra) {
+    const picker = sentencePicker(cd);
+    const pickBtn = el('button', { type: 'button', class: 'small', disabled: locked, title: '이 후보의 문장을 골라 최종안에 넣습니다', text: '문장 골라 넣기', onclick: () => { picker.toggle(); pickBtn.classList.toggle('on', !picker.hidden); } });
     return el('div', { class: 'cand' + (cd.locked ? ' locked' : '') }, [
       el('div', { class: 'cand-head' }, [el('b', { text: OP_LABEL[cd.op] || cd.op }), stdBadge(cd.meta), cd.meta.extra ? el('span', { class: 'badge extra-badge', title: cd.meta.extra, text: `추가 요구: ${cd.meta.extra.length > 24 ? cd.meta.extra.slice(0, 24) + '…' : cd.meta.extra}` }) : null, cd.created_at.slice(5, 16), cd.meta.model ? `· ${cd.meta.model}` : '',
         cd.meta.ratios ? `· 비율 ${cd.meta.ratios.join('/')}%` : '', el('span', { class: 'spacer' }), bytesEl(cd.bytes, R.target)]),
       el('div', { class: 'cand-body', text: cd.text }),
-      el('div', { class: 'rcard-foot' }, [...(extra || []), el('span', { class: 'spacer' }),
+      picker,
+      el('div', { class: 'rcard-foot' }, [...(extra || []), pickBtn, el('span', { class: 'spacer' }),
         el('button', { type: 'button', class: 'small', title: '새 결과가 생겨도 지우지 않음', text: cd.locked ? '🔒 보관 잠금됨' : '🔓 보관 잠금', onclick: async () => { if (await mutate('lock_result', cd.id, !cd.locked)) loadStudent(true); } }),
         el('button', { type: 'button', class: 'small link danger-text', disabled: locked, text: '삭제', onclick: async () => { if (await mutate('delete_result', cd.id)) loadStudent(true); } })]),
     ]);
@@ -2297,6 +2395,9 @@
     const bc = el('span', {});
     const upd = () => { bc.innerHTML = ''; bc.appendChild(bytesEl(bytesOf(ta.value), R.target)); };
     ta.addEventListener('input', () => { upd(); saveState.textContent = '저장 중…'; finalAutoSave(); });
+    // 후보 문장을 넣을 자리: 마지막 커서 위치를 기억(없으면 맨 끝)
+    const keepSel = () => { ta._sel = [ta.selectionStart, ta.selectionEnd]; };
+    ['keyup', 'click', 'select', 'blur'].forEach((ev) => ta.addEventListener(ev, keepSel));
     const saveState = el('span', { class: 'muted' });
     const ctx = R.viewCtx;
     finalDraft = { ctx, saved: f ? f.text : '', ta, state: saveState, ro };
@@ -5196,6 +5297,27 @@
     $('prPrompt').addEventListener('input', savePrompt);
     $('prExample').addEventListener('input', savePrompt);
     $('prNewBtn').addEventListener('click', () => newPrompt(null));
+    // 후보 글에서 일부를 마우스로 고르면 [최종안에 넣기] 버튼을 띄운다
+    const selBtn = el('button', { type: 'button', class: 'sel-insert', hidden: true, text: '⤵ 최종안에 넣기' });
+    document.body.appendChild(selBtn);
+    selBtn.addEventListener('mousedown', (e) => e.preventDefault()); // 고른 글이 풀리지 않게
+    selBtn.addEventListener('click', () => {
+      const t = String(window.getSelection() || '').trim();
+      selBtn.hidden = true;
+      if (t && insertToFinal(t)) { window.getSelection().removeAllRanges(); toast('고른 부분을 최종안에 넣었습니다. Ctrl+Z로 되돌릴 수 있습니다.'); }
+    });
+    document.addEventListener('mouseup', () => setTimeout(() => {
+      const sel = window.getSelection();
+      const t = String(sel || '').trim();
+      const node = sel && sel.anchorNode ? (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement) : null;
+      const body = node && node.closest ? node.closest('.cand-body') : null;
+      if (!t || !body || panel !== 'records') { selBtn.hidden = true; return; }
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      selBtn.style.left = `${Math.min(rect.right + 6, window.innerWidth - 150)}px`;
+      selBtn.style.top = `${Math.max(rect.top - 34, 8)}px`;
+      selBtn.hidden = false;
+    }, 0));
+    document.addEventListener('scroll', () => { selBtn.hidden = true; }, true);
     $('prWizBtn').addEventListener('click', openPromptWizard);
     $('prCopyBtn').addEventListener('click', () => newPrompt(P.id));
     $('prResetBtn').addEventListener('click', async () => {

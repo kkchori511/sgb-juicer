@@ -153,6 +153,10 @@ def test_rules():
     assert "고등학교 수학 교사" in t and "생활기록부(과목별 세부능력 및 특기사항)" in t and "교사 의견 덧붙이기" not in t
     assert "예시와 비교" not in t and "[틀린예시]" not in t and "- 숫자는 쓰지 않음" in t and "꺼진 줄" not in t
     assert "5. **최종 출력 형태**" in t and "6. **최종 재검토**" in t
+    # v0.17.8 정제·다듬기 기본: 고치지 않고 쓰던 예전 기본만 새 글로
+    up, ch = prompts.build_library([{"id": k, "name": "x", "prompt": prompts.LEGACY_BUILTIN[k], "example": ""} for k in ("default", "refine", "polish")], {})
+    assert ch and [x["prompt"] for x in up[:3]] == [prompts.BUILTIN[k]["prompt"] for k in ("default", "refine", "polish")]
+    assert "내용을 지우지 않습니다" in prompts.BUILTIN["polish"]["prompt"] and "학생의 말투" in prompts.BUILTIN["refine"]["prompt"]
     assert "50% 이상 다르게" in prompts.DEFAULT_PROMPTS["subject"]["synth"]["prompt"]
     assert all("50% 이상" in prompts.DEFAULT_PROMPTS[i]["synth"]["prompt"] for i in prompts.ITEMS)
     assert similarity("가나다라마바사", "가나다라마바사") == 1.0 and similarity("가나다라", "하파타카") == 0.0

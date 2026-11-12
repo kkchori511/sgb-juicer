@@ -232,3 +232,35 @@ def validate(rows: list[dict], group: dict, known: dict, members=None) -> list[d
             for r in rows:
                 r["notes"].append("과목 명렬에 여러 학년이 섞여 있음")
     return rows
+
+
+def parse_lines(text: str) -> list[dict]:
+    """직접 입력: 한 줄에 한 명. '20301 김철수', '2 3 1 김철수', '2학년 3반 1번 김철수', '2-3-1 김철수', 탭·쉼표 구분 모두.
+    → [{line, raw, student_no, grade, class_no, number, name}] (못 읽은 칸은 빈 값; 확인은 validate가 한다)"""
+    out = []
+    for i, line in enumerate((text or "").replace("\r", "").split("\n"), 1):
+        raw = line.strip()
+        if not raw:
+            continue
+        s = raw
+        row = {"line": i, "raw": raw, "student_no": "", "grade": "", "class_no": "", "number": "", "name": ""}
+        for key, word in (("grade", "학년"), ("class_no", "반"), ("number", "번")):
+            m = re.search(r"(\d+)\s*" + word, s)
+            if m:
+                row[key] = str(int(m.group(1)))
+                s = s[:m.start()] + " " + s[m.end():]
+        names = re.findall(r"[가-힣]{2,}(?:\s?[가-힣]+)*|[A-Za-z][A-Za-z .'-]*[A-Za-z]", s)
+        row["name"] = re.sub(r"\s+", "", names[0]) if names and re.match(r"[가-힣]", names[0]) else (names[0].strip() if names else "")
+        nums = re.findall(r"\d+", s)
+        if len(nums) == 1 and len(nums[0]) >= 4:
+            row["student_no"] = nums[0]
+        elif len(nums) >= 3 and not (row["grade"] or row["class_no"] or row["number"]):
+            row["grade"], row["class_no"], row["number"] = (str(int(x)) for x in nums[:3])
+        elif len(nums) == 2 and not (row["class_no"] or row["number"]):
+            row["class_no"], row["number"] = (str(int(x)) for x in nums)
+        elif nums:
+            free = [k for k in ("grade", "class_no", "number") if not row[k]]
+            for k, v in zip(free[-len(nums):] if len(nums) <= len(free) else free, nums):
+                row[k] = str(int(v))
+        out.append(row)
+    return out

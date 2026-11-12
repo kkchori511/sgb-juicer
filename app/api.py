@@ -448,6 +448,18 @@ class Api:
                                         self._members_map(d, gid) if add else None)}
 
     @safe
+    def roster_direct(self, gid, text):
+        """명렬 직접 입력: 줄마다 읽어 확인(검사)까지 한 결과. 화면에서 고친 뒤 roster_validate로 다시 확인한다."""
+        rows = roster.parse_lines(text)
+        lines = [(r.pop("line"), r.pop("raw")) for r in rows]
+        out = self.roster_validate(gid, rows, True)
+        if out.get("ok") is False:
+            return out
+        for r, (ln, raw) in zip(out["rows"], lines):
+            r["line"], r["raw"] = ln, raw
+        return {"rows": out["rows"]}
+
+    @safe
     def roster_validate(self, gid, rows, add=False):
         d = self._db()
         for r in rows:

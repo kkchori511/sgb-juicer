@@ -890,3 +890,18 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 
 .ib-item .s.when { color: var(--muted); }
 .ib-item .s { overflow-wrap: anywhere; white-space: normal; }
+
+/* 명렬 직접 입력 */
+.direct-box { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--input); }
+.roster-direct { width: 100%; font-size: 14px; }
+.direct-prev { max-height: 30vh; overflow: auto; }
+.direct-tbl input { padding: 2px 4px; }
+.direct-tbl tr.row-bad td { background: #fef2f2; }
+
+/* 후보 문장을 최종안에 넣기 */
+.sent-pick { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; padding: 8px; border: 1px dashed var(--border); border-radius: 8px; background: #f8fafc; }
+.sent-pick .small-note { flex-basis: 100%; }
+.sent-chip { text-align: left; font-size: 13px; padding: 4px 8px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; max-width: 100%; white-space: normal; }
+.sent-chip:hover { border-color: var(--sel, #334155); background: #eef2ff; }
+.sent-chip.used { opacity: .55; background: #ecfdf5; border-color: #86efac; }
+.sel-insert { position: fixed; z-index: 3000; padding: 4px 10px; font-size: 13px; font-weight: 700; border-radius: 8px; background: var(--sel, #334155); color: #fff; border: none; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
