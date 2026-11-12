@@ -116,7 +116,7 @@ def test_all():
     pl = ok(api.prompt_list())
     assert [x["id"] for x in pl["prompts"]][:3] == ["default", "refine", "polish"] and pl["picks"] == {"synth": "default", "refine": "refine", "polish": "polish"}
     ok(api.ai_synth(hr, "career", "20301", [r1], None))
-    assert SENT[-1][0].startswith("# 주요 업무") and "50% 이상 다르게" in SENT[-1][0]
+    assert SENT[-1][0].startswith("# 역할") and "50% 이상 다르게" in SENT[-1][0]
     nid = ok(api.prompt_save({"name": "내 종합", "prompt": "내 지침", "example": "내 예시"}))["id"]
     ok(api.ai_extra_set("", nid, "synth")); ok(api.ai_synth(hr, "career", "20301", [r1], None)); ok(api.ai_extra_set("", "", ""))
     assert SENT[-1][0].startswith("내 지침") and "내 예시" in SENT[-1][0] and "반드시" in SENT[-1][0]

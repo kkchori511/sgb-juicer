@@ -3521,6 +3521,83 @@
       return r;
     }, 600);
   }
+  // 프롬프트 생성 마법사: 큰 틀(역할·입력 자료·시점과 문체·내용·쓰지 않는 것·틀린/옳은 예시·출력 형태·마지막 점검)을 채우면
+  // 오른쪽에 완성된 프롬프트가 보이고 [목록에 저장]으로 새 프롬프트가 된다. 기본값 그대로면 기본 프롬프트와 같은 글.
+  async function openPromptWizard() {
+    const r0 = await call('prompt_wizard_spec');
+    if (!r0) return;
+    const spec = r0.spec;
+    openSheet((box) => {
+      box.style.width = 'min(1280px, 96vw)';
+      const preview = el('textarea', { class: 'wiz-preview', readonly: true });
+      const nameIn = el('input', { type: 'text', maxlength: 60, placeholder: '예: 수학 세특 · 짧게', value: '' });
+      const exIn = el('textarea', { rows: 3, placeholder: '(선택) 원하는 결과 모양의 생기부 문장. AI가 문체·형식을 따릅니다.' });
+      const refresh = debounce(async () => { const r = await call('prompt_wizard_build', spec); if (r) preview.value = r.text; }, 250);
+      const txt = (key, ph) => el('input', { type: 'text', value: spec[key] || '', placeholder: ph || '', oninput: (e) => { spec[key] = e.target.value; refresh(); } });
+      const chk = (key, label) => el('label', { class: 'wiz-chk' }, [el('input', { type: 'checkbox', checked: !!spec[key], onchange: (e) => { spec[key] = e.target.checked; refresh(); } }), label]);
+      const lineList = (key) => {
+        const wrap = el('div', { class: 'wiz-lines' });
+        const draw = () => {
+          wrap.innerHTML = '';
+          spec[key].forEach((x, i) => wrap.appendChild(el('div', { class: 'wiz-line' + (x.on ? '' : ' off') }, [
+            el('input', { type: 'checkbox', checked: !!x.on, title: '넣기/빼기', onchange: (e) => { x.on = e.target.checked; draw(); refresh(); } }),
+            el('input', { type: 'text', value: x.text, oninput: (e) => { x.text = e.target.value; refresh(); } }),
+            el('button', { type: 'button', class: 'link danger-text', text: '지우기', onclick: () => { spec[key].splice(i, 1); draw(); refresh(); } })])));
+          wrap.appendChild(el('button', { type: 'button', class: 'small', text: '+ 줄 추가', onclick: () => { spec[key].push({ text: '', on: true }); draw(); refresh(); const ins = wrap.querySelectorAll('.wiz-line input[type=text]'); if (ins.length) ins[ins.length - 1].focus(); } }));
+        };
+        draw();
+        return wrap;
+      };
+      const pairBox = el('div', { class: 'wiz-lines' });
+      const drawPairs = () => {
+        pairBox.innerHTML = '';
+        spec.pairs.forEach((p, i) => pairBox.appendChild(el('div', { class: 'wiz-pair' }, [
+          el('label', {}, ['틀린 예', el('input', { type: 'text', value: p.wrong, oninput: (e) => { p.wrong = e.target.value; refresh(); } })]),
+          el('label', {}, ['옳은 예', el('input', { type: 'text', value: p.right, oninput: (e) => { p.right = e.target.value; refresh(); } })]),
+          el('button', { type: 'button', class: 'link danger-text', text: '지우기', onclick: () => { spec.pairs.splice(i, 1); drawPairs(); refresh(); } })])));
+        pairBox.appendChild(el('button', { type: 'button', class: 'small', text: '+ 예시 쌍 추가', onclick: () => { spec.pairs.push({ wrong: '', right: '' }); drawPairs(); refresh(); } }));
+      };
+      drawPairs();
+      const sec = (n, title, hint, ...kids) => el('details', { class: 'wiz-sec', open: n <= 2 }, [el('summary', {}, [el('b', { text: `${n}. ${title}` }), hint ? el('span', { class: 'muted', text: ` — ${hint}` }) : null]), ...kids]);
+      const itemSel = el('select', { onchange: (e) => { spec.item = e.target.value; refresh(); } }, [el('option', { value: '', text: '(항목 지정 안 함)' }), ...r0.items.map((x) => el('option', { value: x, text: x }))]);
+      const outSel = el('div', { class: 'segmented' });
+      const drawOut = () => {
+        outSel.innerHTML = '';
+        [['opinion', '본문 + 빈 줄 + 교사 의견'], ['single', '본문 한 문단만']].forEach(([v, t]) => outSel.appendChild(el('button', { type: 'button', class: 'seg' + (spec.output === v ? ' active' : ''), text: t, onclick: () => { spec.output = v; drawOut(); refresh(); } })));
+      };
+      drawOut();
+      const left = el('div', { class: 'wiz-form' }, [
+        sec(1, '역할', '누가 무엇을 쓰는지', el('div', { class: 'map-row' }, [el('label', {}, ['학교급', txt('school', '고등학교')]), el('label', {}, ['과목', txt('subject', '(선택) 예: 수학')]), el('label', {}, ['항목', itemSel])])),
+        sec(2, '입력 자료', 'AI에 주는 학생 자료가 무엇인지', el('label', {}, ['자료 설명', txt('material', '예: 수행평가 자료 및 교사 의견')])),
+        sec(3, '시점과 문체', '체크를 끄면 빠집니다', lineList('style')),
+        sec(4, '내용', '무엇을 중심으로 쓸지', lineList('content')),
+        sec(5, '쓰지 않는 것', '', chk('banned_personal', '학생 이름·번호 등 개인정보'), el('label', {}, ['쓰지 않을 단어(쉼표로 구분)', txt('banned_words')]), lineList('banned_extra'), chk('no_preface', '글 앞뒤 머리말·설명 쓰지 않기')),
+        sec(6, '틀린/옳은 예시', '관찰자 시점으로 끝맺는 예', pairBox, chk('pair_note', '예시 뒤에 "학생이 한 일로 끝나게" 설명 넣기')),
+        sec(7, '출력 형태', '', outSel, el('label', {}, ['교사 의견 문장 수', txt('opinion_n', '2~3')])),
+        sec(8, '마지막 점검', '', chk('recheck', '최종 재검토 단계'), chk('compare', '예시와 비교(점수는 출력하지 않음)')),
+        sec(9, '그 밖의 지침', '(선택) 직접 더할 규칙', lineList('extra')),
+      ]);
+      box.append(
+        el('div', { class: 'sheet-head' }, [el('h2', { text: '✨ 프롬프트 생성 마법사' }), el('span', { class: 'muted', text: '왼쪽 틀을 채우면 오른쪽에 프롬프트가 만들어집니다. 처음 값은 기본 프롬프트와 같습니다.' })]),
+        el('div', { class: 'sheet-body wiz-body' }, [left, el('div', { class: 'wiz-right' }, [el('div', { class: 'col-label', text: '만들어질 프롬프트' }), preview,
+          el('div', { class: 'col-label', text: '예시 (선택)' }), exIn, el('p', { class: 'hint', text: r0.note })])]),
+        el('div', { class: 'sheet-foot' }, [el('label', { class: 'inline', style: 'margin:0' }, ['이름', nameIn]), el('span', { class: 'spacer' }),
+          el('button', { type: 'button', text: '취소', onclick: closeSheet }),
+          el('button', { type: 'button', class: 'primary', text: '목록에 저장', onclick: async () => {
+            const name = nameIn.value.trim();
+            if (!name) { toast('이름을 적어 주세요.'); nameIn.focus(); return; }
+            const b = await call('prompt_wizard_build', spec);
+            if (!b) return;
+            const r = await mutate('prompt_save', { name, prompt: b.text, example: exIn.value });
+            if (!r) return;
+            closeSheet();
+            P.id = r.id;
+            await renderPrompts();
+            toast(`'${name}' 프롬프트를 만들었습니다. AI 실행 확인 창에서 고를 수 있습니다.`);
+          } })]));
+      refresh();
+    });
+  }
   async function newPrompt(copyOf) {
     await flushPending();
     const src = copyOf ? P.data.prompts.find((x) => x.id === copyOf) : null;
@@ -3569,7 +3646,8 @@
       el('span', { class: 't', text: b.title }),
       el('span', { class: 's', text: slotLabel(b.group_id, b.item) }),
       el('span', { class: 's' }, [el('span', { class: 'stage-chip' + (b.stage === 'sent' ? ' sent' : ''), text: STAGE_NAME[b.stage] }),
-        b.stage === 'sent' ? ` ${b.sent_summary} · ${b.sent_at}` : (b.n ? ` ${b.n}건${b.pending ? ` · 확인 필요 ${b.pending}` : ''}` : '')]),
+        b.stage === 'sent' ? ` ${b.sent_summary}` : (b.n ? ` ${b.n}건${b.pending ? ` · 확인 필요 ${b.pending}` : ''}` : '')]),
+      b.stage === 'sent' && b.sent_at ? el('span', { class: 's when', text: `보낸 때 ${b.sent_at}` }) : null,
     ]);
     if (!open.length) box.appendChild(el('p', { class: 'hint', text: '진행 중인 묶음이 없습니다. 학습지·엑셀 자료를 [+ 새 자료 묶음]으로 가져오세요.' }));
     open.forEach((b) => box.appendChild(item(b)));
@@ -4068,6 +4146,11 @@
         el('button', { type: 'button', text: '🏷 이 묶음 기록에 태그 지정', onclick: () => sentTags(b) }),
         el('span', { class: 'spacer' }),
         el('button', { type: 'button', class: 'danger-text', text: '보낸 기록 모두 삭제', onclick: () => sentDelete(b) }),
+        el('button', { type: 'button', class: 'link danger-text', text: '이력에서 지우기', title: '인박스 이력만 지웁니다(항목에 들어간 기록은 그대로)', onclick: async () => {
+          const msg = `'${b.title}' 묶음을 인박스 이력에서 지웁니다.\n· 지우는 것: 가져온 원본 표, 매칭·정제 결과\n· 남는 것: 항목에 들어간 기록(그대로 남음)\n· 지운 뒤에는 이 묶음 단위로 태그 지정·모두 삭제를 할 수 없습니다. 기록까지 지우려면 먼저 [보낸 기록 모두 삭제]를 쓰세요.`;
+          if (!(await typedConfirm(msg, '이력에서 지우기'))) return;
+          if (await mutate('inbox_delete', b.id)) { IB.bid = null; await refreshInboxBadge(); renderInboxList(); renderInboxEmpty(); toast('이력에서 지웠습니다. 보낸 기록은 그대로입니다.'); }
+        } }),
       ])]));
     const t = el('table', { class: 'tbl match-tbl' });
     t.appendChild(el('tr', {}, ['원본 위치', '학생', '상태', '보낸 내용'].map((h) => el('th', { text: h }))));
@@ -5113,6 +5196,7 @@
     $('prPrompt').addEventListener('input', savePrompt);
     $('prExample').addEventListener('input', savePrompt);
     $('prNewBtn').addEventListener('click', () => newPrompt(null));
+    $('prWizBtn').addEventListener('click', openPromptWizard);
     $('prCopyBtn').addEventListener('click', () => newPrompt(P.id));
     $('prResetBtn').addEventListener('click', async () => {
       const cur = P.data.prompts.find((x) => x.id === P.id);

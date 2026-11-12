@@ -161,7 +161,7 @@
           <div class="card-head"><h2>프롬프트</h2><span class="tag">목록을 만들고, AI를 실행할 때 확인 창에서 골라 씁니다</span></div>
           <p class="hint">AI에 줄 지침과 예시를 프롬프트마다 저장합니다. AI 실행 확인 창에서 이번에 쓸 프롬프트를 고르고, 작업(종합·생성 / 기록 정제 / 다듬기)마다 마지막에 고른 것을 기억합니다. 분량·출력 형식·성취기준·다른 학생과 겹치지 않기 규칙과 '학번·이름은 보내지 않음'은 앱이 자동으로 붙입니다.</p>
           <div class="pr-wrap">
-            <aside class="pr-list"><div class="pr-items" id="prList"></div><button type="button" class="primary" id="prNewBtn">+ 새 프롬프트</button></aside>
+            <aside class="pr-list"><div class="pr-items" id="prList"></div><button type="button" class="primary" id="prNewBtn">+ 새 프롬프트</button><button type="button" class="wiz-btn" id="prWizBtn">✨ 프롬프트 생성 마법사</button></aside>
             <div class="pr-edit">
               <div class="map-row">
                 <label class="grow">이름 <input type="text" id="prName" maxlength="60"></label>
@@ -494,6 +494,7 @@
               <li><b>모델 4칸</b>: 모델 ID를 넣으면 단가가 보입니다. 작업 화면 오른쪽 위에서 고릅니다.</li>
               <li><b>OpenRouter 학습 차단</b>(기본 꺼짐): 켜면 데이터를 수집·보관하지 않는 제공자에게만 보냅니다. 무료 모델 등은 쓸 수 없게 될 수 있습니다.</li>
               <li><b>프롬프트</b>(메뉴 › 💬 프롬프트): 지침·예시를 이름 붙여 여러 개 만들어 둡니다. 기본 3개(기본 프롬프트·기록 정제·다듬기)는 지울 수 없고 [기본값으로 되돌리기]가 됩니다. AI 실행 확인 창에서 이번에 쓸 프롬프트를 고르며, 작업(종합·생성 / 기록 정제 / 다듬기)마다 마지막에 고른 것을 기억합니다. 예전에 항목별로 고쳐 둔 프롬프트는 '(예전 설정)'으로 목록에 옮겨져 있습니다.</li>
+              <li><b>✨ 프롬프트 생성 마법사</b>(프롬프트 메뉴): 역할·입력 자료·시점과 문체·내용·쓰지 않는 것·틀린/옳은 예시·출력 형태·마지막 점검을 차례로 채우면 오른쪽에 프롬프트가 만들어지고 [목록에 저장]으로 새 프롬프트가 됩니다. 처음 값은 기본 프롬프트와 같습니다.</li>
               <li><b>분량</b>: 행동특성 및 종합의견 900바이트, 나머지 1500바이트가 기본입니다(한글 1자 = 3바이트).</li>
               <li><b>태그</b>: 메뉴 [태그]에서 만들고, 기록에는 목록에서 골라 붙입니다(표현 통일).</li>
             </ul>

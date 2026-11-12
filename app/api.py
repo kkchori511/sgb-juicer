@@ -1236,6 +1236,18 @@ class Api:
                 "defaults": {k: prompts.BUILTIN[k]["prompt"] for k in prompts.BUILTIN}}
 
     @safe
+    def prompt_wizard_spec(self):
+        from . import prompt_wizard
+
+        return {"spec": prompt_wizard.default_spec(), "items": list(prompts.ITEM_NAMES.values()), "note": prompt_wizard.STEPS_NOTE}
+
+    @safe
+    def prompt_wizard_build(self, spec):
+        from . import prompt_wizard
+
+        return {"text": prompt_wizard.build(spec or {})}
+
+    @safe
     def prompt_save(self, entry):
         """새로 만들기(id 없음) 또는 고치기. 기본 프롬프트는 이름을 바꾸지 않는다."""
         import uuid

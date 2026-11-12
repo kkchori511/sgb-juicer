@@ -139,6 +139,20 @@ def test_rules():
     lib2, ch2 = prompts.build_library([x for x in lib if x["id"] != "polish"], {})  # 기본은 늘 다시 채움
     assert ch2 and [x["id"] for x in lib2][:3] == ["default", "refine", "polish"]
     assert "50% 이상" in prompts.SYNTH_RULE
+    # v0.17.7 기본 프롬프트 = 마법사 기본값, 고치지 않고 쓰던 예전 기본은 새 기본으로
+    from app import prompt_wizard
+    from app.prompt_default import DEFAULT_TEXT, LEGACY_TEXT
+    assert prompt_wizard.build() == DEFAULT_TEXT and prompts.BUILTIN["default"]["prompt"] == DEFAULT_TEXT
+    assert "정평평가" not in DEFAULT_TEXT and "관찰자 시험" not in DEFAULT_TEXT and "[틀린예시]" in DEFAULT_TEXT
+    up, ch = prompts.build_library([{"id": "default", "name": "기본 프롬프트", "prompt": LEGACY_TEXT, "example": ""}], {})
+    assert ch and up[0]["prompt"] == DEFAULT_TEXT
+    keep, _ = prompts.build_library([{"id": "default", "name": "기본 프롬프트", "prompt": "내가 고친 기본", "example": ""}], {})
+    assert keep[0]["prompt"] == "내가 고친 기본"
+    t = prompt_wizard.build({"subject": "수학", "item": "과목별 세부능력 및 특기사항", "output": "single", "compare": False,
+                             "banned_words": "", "pairs": [], "extra": [{"text": "숫자는 쓰지 않음", "on": True}, {"text": "꺼진 줄", "on": False}]})
+    assert "고등학교 수학 교사" in t and "생활기록부(과목별 세부능력 및 특기사항)" in t and "교사 의견 덧붙이기" not in t
+    assert "예시와 비교" not in t and "[틀린예시]" not in t and "- 숫자는 쓰지 않음" in t and "꺼진 줄" not in t
+    assert "5. **최종 출력 형태**" in t and "6. **최종 재검토**" in t
     assert "50% 이상 다르게" in prompts.DEFAULT_PROMPTS["subject"]["synth"]["prompt"]
     assert all("50% 이상" in prompts.DEFAULT_PROMPTS[i]["synth"]["prompt"] for i in prompts.ITEMS)
     assert similarity("가나다라마바사", "가나다라마바사") == 1.0 and similarity("가나다라", "하파타카") == 0.0

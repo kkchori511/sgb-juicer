@@ -733,7 +733,7 @@ input.sec-in { width: 130px; height: 28px; padding: 2px 6px; font-size: 13px; di
 .tv-more { width: 100%; margin-top: 8px; }
 .tv-bulk { flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; padding: 8px 12px; background: #1e293b; color: #fff; border-radius: var(--radius); }
 .tv-bulk .muted { color: #cbd5e1; }
-.tv-bulk select { width: auto; height: 32px; }
+.tv-bulk select { width: auto; height: auto; min-height: 34px; padding: 5px 28px 5px 10px; line-height: 1.4; }
 @media (max-width: 980px) {
   .tv-body { grid-template-columns: minmax(0, 1fr); }
   .tv-tags { display: none; }
@@ -869,3 +869,24 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 .pr-edit .map-row label.grow { display: flex; align-items: center; gap: 6px; flex: 1; }
 .pr-edit .map-row label.grow input { flex: 1; }
 .ai-conf select#aiPrompt { max-width: 260px; }
+
+/* 프롬프트 생성 마법사 */
+.wiz-btn { background: linear-gradient(135deg, #fef3c7, #fde68a); border-color: #f59e0b; font-weight: 800; }
+.wiz-body { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; }
+.wiz-form { display: flex; flex-direction: column; gap: 8px; max-height: 70vh; overflow: auto; padding-right: 4px; }
+.wiz-sec { border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; background: var(--input); }
+.wiz-sec summary { cursor: pointer; }
+.wiz-sec label { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+.wiz-sec label input[type=text] { flex: 1; }
+.wiz-lines { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; align-items: flex-start; }
+.wiz-line { display: flex; gap: 6px; align-items: center; width: 100%; }
+.wiz-line input[type=text] { flex: 1; }
+.wiz-line.off input[type=text] { opacity: .45; text-decoration: line-through; }
+.wiz-pair { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; width: 100%; align-items: center; }
+.wiz-pair label { margin: 0; }
+.wiz-chk { font-weight: 600; }
+.wiz-right { display: flex; flex-direction: column; gap: 6px; }
+.wiz-preview { flex: 1; min-height: 46vh; font-size: 13px; line-height: 1.55; background: #f8fafc; }
+
+.ib-item .s.when { color: var(--muted); }
+.ib-item .s { overflow-wrap: anywhere; white-space: normal; }

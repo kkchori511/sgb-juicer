@@ -149,6 +149,11 @@ def test_flow():
     tid = {t["name"]: t["id"] for t in r["tags"]}
     assert ok(api.inbox_view(b3))["batch"]["tag_ids"] == [tid["x"]]
     assert tid["독서 기록"] not in ok(api.inbox_view(bid))["batch"]["tag_ids"]  # 보낸 묶음은 그대로
+    # 보낸 묶음을 이력에서 지워도 기록은 그대로
+    n_before = len(ok(api.student_view(hr, "behavior", "20302"))["records"])
+    ok(api.inbox_delete(b2))
+    assert b2 not in [x["id"] for x in ok(api.inbox_list())["batches"]]
+    assert len(ok(api.student_view(hr, "behavior", "20302"))["records"]) == n_before == 3
     print("INBOX OK")
 
 if __name__ == "__main__":

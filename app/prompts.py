@@ -9,7 +9,7 @@ AI에는 학번·이름을 넣지 않는다(부르는 쪽에서 내용만 넘긴
 """
 import uuid
 
-from .prompt_default import DEFAULT_TEXT
+from .prompt_default import DEFAULT_TEXT, LEGACY_TEXT
 
 ITEMS = ("autonomy", "career", "behavior", "subject", "club")
 OPS = ("refine", "polish", "synth")
@@ -179,8 +179,14 @@ def build_library(saved_lib, old_prompts):
             changed = True
             continue
         seen.add(x["id"])
-        lib.append({"id": str(x["id"]), "name": str(x.get("name") or "이름 없음")[:60], "prompt": str(x.get("prompt") or ""),
-                    "example": str(x.get("example") or ""), "builtin": x["id"] in BUILTIN})
+        e = {"id": str(x["id"]), "name": str(x.get("name") or "이름 없음")[:60], "prompt": str(x.get("prompt") or ""),
+             "example": str(x.get("example") or ""), "builtin": x["id"] in BUILTIN}
+        if e["id"] == "default" and e["prompt"].strip() == LEGACY_TEXT.strip():  # 고치지 않고 쓰던 예전 기본 → 새 기본
+            e["prompt"] = DEFAULT_TEXT
+            changed = True
+        if e["builtin"]:
+            e["name"] = BUILTIN[e["id"]]["name"]
+        lib.append(e)
     for k in BUILTIN:  # 기본은 늘 있어야 한다
         if k not in seen:
             lib.insert(list(BUILTIN).index(k), _builtin(k))
