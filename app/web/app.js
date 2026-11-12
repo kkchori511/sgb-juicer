@@ -6,6 +6,7 @@
   let info = {};
   let cfg = {};
   let ys = { year: 0, years: [] }; // year_state
+  let dataDir = ''; // 지금 쓰는 자료 폴더(시작 설정·오류 안내에 보여 줌)
   let dash = null;
   let panel = 'dashboard';
   let dashSel = null;
@@ -1472,6 +1473,10 @@
     $('wPrev').textContent = W.step === first && W.mode === 'newyear' ? '취소' : '이전';
     $('wPrev').hidden = W.step === first && W.mode === 'first';
     $('wNext').textContent = W.step === 4 ? '시작하기' : '다음';
+    if (W.mode === 'first' && dataDir) {
+      body.appendChild(el('div', { class: 'wiz-dir' }, [el('b', { text: '자료 폴더: ' }), dataDir,
+        ys.years && ys.years.length ? null : el('div', { class: 'muted', text: '이 폴더에는 아직 자료가 없습니다. 쓰던 자료가 있다면 다른 폴더의 exe를 실행한 것일 수 있습니다. 앱을 끄고 원래 폴더의 exe를 실행하세요.' })]));
+    }
     [null, wStep1, wStep2, wStep3, wStep4][W.step](body);
   }
   function wStep1(body) {
@@ -5439,6 +5444,14 @@
     $('verText').textContent = 'v' + info.version.replace(/\.0$/, '');
     const c = await api.load_config();
     cfg = c.config;
+    dataDir = c.data_dir || info.data_dir;
+    const prob = c.problem || {};
+    // 설정 파일이 있는데 읽지 못함: 처음 사용처럼 시작 설정을 띄우지 않고 알린 뒤 다시 시도
+    if (prob.error) {
+      await modal(`<b>설정 파일을 읽지 못했습니다.</b><br>${escHtml(prob.error)}<br><br>백신 프로그램이 파일을 잠깐 잡고 있거나, 업데이트 직후일 수 있습니다. 자료는 그대로 있습니다. 잠시 뒤 [다시 시도]를 눌러 주세요.<br><span class="muted">자료 폴더: ${escHtml(dataDir)}</span>`, false, true, '다시 시도');
+      location.reload();
+      return;
+    }
     setCollapsed(cfg.menu_collapsed);
     fillSoon();
     bind();
@@ -5448,7 +5461,13 @@
     refreshBalance();
     api.run_cost().then((r) => { if (r && r.ok) { runCost = r.run_cost; $('runCost').textContent = fmtCredit(runCost); } });
     const r = await api.year_state();
-    ys = r && r.ok ? r : { year: 0, years: [] };
+    if (!r || !r.ok) { // 학년도 자료를 열다 오류: 시작 설정으로 넘어가지 않는다
+      await modal(`<b>학년도 자료를 읽지 못했습니다.</b><br>${escHtml((r && r.error) || '알 수 없는 오류')}<br><br>자료는 지우지 않았습니다. 잠시 뒤 [다시 시도]를 눌러 주세요. 계속되면 이 화면을 찍어 알려 주세요.<br><span class="muted">자료 폴더: ${escHtml(dataDir)}</span>`, false, true, '다시 시도');
+      location.reload();
+      return;
+    }
+    ys = r;
+    if (prob.broken) alertBox(`설정 파일이 깨져 있어 새로 시작했습니다. 예전 파일은 자료 폴더에 '${prob.broken}'로 남겨 두었습니다.${ys.year ? ' 학년도 자료는 그대로 이어서 씁니다. OpenRouter 키 등 설정을 다시 확인해 주세요.' : ''}`);
     renderYearSelect();
     refreshInboxBadge();
     if (!cfg.setup_done || !ys.year) {

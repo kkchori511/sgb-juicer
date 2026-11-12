@@ -46,6 +46,7 @@ jobs:
           python tests/test_fill_tidy.py
           python tests/test_update_download.py
           python tests/test_ai_cancel.py
+          python tests/test_config_safe.py
           python tests/test_inbox_columns.py
 
       - name: Version info

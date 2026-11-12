@@ -63,7 +63,7 @@ def safe(fn):
             if isinstance(out, dict) and "ok" in out:
                 return out
             return {"ok": True, **(out if isinstance(out, dict) else {"value": out})}
-        except (db.DbError, updater.UpdateError, openrouter.LlmError, weights.WeightError) as e:
+        except (db.DbError, updater.UpdateError, openrouter.LlmError, weights.WeightError, config.ConfigError) as e:
             out = {"ok": False, "error": str(e)}
             if getattr(e, "code", None):
                 out["code"] = e.code
@@ -201,7 +201,13 @@ class Api:
 
     @safe
     def load_config(self):
-        return {"config": config.load()}
+        cfg = config.load()
+        problem = config.read_problem()
+        years = db.list_years() if not problem["error"] else []
+        if problem["broken"] and years and cfg["current_year"] not in years:
+            # 설정 파일이 깨져 새로 시작했는데 학년도 자료는 있으면: 가장 최근 학년도로 이어서 쓴다(시작 설정 없이)
+            cfg = config.save({"current_year": max(years), "setup_done": True})
+        return {"config": cfg, "problem": problem, "data_dir": str(data_dir())}
 
     @safe
     def save_config(self, patch):

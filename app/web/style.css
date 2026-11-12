@@ -905,3 +905,4 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 .sent-chip:hover { border-color: var(--sel, #334155); background: #eef2ff; }
 .sent-chip.used { opacity: .55; background: #ecfdf5; border-color: #86efac; }
 .sel-insert { position: fixed; z-index: 3000; padding: 4px 10px; font-size: 13px; font-weight: 700; border-radius: 8px; background: var(--sel, #334155); color: #fff; border: none; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
+.wiz-dir { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13.5px; word-break: break-all; }
