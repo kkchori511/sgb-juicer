@@ -1675,13 +1675,14 @@
   const escHtml = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   function modelName(sel) { const o = sel && sel.selectedOptions && sel.selectedOptions[0]; return o ? o.textContent : '-'; }
   // kind: 프롬프트를 고르는 작업이면 'synth'(종합·생성) / 'refine'(기록 정제) / 'polish'(다듬기). 없으면 고정 프롬프트 작업.
-  async function aiConfirm(title, rows, warn, kind) {
+  // prefer: 이 실행의 처음 고르기 값(예: 스캔 묶음은 '스캔 내용 정리'). 목록에 없으면 작업별 기억값.
+  async function aiConfirm(title, rows, warn, kind, prefer) {
     let pick = '';
     let opts = '';
     if (kind) {
       const r = await loadPromptList();
       if (r) {
-        pick = r.picks[kind] || '';
+        pick = prefer && r.prompts.some((x) => x.id === prefer) ? prefer : r.picks[kind] || '';
         opts = r.prompts.map((x) => `<option value="${escHtml(x.id)}"${x.id === pick ? ' selected' : ''}>${escHtml(x.name)}</option>`).join('');
       }
     }
@@ -1754,7 +1755,8 @@
     };
   }
   // jobs: [{ label, run: () => api 결과 }] — api를 직접 불러 오류도 진행 창에서 모아 보여 준다.
-  async function aiRun({ title, rows, warn, jobs, summary, skipConfirm, before, after, extra, kind, prompt }) {
+  // remember=false: 고른 프롬프트를 작업별 기억값으로 저장하지 않는다(묶음마다 따로 기억하는 경우)
+  async function aiRun({ title, rows, warn, jobs, summary, skipConfirm, before, after, extra, kind, prompt, remember }) {
     if (!skipConfirm) {
       const conf = await aiConfirm(title, rows, warn, kind);
       if (!conf) return null;
@@ -1762,7 +1764,7 @@
       prompt = conf.prompt;
     }
     if (before && !(await before())) return null; // [AI 실행]을 누른 뒤에만 설정을 저장(취소하면 아무것도 바뀌지 않음)
-    await api.ai_extra_set(extra || '', prompt || '', kind || ''); // 이번 실행에만: 추가 요구 사항·고른 프롬프트(끝나면 지움)
+    await api.ai_extra_set(extra || '', prompt || '', remember === false ? '' : kind || ''); // 이번 실행에만: 추가 요구 사항·고른 프롬프트(끝나면 지움)
     try { return await aiRunJobs({ title, jobs, summary, after }); } finally { await api.ai_extra_set('', '', ''); }
   }
   async function aiRunJobs({ title, jobs, summary, after }) {
@@ -4110,18 +4112,27 @@
       } }),
     ]));
   }
+  const ibPromptKey = (b) => `sgb.ibPrompt.${ys.year}.${b.id}`;
+  const ibPromptKeyUse = (b) => b.source === 'scan' || localStorage.getItem(ibPromptKey(b)) !== null;
+  function ibPromptPref(b) {
+    const saved = localStorage.getItem(ibPromptKey(b));
+    if (saved) return saved;
+    return b.source === 'scan' ? 'scan' : '';
+  }
   async function refineRows(rows, modelIndex, btn, modelLabel) {
     if (!rows.length) return;
     const b = IB.view.batch;
+    // 스캔 PDF 묶음은 처음 값이 '스캔 내용 정리', 묶음마다 마지막에 고른 프롬프트를 기억
     const conf = await aiConfirm('인박스 자료 정제', [['묶음', `${b.title} → ${slotLabel(b.group_id, b.item)}`], ['대상', `${rows.length}건 (${new Set(rows.map((r) => r.student_no)).size}명)`], ['모델', modelLabel || '-']],
-      '원문은 그대로 남습니다. 정제 후보는 행마다 최근 3개까지 보관하고, 넘으면 가장 오래된 후보를 지웁니다. 새 정제 결과를 보낼 내용으로 바로 골라 둡니다.', 'refine');
+      '원문은 그대로 남습니다. 정제 후보는 행마다 최근 3개까지 보관하고, 넘으면 가장 오래된 후보를 지웁니다. 새 정제 결과를 보낼 내용으로 바로 골라 둡니다.', 'refine', ibPromptPref(b));
+    if (conf && ibPromptKeyUse(b)) localStorage.setItem(ibPromptKey(b), conf.prompt || '');
     if (!conf) return;
     if (btn) { btn.disabled = true; btn.classList.add('busy-btn'); }
     await jobStart();
     let out;
     try {
       const failedIds = [];
-      out = await aiRun({ title: '인박스 자료 정제', skipConfirm: true, extra: conf.extra, prompt: conf.prompt, kind: 'refine',
+      out = await aiRun({ title: '인박스 자료 정제', skipConfirm: true, extra: conf.extra, prompt: conf.prompt, kind: 'refine', remember: !ibPromptKeyUse(b),
         jobs: rows.map((r) => ({ label: `${r.name || r.student_no || ''} ${(r.content || '').slice(0, 16)}`.trim(), run: () => api.ai_inbox_row(r.id, modelIndex), onFail: () => failedIds.push(r.id) })),
         after: (o) => { out = o; o.retry = [...failedIds, ...rows.slice(o.done + o.fail).map((r) => r.id)]; } });
     } finally { await jobEnd(); if (btn && btn.isConnected) { btn.disabled = false; btn.classList.remove('busy-btn'); } }

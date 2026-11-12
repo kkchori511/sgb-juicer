@@ -9,7 +9,7 @@ AI에는 학번·이름을 넣지 않는다(부르는 쪽에서 내용만 넘긴
 """
 import uuid
 
-from .prompt_default import DEFAULT_TEXT, LEGACY_TEXT, POLISH_TEXT, REFINE_TEXT
+from .prompt_default import DEFAULT_TEXT, LEGACY_TEXT, POLISH_TEXT, REFINE_TEXT, SCAN_TEXT, VOICE_TEXT
 
 ITEMS = ("autonomy", "career", "behavior", "subject", "club")
 OPS = ("refine", "polish", "synth")
@@ -139,6 +139,9 @@ BUILTIN = {
     "default": {"name": "기본 프롬프트", "prompt": DEFAULT_TEXT, "example": ""},
     "refine": {"name": "기록 정제(기본)", "prompt": REFINE_TEXT, "example": ""},
     "polish": {"name": "다듬기(기본)", "prompt": POLISH_TEXT, "example": ""},
+    # v0.17.9: 기록 정제 작업에서 고를 수 있는 특수 정리(스캔 PDF 묶음은 처음 값이 스캔 내용 정리)
+    "scan": {"name": "스캔 내용 정리", "prompt": SCAN_TEXT, "example": ""},
+    "voice": {"name": "음성 스크립트 정리", "prompt": VOICE_TEXT, "example": ""},
 }
 # v0.17.6~0.17.7의 정제·다듬기 기본(고치지 않고 쓰던 사람은 새 기본으로 바꿔 준다)
 LEGACY_BUILTIN = {

@@ -134,8 +134,8 @@ def test_rules():
     # v0.17.6 프롬프트 목록: 처음 열 때 기본 3개 + 예전 항목별로 고친 것만 '(예전 설정)'으로 옮김
     lib, changed = prompts.build_library(None, {"career": {"synth": {"prompt": "내 진로 종합", "example": "예"}},
                                                  "club": {"refine": dict(prompts.DEFAULT_PROMPTS["club"]["refine"])}})
-    assert changed and [x["name"] for x in lib] == ["기본 프롬프트", "기록 정제(기본)", "다듬기(기본)", "진로활동·종합 (예전 설정)"]
-    assert lib[3]["prompt"] == "내 진로 종합" and lib[3]["example"] == "예"
+    assert changed and [x["name"] for x in lib] == ["기본 프롬프트", "기록 정제(기본)", "다듬기(기본)", "스캔 내용 정리", "음성 스크립트 정리", "진로활동·종합 (예전 설정)"]
+    assert lib[5]["prompt"] == "내 진로 종합" and lib[5]["example"] == "예"
     lib2, ch2 = prompts.build_library([x for x in lib if x["id"] != "polish"], {})  # 기본은 늘 다시 채움
     assert ch2 and [x["id"] for x in lib2][:3] == ["default", "refine", "polish"]
     assert "50% 이상" in prompts.SYNTH_RULE
@@ -157,6 +157,16 @@ def test_rules():
     up, ch = prompts.build_library([{"id": k, "name": "x", "prompt": prompts.LEGACY_BUILTIN[k], "example": ""} for k in ("default", "refine", "polish")], {})
     assert ch and [x["prompt"] for x in up[:3]] == [prompts.BUILTIN[k]["prompt"] for k in ("default", "refine", "polish")]
     assert "내용을 지우지 않습니다" in prompts.BUILTIN["polish"]["prompt"] and "학생의 말투" in prompts.BUILTIN["refine"]["prompt"]
+    # v0.17.9 스캔 내용 정리·음성 스크립트 정리: 기존 목록에도 자동으로 들어감(지울 수 없음)
+    lib3, ch3 = prompts.build_library([{"id": "default", "name": "기본 프롬프트", "prompt": "x", "example": ""}], {})
+    assert ch3 and [x["id"] for x in lib3][:5] == ["default", "refine", "polish", "scan", "voice"]
+    assert "OCR" in prompts.BUILTIN["scan"]["prompt"] and "발화자" in prompts.BUILTIN["voice"]["prompt"] and "\\frac" in prompts.BUILTIN["voice"]["prompt"]
+    api = Api()
+    assert not api.prompt_delete("scan")["ok"]
+    ok(api.ai_extra_set("", "scan", ""))  # 묶음마다 기억하는 경우: 작업별 기억값은 그대로
+    assert ok(api.prompt_list())["picks"]["refine"] == "refine"
+    assert api._prompt("refine")["id"] == "scan"
+    ok(api.ai_extra_set("", "", ""))
     assert "50% 이상 다르게" in prompts.DEFAULT_PROMPTS["subject"]["synth"]["prompt"]
     assert all("50% 이상" in prompts.DEFAULT_PROMPTS[i]["synth"]["prompt"] for i in prompts.ITEMS)
     assert similarity("가나다라마바사", "가나다라마바사") == 1.0 and similarity("가나다라", "하파타카") == 0.0
