@@ -115,42 +115,139 @@ def _explain(status: int, msg: str, privacy_block: bool) -> str:
     return f"{kind} {('- ' + msg) if msg else ''}".strip()
 
 
+# 바로 중지: cancel()은 진행 중인 요청 연결을 모두 닫고, 끝나기 전까지 새 요청·결과를 막는다(reset()으로 풀림).
+_cancel = threading.Event()
+_active = set()
+_active_lock = threading.Lock()
+
+
+class Cancelled(LlmError):
+    def __init__(self):
+        super().__init__("중지했습니다. 이 건은 저장하지 않았습니다.", "cancelled")
+
+
+def cancel():
+    _cancel.set()
+    with _active_lock:
+        live = list(_active)
+    for r in live:
+        try:
+            r.close()
+        except Exception:
+            pass
+
+
+def reset():
+    _cancel.clear()
+
+
+def cancelled() -> bool:
+    return _cancel.is_set()
+
+
+def _check():
+    if _cancel.is_set():
+        raise Cancelled()
+
+
+def _sleep(sec):
+    """재시도 기다림도 중지하면 바로 끝낸다."""
+    if _cancel.wait(sec):
+        raise Cancelled()
+
+
+def _read_stream(res):
+    """SSE 응답을 조각조각 읽는다. 중지하면 연결을 닫아 남은 생성을 멈춘다(제공자에 따라 그만큼 비용이 덜 나감)."""
+    parts, cost = [], 0.0
+    for raw in res.iter_lines(decode_unicode=False):
+        _check()
+        if not raw:
+            continue
+        line = raw.decode("utf-8", "replace")
+        if line.startswith(":") or not line.startswith("data:"):
+            continue  # ': OPENROUTER PROCESSING' 같은 대기 신호
+        data = line[5:].strip()
+        if data == "[DONE]":
+            break
+        try:
+            chunk = json.loads(data)
+        except ValueError:
+            continue
+        if isinstance(chunk.get("error"), dict):
+            raise LlmError(_explain(0, chunk["error"].get("message") or "", False))
+        for ch in chunk.get("choices") or []:
+            d = ch.get("delta") or ch.get("message") or {}
+            if d.get("content"):
+                parts.append(d["content"])
+            if ch.get("finish_reason") == "error":
+                raise LlmError("AI가 답을 만들다 오류로 멈췄습니다. 다시 시도하거나 다른 모델을 고르세요.")
+        if chunk.get("usage"):
+            cost = float(chunk["usage"].get("cost") or 0)
+    _check()
+    return "".join(parts).strip(), cost
+
+
 def chat(key: str, model: str, system: str, user: str, privacy_block: bool = False) -> tuple[str, float]:
-    """(응답 텍스트, 비용 크레딧). 학번·이름은 부르는 쪽에서 미리 빼고 내용만 넘긴다."""
+    """(응답 텍스트, 비용 크레딧). 학번·이름은 부르는 쪽에서 미리 빼고 내용만 넘긴다.
+    응답은 스트리밍으로 받아 [바로 중지] 때 연결을 끊을 수 있게 한다."""
     if not key:
         raise LlmError("OpenRouter API 키를 입력해 주세요.")
-    payload = build_payload(model, system, user, privacy_block)
+    payload = {**build_payload(model, system, user, privacy_block), "stream": True}
     last = None
     for attempt in range(3):
+        _check()
         try:
             res = requests.post(
-                f"{BASE}/chat/completions", headers=_headers(key), json=payload, timeout=300
+                f"{BASE}/chat/completions", headers=_headers(key), json=payload, timeout=(20, 300), stream=True
             )
         except requests.RequestException as e:
+            _check()
             last = LlmError(f"OpenRouter에 연결하지 못했습니다({e.__class__.__name__}). 인터넷 연결이나 OpenRouter 상태를 확인해 주세요.", "service_down")
-            time.sleep(2 * (attempt + 1))
+            _sleep(2 * (attempt + 1))
             continue
-        if res.status_code == 429 or res.status_code in DOWN:
-            if attempt < 2:
-                time.sleep(3 * (attempt + 1))
-                continue
-            if res.status_code == 429:
-                raise LlmError("속도 제한이 계속됩니다(HTTP 429). 잠시 뒤 다시 시도하거나 다른 모델을 고르세요(무료 모델은 제한이 큽니다).", "rate_limited")
-            raise LlmError(f"OpenRouter 서버가 응답하지 않습니다(HTTP {res.status_code}). 잠시 뒤 다시 시도하거나 OpenRouter 상태를 확인해 주세요.", "service_down")
+        with _active_lock:
+            _active.add(res)
         try:
-            body = res.json()
-        except ValueError:
-            body = {}
-        if not res.ok or "error" in body:
-            err = body.get("error") if isinstance(body, dict) else None
-            msg = err.get("message") if isinstance(err, dict) else ""
-            raise LlmError(_explain(res.status_code, msg, privacy_block))
-        try:
-            text = body["choices"][0]["message"]["content"] or ""
-        except (KeyError, IndexError, TypeError) as e:
-            raise LlmError("OpenRouter 응답 형식이 올바르지 않습니다.") from e
-        cost = float((body.get("usage") or {}).get("cost") or 0)
-        return text.strip(), cost
+            if res.status_code == 429 or res.status_code in DOWN:
+                if attempt < 2:
+                    _sleep(3 * (attempt + 1))
+                    continue
+                if res.status_code == 429:
+                    raise LlmError("속도 제한이 계속됩니다(HTTP 429). 잠시 뒤 다시 시도하거나 다른 모델을 고르세요(무료 모델은 제한이 큽니다).", "rate_limited")
+                raise LlmError(f"OpenRouter 서버가 응답하지 않습니다(HTTP {res.status_code}). 잠시 뒤 다시 시도하거나 OpenRouter 상태를 확인해 주세요.", "service_down")
+            ctype = str((getattr(res, "headers", None) or {}).get("Content-Type") or "")
+            if res.ok and "event-stream" in ctype:
+                try:
+                    return _read_stream(res)
+                except LlmError:
+                    raise
+                except Exception as e:  # 읽는 중 끊김(중지로 닫은 경우 포함)
+                    _check()
+                    last = LlmError(f"AI 응답을 받다 연결이 끊겼습니다({e.__class__.__name__}). 다시 시도해 주세요.", "service_down")
+                    _sleep(2 * (attempt + 1))
+                    continue
+            try:
+                body = res.json()
+            except ValueError:
+                body = {}
+            if not res.ok or "error" in body:
+                err = body.get("error") if isinstance(body, dict) else None
+                msg = err.get("message") if isinstance(err, dict) else ""
+                raise LlmError(_explain(res.status_code, msg, privacy_block))
+            try:
+                text = body["choices"][0]["message"]["content"] or ""
+            except (KeyError, IndexError, TypeError) as e:
+                raise LlmError("OpenRouter 응답 형식이 올바르지 않습니다.") from e
+            _check()
+            cost = float((body.get("usage") or {}).get("cost") or 0)
+            return text.strip(), cost
+        finally:
+            with _active_lock:
+                _active.discard(res)
+            try:
+                res.close()
+            except Exception:
+                pass
     raise last or LlmError("OpenRouter 호출에 실패했습니다.")
 
 

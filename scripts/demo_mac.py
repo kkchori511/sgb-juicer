@@ -20,7 +20,9 @@ from app import openrouter  # noqa: E402
 
 
 def _fake_chat(key, model, system, user, privacy_block=False):
-    time.sleep(0.8)
+    # 3초 걸리는 척: 여러 건 동시 처리와 [바로 중지]를 볼 수 있게(중지하면 바로 끊김)
+    if openrouter._cancel.wait(3):
+        raise openrouter.Cancelled()
     return "(시험용 AI 결과) 수업 활동에 적극적으로 참여하며 탐구 과정을 꼼꼼히 기록함. " + user.replace("\n", " ")[:100], 0.0004
 
 

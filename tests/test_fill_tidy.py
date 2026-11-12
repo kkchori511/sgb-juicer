@@ -69,6 +69,7 @@ def outage():
     import requests
     orr = importlib.reload(openrouter)  # 위에서 바꿔 둔 chat을 원래대로
     orr.time.sleep = lambda s: None
+    orr._sleep = lambda s: None
 
     class R:
         def __init__(self, code, body=None): self.status_code, self.ok, self._b = code, code < 400, body or {}

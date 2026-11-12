@@ -939,11 +939,28 @@ class Api:
         if x:
             system = (system + "\n\n[이번 추가 요구 사항 — 교사가 이번 실행에만 준 요청]\n<요청>\n" + x + "\n</요청>\n"
                       "- 위 요청을 반영하되, 앞의 규칙(학번·이름 쓰지 않기, 분량, 없는 사실 지어내지 않기, 원문 보존, 출력 형식)이 항상 우선한다.")
+        if openrouter.cancelled():
+            raise openrouter.Cancelled()
         text, cost = openrouter.chat(key, model, system, user, privacy)
+        with self._ai_lock:
+            self._run_cost += cost
+        if openrouter.cancelled():  # [바로 중지] 뒤에 도착한 답은 저장하지 않는다
+            raise openrouter.Cancelled()
         if not text.strip():
             raise openrouter.LlmError("AI가 빈 결과를 돌려주었습니다. 다시 시도하거나 다른 모델을 고르세요.")
-        self._run_cost += cost
         return text, cost
+
+    @safe
+    def ai_cancel(self):
+        """[바로 중지]: 진행 중인 AI 요청 연결을 끊고, 늦게 도착한 답도 버린다."""
+        openrouter.cancel()
+        return {}
+
+    @safe
+    def ai_cancel_reset(self):
+        """새 AI 실행을 시작할 때 중지 표시를 푼다."""
+        openrouter.reset()
+        return {}
 
     def _guard(self, key):
         with self._ai_lock:

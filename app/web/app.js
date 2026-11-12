@@ -1696,22 +1696,24 @@
     return modal(html, true, true, 'AI 실행', '취소').then((ok) => (ok ? { extra: ($('aiExtra') ? $('aiExtra').value : '').trim(), prompt: $('aiPrompt') ? $('aiPrompt').value : '', kind: kind || '' } : null))
       .finally(() => $('modalOk').classList.remove('ai-btn'));
   }
-  function aiProgress(title, total, onStop) {
+  // onStop: [다음 건부터 중지](여러 건일 때), onCancel: [바로 중지](언제나)
+  function aiProgress(title, total, onStop, onCancel) {
     let box = $('aiProg');
     if (!box) { box = el('div', { id: 'aiProg', class: 'ai-prog', hidden: true }); document.body.appendChild(box); }
     box.innerHTML = '';
     const t0 = Date.now();
     const count = el('div', { class: 'ai-prog-count', text: 'AI에 보내는 중…' });
     const time = el('b', { text: '0:00' });
-    // 막대: 끝난 건(파랑)·실패(빨강)·지금 처리 중(빗금이 흐름). 위에 '지금 처리 중 n / 전체 N'
+    // 막대: 끝난 건(파랑)·실패(빨강)·지금 처리 중(빗금이 흐름). 위에 '처리 중 n건 / 전체 N'
     const segDone = el('span', { class: 'seg-done' }), segFail = el('span', { class: 'seg-fail' }), segCur = el('span', { class: 'seg-cur' });
     const bar = el('div', { class: 'ai-bar2' }, [segDone, segFail, segCur]);
     const barLabel = el('div', { class: 'ai-bar-label', text: `지금 처리 중 1 / 전체 ${total}` });
-    let stopped = false;
-    const stopBtn = onStop ? el('button', { type: 'button', class: 'btn-danger', title: '지금 처리 중인 건은 끝까지 처리되고(결과·비용 유지), 남은 건은 실행하지 않습니다', text: '다음 건부터 중지',
-      onclick: () => { stopped = true; stopBtn.disabled = true; stopBtn.textContent = '중지 예약됨 — 지금 건이 끝나면 멈춥니다'; onStop(); } }) : null;
+    const stopBtn = onStop ? el('button', { type: 'button', title: '지금 처리 중인 건은 끝까지 처리되고(결과·비용 유지), 남은 건은 실행하지 않습니다', text: '다음 건부터 중지',
+      onclick: () => { stopBtn.disabled = true; stopBtn.textContent = '중지 예약됨 — 처리 중인 건이 끝나면 멈춥니다'; onStop(); } }) : null;
+    const cancelBtn = onCancel ? el('button', { type: 'button', class: 'btn-danger', title: '처리 중인 건도 바로 끊고 결과를 버립니다(저장하지 않음). 이미 나간 비용은 돌아오지 않습니다', text: '⏹ 바로 중지',
+      onclick: () => { cancelBtn.disabled = true; if (stopBtn) stopBtn.disabled = true; cancelBtn.textContent = '중지하는 중…'; onCancel(); } }) : null;
     const result = el('div', { class: 'ai-prog-result' });
-    const foot = el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), stopBtn]);
+    const foot = el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), stopBtn, cancelBtn].filter(Boolean));
     const spin = el('div', { class: 'ai-spin' });
     const wait = el('div', { class: 'muted' }, ['경과 ', time, ' · 멈춘 것이 아니니 기다려 주세요. AI 응답은 보통 수십 초, 느리면 몇 분 걸릴 수 있습니다.']);
     box.appendChild(el('div', { class: 'ai-prog-card', role: 'dialog', 'aria-live': 'polite' }, [el('h2', { text: title }), spin, count, barLabel, bar, wait, result, foot]));
@@ -1719,18 +1721,18 @@
     box.setAttribute('aria-modal', 'true');
     $('app').inert = true; $('sheet').inert = true; $('modal').inert = true; // 진행 중 배경 조작·단축키 막기
     box.tabIndex = -1;
-    setTimeout(() => (stopBtn || box).focus(), 30);
+    setTimeout(() => (stopBtn || cancelBtn || box).focus(), 30);
     const unblock = () => { $('app').inert = false; $('sheet').inert = false; $('modal').inert = false; };
     const tick = () => { const x = Math.floor((Date.now() - t0) / 1000); time.textContent = `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}`; };
     const timer = setInterval(tick, 500);
     return {
-      set(done, fail, label) {
-        const cur = Math.min(done + fail + 1, total);
+      set(done, fail, label, running) {
+        const run = running === undefined ? (done + fail < total ? 1 : 0) : running;
         count.textContent = total > 1 ? `완료 ${done}${fail ? ` · 실패 ${fail}` : ''}${label ? `\n지금: ${label}` : ''}` : `AI에 보내는 중…${label ? ` (${label})` : ''}`;
-        barLabel.textContent = `지금 처리 중 ${cur} / 전체 ${total}`;
+        barLabel.textContent = total > 1 && run > 1 ? `동시에 ${run}건 처리 중 · 끝난 건 ${done + fail} / 전체 ${total}` : `지금 처리 중 ${Math.min(done + fail + 1, total)} / 전체 ${total}`;
         segDone.style.width = `${(done / total) * 100}%`;
         segFail.style.width = `${(fail / total) * 100}%`;
-        segCur.style.width = done + fail < total ? `${100 / total}%` : '0';
+        segCur.style.width = `${(run / total) * 100}%`;
       },
       // 실패가 있거나 요약을 보여야 하면 창을 남기고 [확인]을 기다린다. 아니면 바로 닫는다.
       finish(errors, summary, ratio) {
@@ -1756,7 +1758,7 @@
   }
   // jobs: [{ label, run: () => api 결과 }] — api를 직접 불러 오류도 진행 창에서 모아 보여 준다.
   // remember=false: 고른 프롬프트를 작업별 기억값으로 저장하지 않는다(묶음마다 따로 기억하는 경우)
-  async function aiRun({ title, rows, warn, jobs, summary, skipConfirm, before, after, extra, kind, prompt, remember }) {
+  async function aiRun({ title, rows, warn, jobs, summary, skipConfirm, before, after, extra, kind, prompt, remember, concurrency }) {
     if (!skipConfirm) {
       const conf = await aiConfirm(title, rows, warn, kind);
       if (!conf) return null;
@@ -1765,30 +1767,49 @@
     }
     if (before && !(await before())) return null; // [AI 실행]을 누른 뒤에만 설정을 저장(취소하면 아무것도 바뀌지 않음)
     await api.ai_extra_set(extra || '', prompt || '', remember === false ? '' : kind || ''); // 이번 실행에만: 추가 요구 사항·고른 프롬프트(끝나면 지움)
-    try { return await aiRunJobs({ title, jobs, summary, after }); } finally { await api.ai_extra_set('', '', ''); }
+    try { return await aiRunJobs({ title, jobs, summary, after, concurrency }); } finally { await api.ai_extra_set('', '', ''); }
   }
-  async function aiRunJobs({ title, jobs, summary, after }) {
-    let stop = false;
-    const pg = aiProgress(title, jobs.length, jobs.length > 1 ? () => { stop = true; } : null);
+  // 여러 건은 동시에 AI_PARALLEL건씩 보낸다(concurrency로 바꿈: 앞 결과를 보고 쓰는 작업은 1).
+  // out.notRun: 끝내지 못한 건의 번호(중지·장애로 보내지 않았거나 바로 중지로 버린 건) — 이어서 돌릴 때 쓴다.
+  const AI_PARALLEL = 8;
+  async function aiRunJobs({ title, jobs, summary, after, concurrency }) {
+    let stop = false, cancelled = false, cancelNow = null;
+    const cancelWait = new Promise((res) => { cancelNow = res; });
+    await api.ai_cancel_reset();
+    const pg = aiProgress(title, jobs.length, jobs.length > 1 ? () => { stop = true; } : null,
+      () => { stop = true; cancelled = true; api.ai_cancel(); cancelNow(); });
     const results = [];
     const errors = [];
-    let done = 0, fail = 0, down = null;
-    for (const j of jobs) {
-      if (stop) break;
-      pg.set(done, fail, j.label);
-      let r;
-      try { r = await j.run(); } catch (e) { r = { ok: false, error: String(e) }; }
-      if (r && r.ok !== false) { done += 1; results.push(r); setCredits(r); if (j.onDone) j.onDone(r); }
-      else {
-        fail += 1; errors.push(`${j.label ? `${j.label}: ` : ''}${(r && r.error) || '처리하지 못했습니다.'}`); if (j.onFail) j.onFail(r);
-        if (r && (r.code === 'service_down' || r.code === 'rate_limited')) { down = r.code; stop = true; } // 장애·속도 제한: 남은 건은 보내지 않는다
+    const state = jobs.map(() => 'wait'); // wait → run → ok / fail
+    let done = 0, fail = 0, down = null, next = 0;
+    const running = new Set();
+    const show = () => pg.set(done, fail, jobs.length > 1 ? [...running].map((i) => jobs[i].label).filter(Boolean).slice(0, 3).join(', ') + (running.size > 3 ? ` 외 ${running.size - 3}건` : '') : jobs[0].label, running.size);
+    const worker = async () => {
+      while (!stop && next < jobs.length) {
+        const i = next++;
+        const j = jobs[i];
+        state[i] = 'run'; running.add(i); show();
+        let r;
+        try { r = await j.run(); } catch (e) { r = { ok: false, error: String(e) }; }
+        running.delete(i);
+        if (cancelled) { state[i] = 'wait'; return; } // 바로 중지 뒤에 온 답은 세지 않는다(서버도 저장하지 않음)
+        if (r && r.ok !== false) { state[i] = 'ok'; done += 1; results.push(r); setCredits(r); if (j.onDone) j.onDone(r); }
+        else {
+          state[i] = 'fail'; fail += 1; errors.push(`${j.label ? `${j.label}: ` : ''}${(r && r.error) || '처리하지 못했습니다.'}`); if (j.onFail) j.onFail(r);
+          if (r && (r.code === 'service_down' || r.code === 'rate_limited')) { down = r.code; stop = true; } // 장애·속도 제한: 남은 건은 보내지 않는다
+        }
+        show();
       }
-    }
-    const out = { done, fail, stopped: stop, skipped: jobs.length - done - fail, results, errors };
+    };
+    const n = Math.max(1, Math.min(concurrency || AI_PARALLEL, jobs.length));
+    await Promise.race([Promise.all(Array.from({ length: n }, worker)), cancelWait]);
+    const notRun = state.map((x, i) => (x === 'wait' || x === 'run' ? i : -1)).filter((i) => i >= 0);
+    const out = { done, fail, stopped: stop, cancelled, skipped: notRun.length, notRun, results, errors };
     if (after) after(out);
-    const msg = summary ? summary(out) : (jobs.length > 1 && (fail || stop) ? `완료 ${done}건 · 실패 ${fail}건${out.skipped ? ` · 중지로 건너뜀 ${out.skipped}건` : ''}` : '');
+    const msg = summary ? summary(out) : (cancelled ? `바로 중지했습니다. 완료 ${done}건${fail ? ` · 실패 ${fail}건` : ''}${notRun.length ? ` · 처리하지 않음 ${notRun.length}건(처리 중이던 건은 저장하지 않음)` : ''}`
+      : jobs.length > 1 && (fail || stop) ? `완료 ${done}건 · 실패 ${fail}건${out.skipped ? ` · 중지로 건너뜀 ${out.skipped}건` : ''}` : '');
     await pg.finish(errors, msg, (done + fail) / jobs.length);
-    if (down) await aiDownBox(down, out.skipped);
+    if (down && !cancelled) await aiDownBox(down, out.skipped);
     return out;
   }
   // OpenRouter 장애(연결 실패·서버 오류)나 계속되는 속도 제한: 남은 건을 멈췄다고 알리고 상태 페이지를 열 수 있게
@@ -4134,7 +4155,7 @@
       const failedIds = [];
       out = await aiRun({ title: '인박스 자료 정제', skipConfirm: true, extra: conf.extra, prompt: conf.prompt, kind: 'refine', remember: !ibPromptKeyUse(b),
         jobs: rows.map((r) => ({ label: `${r.name || r.student_no || ''} ${(r.content || '').slice(0, 16)}`.trim(), run: () => api.ai_inbox_row(r.id, modelIndex), onFail: () => failedIds.push(r.id) })),
-        after: (o) => { out = o; o.retry = [...failedIds, ...rows.slice(o.done + o.fail).map((r) => r.id)]; } });
+        after: (o) => { out = o; o.retry = [...failedIds, ...o.notRun.map((i) => rows[i].id)]; } });
     } finally { await jobEnd(); if (btn && btn.isConnected) { btn.disabled = false; btn.classList.remove('busy-btn'); } }
     refreshBalance();
     // 실패·미실행 행만 골라 두어 [선택 N건 정제]로 이어서 돌릴 수 있게(성공한 행은 다시 하지 않음)
@@ -5057,8 +5078,9 @@
               onDone: () => { res[x.student_no] = { ok: true }; },
               onFail: (r) => { res[x.student_no] = { ok: false, error: (r && r.error) || '실패' }; },
             })),
-            after: (o) => { students.slice(o.done + o.fail).forEach((x) => { res[x.student_no] = { ok: false, skipped: true }; }); },
-            summary: (o) => `완료 ${o.done}명 · 실패 ${o.fail}명${o.skipped ? ` · 중지로 건너뜀 ${o.skipped}명` : ''}\n후보는 이 창의 [후보 보기]나 학생 화면의 '종합·다듬기 후보'에서 확인한 뒤 최종안으로 채택하세요.`,
+            concurrency: 1, // 앞 학생 후보를 보고 겹치지 않게 쓰므로 한 명씩
+            after: (o) => { o.notRun.forEach((i) => { res[students[i].student_no] = { ok: false, skipped: true }; }); },
+            summary: (o) => `${o.cancelled ? '바로 중지했습니다(처리 중이던 학생은 저장하지 않음). ' : ''}완료 ${o.done}명 · 실패 ${o.fail}명${o.skipped ? ` · 중지로 건너뜀 ${o.skipped}명` : ''}\n후보는 이 창의 [후보 보기]나 학생 화면의 '종합·다듬기 후보'에서 확인한 뒤 최종안으로 채택하세요.`,
           });
         } finally {
           if (started) await jobEnd();
