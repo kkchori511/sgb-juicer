@@ -112,10 +112,13 @@ class TagWork:
     def save_draft(self, wid, draft):
         d = draft or {}
         keep = {k: str(d.get(k) or "")[:20000] for k in ("prompt", "example", "lib_id", "lib_name")}
-        old = _j(self.d.q("SELECT draft FROM tag_works WHERE id=?", (int(wid),))[0]["draft"] if self.d.q("SELECT 1 FROM tag_works WHERE id=?", (int(wid),)) else "{}", {})
-        if old.get("_vers"):
-            keep["_vers"] = old["_vers"]
-        with self.d.tx() as c:
+        with self.d.tx() as c:  # 번호표(_vers)는 같은 트랜잭션에서 읽어 그대로 둔다(후보 저장과 겹쳐도 잃지 않게)
+            row = c.execute("SELECT draft FROM tag_works WHERE id=?", (int(wid),)).fetchone()
+            if not row:
+                raise DbError("태그 작업을 찾지 못했습니다.")
+            old = _j(row[0], {})
+            if old.get("_vers"):
+                keep["_vers"] = old["_vers"]
             c.execute("UPDATE tag_works SET draft=?, updated_at=datetime('now','localtime') WHERE id=?",
                       (json.dumps(keep, ensure_ascii=False), int(wid)))
         return keep
@@ -184,11 +187,13 @@ class TagWork:
         if len(rows) >= TRIAL_MAX and all(r["locked"] for r in rows):
             raise DbError("시험 후보 3개가 모두 잠겨 있습니다. 하나를 잠금 해제하거나 지운 뒤 다시 해 주세요.")
 
-    def add_trial(self, wid, r, chain, parent_id, input_src, input_text, text, model, cost, meta, base=None):
+    def add_trial(self, wid, r, chain, parent_id, input_src, input_text, text, model, cost, meta, base=None, alive=None):
         """시험 후보를 넣고, 3개를 넘으면 잠기지 않은 가장 오래된 시험 후보를 지운다. 반환: (새 id, 지운 id)
         base: 원자료 기준(record_ver, record_text). 이어 고친 후보는 앞 후보의 기준을 그대로 물려받는다."""
         rv, rt = base if base else (r.get("content_ver") or 0, r["content"])
         with self.d.tx() as c:
+            if alive:
+                alive()  # [바로 중지]가 저장 직전에 들어왔으면 여기서 멈춘다
             now = c.execute("SELECT content_ver, content FROM records WHERE id=?", (r["id"],)).fetchone()
             if not now or ((now[0] or 0), now[1]) != ((rv or 0), rt):
                 raise DbError("변환하는 동안 기록이 바뀌어 후보를 저장하지 않았습니다. 다시 시험해 주세요.")
@@ -328,9 +333,11 @@ class TagWork:
         return {"ver": rows[0]["record_ver"] or 0, "text": rows[0]["record_text"], "outs": m.get("steps_out") or [], "input": m.get("input") or "",
                 "cost": rows[0]["cost"] or 0}
 
-    def save_bulk(self, run, r, input_text, text, model, cost, meta, error=None):
+    def save_bulk(self, run, r, input_text, text, model, cost, meta, error=None, alive=None):
         """일괄 결과 한 건. 같은 실행·기록의 실패 결과는 바꿔 쓴다(성공은 다시 만들지 않음)."""
         with self.d.tx() as c:
+            if alive and not error:
+                alive()
             self._ver_of(c, run["work_id"], signature(run["chain"]))
             if c.execute("SELECT 1 FROM tag_cands WHERE run_id=? AND record_id=? AND status='ok'", (run["id"], r["id"])).fetchone():
                 return None
@@ -499,13 +506,13 @@ class TagWork:
             targets.update(_j(x["targets"], []))
         pending = failed = notrun = 0
         for rid in targets:
-            x = latest.get(rid)
+            x = latest.get(rid)  # 그 기록의 가장 최근 일괄 결과로 판단(예전 반영 여부로 새 결과를 끝난 것으로 보지 않음)
             if not x:
                 if rid not in applied_rec:
                     notrun += 1
             elif x["status"] == "failed":
                 failed += 1
-            elif x["id"] not in applied and rid not in applied_rec:
+            elif x["id"] not in applied:
                 pending += 1
         return {"pending": pending, "failed": failed, "notrun": notrun}
 

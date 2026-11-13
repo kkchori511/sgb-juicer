@@ -20,7 +20,7 @@ def fake_chat(key, model, system, user, privacy_block=False):
 openrouter.chat = fake_chat
 openrouter.balance = lambda key: 1.0  # 시험에서 잔액 조회 HTTP를 보내지 않음
 from app.api import Api  # noqa: E402
-from app.tagwork import step_system  # noqa: E402
+from app.tagwork import TagWork, step_system  # noqa: E402
 
 
 def ok(r):
@@ -132,6 +132,51 @@ def test_edges():
     HOOK["fn"] = None
     # 확정 단계: P? → (이어) 요청B. 실패한 건은 마지막 단계만 다시
     assert len(CALLS) - before == 1, CALLS[before:]
+    # A03: AI 답을 받은 뒤 저장 직전에 중지가 끼어도 저장하지 않음
+    def cancel_after(tw_method):
+        real = getattr(TagWork, tw_method)
+        def wrapped(self, *a, **k):
+            openrouter.cancel()
+            openrouter.reset()
+            return real(self, *a, **k)
+        return real, wrapped
+    real, wrapped = cancel_after("add_trial")
+    TagWork.add_trial = wrapped
+    try:
+        r = api.tag_trial_run(w["id"], rids[2], chain("A"), None, None, Y)
+    finally:
+        TagWork.add_trial = real
+    assert not r["ok"] and r.get("code") == "cancelled", r
+    # A04: 단계 사이에서 중지하면 끝낸 단계·비용은 '중지함'으로 남고, 다시 할 때 다음 단계부터
+    stop = {"n": 0}
+    def stop_b(s, u):
+        if "요청B" in s and stop["n"] == 0:
+            stop["n"] += 1
+            openrouter.cancel()
+            raise openrouter.Cancelled()
+    HOOK["fn"] = stop_b
+    run2 = ok(api.tag_run_create(w["id"], [rids[0]], {"slot": "i:autonomy"}, Y))["run"]
+    assert not api.tag_run_item(run2["id"], rids[0], None, Y)["ok"]
+    openrouter.reset()
+    HOOK["fn"] = None
+    rv0 = ok(api.tag_review(w["id"], run2["id"], Y))["rows"][0]
+    assert rv0["state"] == "failed" and "중지" in rv0["cand"]["error"] and rv0["cand"]["cost"] > 0, rv0
+    before = len(CALLS)
+    ok(api.tag_run_item(run2["id"], rids[0], None, Y))
+    assert len(CALLS) - before == 1
+    # R01: 예전에 반영한 기록을 다시 변환한 새 결과는 '검토 전'으로 셈
+    c_old = ok(api.tag_review(w["id"], run2["id"], Y))["rows"][0]["cand"]["id"]
+    ok(api.tag_apply(w["id"], [c_old], Y))
+    run3 = ok(api.tag_run_create(w["id"], [rids[0]], {"slot": "i:autonomy"}, Y))["run"]
+    ok(api.tag_run_item(run3["id"], rids[0], None, Y))
+    assert ok(api.tag_summary())["works"][0]["pending"] >= 1
+    # R02: 초안 저장이 프롬프트 번호표를 지우지 않음
+    vers_before = ok(api.tag_work(tag, Y))["trials"]
+    ok(api.tag_draft_save(w["id"], {"prompt": "새 초안"}, Y))
+    d = api._db().q("SELECT draft FROM tag_works WHERE id=?", (w["id"],))[0]["draft"]
+    assert json.loads(d).get("_vers"), d
+    # A02: 다른 학년도 화면의 요청은 그 학년도 DB에만, 지금 학년도가 아니면 거절
+    assert not api.tag_draft_save(w["id"], {"prompt": "x"}, 2027)["ok"]
     # 검토 행에 활성 여부·회차 등
     row = ok(api.tag_review(w["id"], run["id"], Y))["rows"][1]
     assert row["active"] is True and "seq" in row

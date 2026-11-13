@@ -735,9 +735,21 @@ class Api:
     # ---------- 태그 AI 변환(tagwork.py) ----------
     # 모든 쓰기·AI 호출은 화면이 연 학년도(year)를 받아 지금 학년도와 같은지 확인한다(학년도마다 id가 겹치므로).
     def _tw(self, year=None):
-        if year is not None and int(year) != config.load()["current_year"]:
+        """화면이 연 학년도의 DB로 묶는다(확인한 뒤 지금 학년도를 다시 읽지 않음: 그 사이 학년도가 바뀌어도 다른 학년도에 쓰지 않게)."""
+        if year is None:
+            return TagWork(self._db())
+        y = int(year)
+        if y != config.load()["current_year"] or y not in db.list_years():
             raise db.DbError("학년도가 바뀌었습니다. 화면을 다시 열어 주세요.")
-        return TagWork(self._db())
+        return TagWork(db.open_year(y))
+
+    @staticmethod
+    def _alive(gen):
+        """AI를 부르기 전 세대(gen)와 지금이 같아야 저장한다([바로 중지]가 끼면 버림)."""
+        def check():
+            if openrouter.cancelled() or openrouter.generation() != gen:
+                raise openrouter.Cancelled()
+        return check
 
     @safe
     def tag_work(self, tag_id, year=None):
@@ -792,10 +804,11 @@ class Api:
         key = ("tag", int(r["id"]))
         self._guard(key)
         try:
+            gen = openrouter.generation()
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, len(chain["steps"]) - 1), src_text,
                                        cfg["privacy_block"], extra=False)
             nid, dropped = tw.add_trial(w["id"], r, chain, int(parent_id) if parent_id else None, input_src, src_text, text, model, cost, {},
-                                        base=base)
+                                        base=base, alive=self._alive(gen))
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
         finally:
             self._release(key)
@@ -820,15 +833,14 @@ class Api:
 
     @safe
     def tag_plan(self, wid, flt=None, year=None):
-        d = self._db()
-        self._tw(year)
-        return TagWork(d).plan(wid, d.role(), flt or {})
+        tw = self._tw(year)
+        return tw.plan(wid, tw.d.role(), flt or {})
 
     @safe
     def tag_run_create(self, wid, record_ids, flt=None, year=None):
         self._editable(year)
-        d = self._db()
-        return {"run": self._tw(year).create_run(wid, record_ids, flt or {}, d.role())}
+        tw = self._tw(year)
+        return {"run": tw.create_run(wid, record_ids, flt or {}, tw.d.role())}
 
     @safe
     def tag_run_item(self, run_id, rid, model_index=None, year=None):
@@ -856,17 +868,22 @@ class Api:
             if part and part["ver"] == (r.get("content_ver") or 0) and part["text"] == r["content"] and part["input"] == first and part["outs"]:
                 outs, total = list(part["outs"])[: len(chain["steps"]) - 1], float(part["cost"] or 0)
             text = outs[-1] if outs else first
+            gen = openrouter.generation()
+            done_before = len(outs)
             try:
                 for i in range(len(outs), len(chain["steps"])):
                     text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, i), text, cfg["privacy_block"], extra=False)
                     total += cost
                     outs.append(text)
             except openrouter.Cancelled:
+                # 중지: 끝낸 앞 단계·비용만 '중지함'으로 남겨 다음에 이어서 한다(결과 후보로 내놓지는 않음)
+                if len(outs) > done_before and len(outs) < len(chain["steps"]):
+                    tw.save_bulk(run, r, first, "", model, total, {"steps_out": outs, "input": first}, error="중지함(끝낸 단계까지 저장)")
                 raise
             except (db.DbError, openrouter.LlmError) as e:  # 끝낸 단계·비용은 남겨 다음에 이어서
                 tw.save_bulk(run, r, first, "", model, total, {"steps_out": outs, "input": first}, error=str(e))
                 raise
-            nid = tw.save_bulk(run, r, first, text, model, total, {"steps_out": outs[:-1], "input": first})
+            nid = tw.save_bulk(run, r, first, text, model, total, {"steps_out": outs[:-1], "input": first}, alive=self._alive(gen))
             return self._ai_out({"id": nid, "cost": total})
         except openrouter.Cancelled:
             raise
