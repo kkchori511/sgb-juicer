@@ -959,3 +959,24 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 .tw-chip.tw-closed { background: #dbeafe; color: #1e40af; border-color: #bfdbfe; }
 .tw-chip.tw-off { background: var(--surface-2); color: var(--muted); border-color: var(--border); }
 .tw-applied-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; max-height: 50vh; overflow: auto; }
+
+/* 프롬프트 메뉴: 기본 묶음 */
+.pr-group { border: 1px solid var(--border); border-radius: 8px; padding: 4px 6px; margin-bottom: 8px; background: var(--surface-2); }
+.pr-group > summary { cursor: pointer; padding: 6px 4px; list-style-position: inside; }
+.pr-group[open] > summary { border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.pr-mine-title { font-size: 12.5px; font-weight: 700; color: var(--muted); margin: 6px 4px 4px; }
+/* 태그 AI 변환: 원문·프롬프트 칸 구분(옅은 색) */
+.tw-box { border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.tw-box-src { background: #f4f7fa; border: 1px solid #dde4ec; }
+.tw-box-pr { background: #f7f5fc; border: 1px solid #e4def3; }
+.tw-box-title { font-weight: 700; font-size: 14px; }
+.tw-from { font-size: 12.5px; }
+.tw-prhead { align-items: flex-start; }
+.tw-libsel { max-width: 240px; }
+.tw-left { gap: 10px; }
+/* 태그별 기록 일괄: 활동명·날짜 */
+.tv-bulk-grp { display: inline-flex; align-items: center; gap: 4px; padding-left: 8px; border-left: 1px solid rgba(255,255,255,.25); }
+.tv-bulk-in { width: 150px; padding: 4px 8px; font-size: 13px; }
+.tw-libline { display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 400; }
+.tw-libline .tw-libsel { flex: 1; max-width: none; width: auto; }
+.pr-group > summary .small-note { margin: 2px 0 0 20px; font-weight: 400; }

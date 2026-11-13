@@ -293,6 +293,52 @@ class Records:
                 done += 1
         return done, skipped, changed
 
+    def set_field_changed(self, record_ids, field, value):
+        """여러 기록의 활동명(title) 또는 날짜(date)를 같은 값으로. 마감·비활성 기록은 건너뛴다.
+        반환: 실제로 바뀐 [기록, 바꾸기 전, 바꾼 뒤] 목록(되돌리기용)."""
+        if field not in ("title", "date"):
+            raise DbError("활동명이나 날짜만 한꺼번에 바꿀 수 있습니다.")
+        value = (value or "").strip()
+        if field == "date" and value and not re.match(r"^\d{4}-\d{2}-\d{2}$", value):
+            raise DbError("날짜는 2026-03-15 같은 모양으로 넣어 주세요.")
+        if field == "title" and len(value) > 200:
+            raise DbError("활동명이 너무 깁니다.")
+        out = []
+        with self.d.tx() as c:
+            for rid in sorted({int(x) for x in record_ids or []}):
+                r = c.execute("SELECT id, group_id, item, student_no, title, date FROM records WHERE id=?", (rid,)).fetchone()
+                if not r or self.is_closed(r[1], r[2], r[3]):
+                    continue
+                m = c.execute("SELECT active FROM memberships WHERE group_id=? AND student_no=?", (r[1], r[3])).fetchone()
+                if not m or not m[0]:
+                    continue
+                before = (r[4] if field == "title" else r[5]) or ""
+                if before == value:
+                    continue
+                c.execute(f"UPDATE records SET {field}=?, updated_at=datetime('now','localtime') WHERE id=?", (value, rid))
+                out.append([rid, before, value])
+        return out
+
+    def undo_field_pairs(self, pairs, field):
+        """활동명·날짜 일괄 되돌리기. 그 뒤 다시 바뀌었거나 마감된 기록은 건너뛴다. → (되돌린 수, 건너뛴 수, 그 뒤 바뀌어 건너뛴 수)"""
+        if field not in ("title", "date"):
+            raise DbError("되돌릴 수 없는 항목입니다.")
+        done = skipped = changed = 0
+        with self.d.tx() as c:
+            for p in pairs or []:
+                rid, before, after = int(p[0]), str(p[1] or ""), str(p[2] or "")
+                r = c.execute(f"SELECT group_id, item, student_no, {field} FROM records WHERE id=?", (rid,)).fetchone()
+                if not r or self.is_closed(r[0], r[1], r[2]):
+                    skipped += 1
+                    continue
+                if (r[3] or "") != after:
+                    skipped += 1
+                    changed += 1
+                    continue
+                c.execute(f"UPDATE records SET {field}=?, updated_at=datetime('now','localtime') WHERE id=?", (before, rid))
+                done += 1
+        return done, skipped, changed
+
     # ---------- 태그별 기록 ----------
     def record_state(self, rid):
         """기록 한 건의 지금 값(태그별 기록 화면의 저장·되돌리기 확인용)."""

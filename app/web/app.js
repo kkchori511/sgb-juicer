@@ -3520,7 +3520,14 @@
     const addSel = tagSel('태그 더하기…'), rmSel = tagSel('태그 빼기…');
     addSel.addEventListener('change', () => tvBulkRun(addSel, 'add', n));
     rmSel.addEventListener('change', () => tvBulkRun(rmSel, 'remove', n));
+    const titleIn = el('input', { type: 'text', class: 'tv-bulk-in', placeholder: '활동명', 'aria-label': '고른 기록에 넣을 활동명' });
+    const dateIn = el('input', { type: 'date', class: 'tv-bulk-in', 'aria-label': '고른 기록에 넣을 날짜' });
+    const setTitle = el('button', { type: 'button', text: '활동명 바꾸기', onclick: () => tvBulkField('title', titleIn.value, n) });
+    titleIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') setTitle.click(); });
     bar.append(el('b', { text: `선택 ${n}명 ${recs.length}건` }), el('span', { class: 'muted', text: '(고칠 수 있는 기록만 고를 수 있습니다)' }), addSel, rmSel,
+      el('span', { class: 'tv-bulk-grp' }, [titleIn, setTitle]),
+      el('span', { class: 'tv-bulk-grp' }, [dateIn, el('button', { type: 'button', text: '날짜 바꾸기', onclick: () => tvBulkField('date', dateIn.value, n) }),
+        el('button', { type: 'button', class: 'link', text: '날짜 비우기', onclick: () => tvBulkField('date', '', n) })]),
       el('button', { type: 'button', text: '선택 해제', onclick: () => tvSelectAll(false) }),
       el('button', { type: 'button', class: 'danger-text', text: `선택 기록 삭제`, onclick: () => tvBulkDelete(recs, n) }));
   }
@@ -3551,14 +3558,17 @@
     await renderTagView(true);
   }
   // 일괄 태그: 목록을 다시 불러오지 않고 바뀐 기록만 고친다(개별 되돌리기·제외 예정 표시 유지)
-  function tvApplyStates(states) {
+  function tvApplyStates(states, keys) {
     Object.entries(states || {}).forEach(([rid, rec]) => {
       const st = TV.rec.get(+rid);
       if (!st) return;
       const now = tvFields(rec);
-      if (sameVal('tag_ids', st.draft.tag_ids, st.saved.tag_ids)) st.draft.tag_ids = now.tag_ids;
-      st.saved.tag_ids = now.tag_ids;
-      if (st.undo && 'tag_ids' in st.undo.after) st.undo.after.tag_ids = now.tag_ids;
+      (keys || ['tag_ids']).forEach((k) => {
+        if (sameVal(k, st.draft[k], st.saved[k])) st.draft[k] = now[k];
+        st.saved[k] = now[k];
+        if (st.undo && k in st.undo.after) st.undo.after[k] = now[k];
+        if (k === 'title' || k === 'date') st.r[k] = now[k];
+      });
       tvApplyState(st, rec);
     });
   }
@@ -3582,10 +3592,35 @@
     tvRenderSum();
     toast(`${TV.bulk.text}. 위 요약 줄의 [되돌리기]로 취소할 수 있습니다.`);
   }
+  // 고른 기록의 활동명·날짜를 한꺼번에 같은 값으로(되돌리기 가능)
+  async function tvBulkField(field, value, n) {
+    const v = (value || '').trim();
+    const name = field === 'title' ? '활동명' : '날짜';
+    if (field === 'title' && !v && !(await confirmBox('활동명을 비웁니다. 고른 기록의 활동명이 모두 지워집니다.', '비우기'))) return;
+    if (!(await leaveOk())) return;
+    const ids = [...TV.sel];
+    const r = await tvOp(() => mutate('records_set_field', ids, field, v, TV.year));
+    if (!r) return;
+    tvApplyStates(r.states, [field]);
+    const shown = field === 'date' && v ? md(v) : v;
+    TV.bulk = { text: `${n}명 ${ids.length}건 중 ${r.pairs.length}건 ${name} ${v ? `'${shown}'(으)로 바꿈` : '비움'}`, pairs: r.pairs, mode: 'field', field };
+    tvRenderSum();
+    toast(r.pairs.length ? `${TV.bulk.text}. 위 요약 줄의 [되돌리기]로 취소할 수 있습니다.` : `바뀐 기록이 없습니다(이미 같은 ${name}이거나 마감·비활성).`, 5000);
+  }
   async function tvBulkUndo() {
     const b = TV.bulk;
     if (!b) return;
     if (!(await leaveOk())) return;
+    if (b.mode === 'field') {
+      const u = await tvOp(() => mutate('undo_records_field', b.pairs, b.field, TV.year));
+      if (!u) return;
+      tvApplyStates(u.states, [b.field]);
+      TV.bulk = null;
+      tvRenderSum();
+      const why = [u.changed ? `${u.changed}건은 그 뒤 다시 바뀌어` : '', u.skipped - u.changed ? `${u.skipped - u.changed}건은 마감·삭제되어` : ''].filter(Boolean).join(', ');
+      toast(why ? `${u.done}건을 되돌렸습니다. ${why} 건너뛰었습니다.` : `${u.done}건을 되돌렸습니다.`, why ? 6000 : 3000);
+      return;
+    }
     const u = await tvOp(() => mutate('undo_tag_records', b.pairs, b.mode, TV.year));
     if (!u) return;
     tvApplyStates(u.states);
@@ -3761,10 +3796,21 @@
     const grid = el('div', { class: 'tw-grid' });
     // 왼쪽: 원문·프롬프트
     const left = el('div', { class: 'tw-left' });
-    left.appendChild(el('div', { class: 'col-label', text: hasOrig ? '처음 원문' : '원문(지금 기록 내용)' }));
-    left.appendChild(el('div', { class: 'cmp-text tw-src', text: hasOrig ? rec.original : rec.content }));
-    if (hasOrig) { left.appendChild(el('div', { class: 'col-label', text: '지금 기록 내용(앞서 반영한 글)' })); left.appendChild(el('div', { class: 'cmp-text tw-src', text: rec.content })); }
-    const libSel = el('select', { 'aria-label': '프롬프트 불러오기' }, [el('option', { value: '', text: '프롬프트 목록에서 불러오기…' }), ...(TW.lib || []).map((p) => el('option', { value: p.id, text: p.name }))]);
+    const srcCard = el('div', { class: 'tw-box tw-box-src' }, [el('div', { class: 'tw-box-title', text: '📄 원문' })]);
+    srcCard.append(el('div', { class: 'col-label', text: hasOrig ? '처음 원문' : '원문(지금 기록 내용)' }), el('div', { class: 'cmp-text tw-src', text: hasOrig ? rec.original : rec.content }));
+    if (hasOrig) srcCard.append(el('div', { class: 'col-label', text: '지금 기록 내용(앞서 반영한 글)' }), el('div', { class: 'cmp-text tw-src', text: rec.content }));
+    left.appendChild(srcCard);
+    const prCard = el('div', { class: 'tw-box tw-box-pr' });
+    const libOf = () => (TW.lib || []).find((p) => p.id === (w.draft && w.draft.lib_id));
+    const libName = () => { const p = libOf(); if (!p) return ''; const same = (w.draft.prompt || '').trim() === (p.prompt || '').trim() && (w.draft.example || '').trim() === (p.example || '').trim(); return same ? p.name : `${p.name} (고침)`; };
+    const libSel = el('select', { 'aria-label': '프롬프트 불러오기', class: 'tw-libsel' });
+    const fillLib = () => {
+      libSel.innerHTML = '';
+      const cur = libOf();
+      libSel.appendChild(el('option', { value: '', text: cur ? libName() : '프롬프트 목록에서 불러오기…', selected: true }));
+      (TW.lib || []).forEach((p) => libSel.appendChild(el('option', { value: p.id, text: p.name })));
+    };
+    fillLib();
     const pr = el('textarea', { class: 'tw-prompt', rows: 12, 'aria-label': '프롬프트(지침)' }); pr.value = (w.draft && w.draft.prompt) || '';
     const ex = el('textarea', { rows: 3, 'aria-label': '예시', placeholder: '예시(선택): 문체·형식만 따라 합니다' }); ex.value = (w.draft && w.draft.example) || '';
     libSel.addEventListener('change', async () => {
@@ -3773,11 +3819,13 @@
       if ((pr.value.trim() && pr.value.trim() !== p.prompt.trim()) && !(await confirmBox(`지금 고치던 프롬프트를 '${p.name}'으로 바꿉니다. 이미 만든 후보에는 영향이 없습니다.`, '불러오기'))) { libSel.value = ''; return; }
       pr.value = p.prompt; ex.value = p.example || '';
       w.draft = { prompt: p.prompt, example: p.example || '', lib_id: p.id, lib_name: p.name };
-      twDraftChanged(); libSel.value = '';
+      twDraftChanged(); fillLib(); fromLine.textContent = fromText();
     });
-    const onEdit = () => { w.draft = { ...(w.draft || {}), prompt: pr.value, example: ex.value }; twDraftChanged(); };
+    const fromText = () => (w.draft && w.draft.lib_name ? `'${w.draft.lib_name}'에서 시작${libName().endsWith('(고침)') ? ' · 고친 내용 있음' : ''}` : '직접 쓴 프롬프트');
+    const fromLine = el('div', { class: 'tw-from muted', text: fromText() });
+    const onEdit = () => { w.draft = { ...(w.draft || {}), prompt: pr.value, example: ex.value }; twDraftChanged(); fromLine.textContent = fromText(); if (libSel.options[0]) libSel.options[0].textContent = libOf() ? libName() : '프롬프트 목록에서 불러오기…'; };
     pr.addEventListener('input', onEdit); ex.addEventListener('input', onEdit);
-    left.append(el('div', { class: 'tw-prhead' }, [el('span', { class: 'col-label', text: `프롬프트(지침)${w.draft && w.draft.lib_name ? ` · '${w.draft.lib_name}'에서 시작` : ''}` }), el('span', { class: 'spacer' }), libSel]), pr,
+    prCard.append(el('div', { class: 'tw-box-title', text: '✍️ 프롬프트(지침)' }), el('label', { class: 'tw-libline' }, [el('span', { class: 'muted', text: '불러온 프롬프트' }), libSel]), fromLine, pr,
       el('details', { open: !!ex.value }, [el('summary', { text: '예시(선택)' }), ex]));
     const model = el('select', { 'aria-label': '모델' }); fillModelSelect(model);
     const srcBox = el('div', { class: 'tw-src-pick' }, [el('span', { class: 'muted', text: '보낼 글:' }),
@@ -3786,8 +3834,9 @@
     const full = trials.length >= 3 && trials.every((t) => t.locked);
     const go = el('button', { type: 'button', class: 'primary ai-btn', disabled: !tvEditable(rec) || full, title: full ? '후보 3칸이 모두 잠겨 있습니다' : '', text: '✨ 이 프롬프트로 변환' });
     go.addEventListener('click', () => twRunTrial(rec, { src: TW.src, steps: [{ prompt: pr.value, example: ex.value, request: TW.req.trim() }] }, null, model, go));
-    left.append(srcBox, req, el('div', { class: 'tw-row' }, [el('label', { class: 'inline', style: 'margin:0' }, ['모델', model]), el('span', { class: 'spacer' }), go]));
-    if (!tvEditable(rec)) left.appendChild(el('p', { class: 'warn-text', text: '마감·비활성·보관 학년도 기록은 변환할 수 없습니다.' }));
+    prCard.append(srcBox, req, el('div', { class: 'tw-row' }, [el('label', { class: 'inline', style: 'margin:0' }, ['모델', model]), el('span', { class: 'spacer' }), go]));
+    if (!tvEditable(rec)) prCard.appendChild(el('p', { class: 'warn-text', text: '마감·비활성·보관 학년도 기록은 변환할 수 없습니다.' }));
+    left.appendChild(prCard);
     // 오른쪽: 후보 3칸
     const right = el('div', { class: 'tw-cands' });
     if (!trials.length) right.appendChild(el('div', { class: 'tw-empty', text: '아직 후보가 없습니다. 왼쪽에서 [✨ 이 프롬프트로 변환]을 누르세요.' }));
@@ -4165,12 +4214,22 @@
     const list = $('prList');
     list.innerHTML = '';
     const usedBy = (id) => Object.entries(r.picks).filter(([, v]) => v === id).map(([k]) => r.kinds[k]);
-    r.prompts.forEach((x) => {
+    const item = (x) => {
       const uses = usedBy(x.id);
-      list.appendChild(el('button', { type: 'button', class: 'pr-item' + (x.id === P.id ? ' active' : ''), onclick: async () => { await flushPending(); P.id = x.id; renderPrompts(); } },
+      return el('button', { type: 'button', class: 'pr-item' + (x.id === P.id ? ' active' : ''), onclick: async () => { await flushPending(); P.id = x.id; P.openGroup = !!x.builtin; renderPrompts(); } },
         [el('b', { text: x.name }), x.builtin ? el('span', { class: 'tag', text: '기본' }) : null,
-          uses.length ? el('div', { class: 'muted small-note', text: `지금 선택: ${uses.join(', ')}` }) : null]));
-    });
+          uses.length ? el('div', { class: 'muted small-note', text: `지금 선택: ${uses.join(', ')}` }) : null]);
+    };
+    // 기본 프롬프트는 한 묶음으로 접어 둔다(마지막 상태 기억, 고른 것이 기본이면 펼침)
+    const builtins = r.prompts.filter((x) => x.builtin), mine = r.prompts.filter((x) => !x.builtin);
+    const curBuiltin = builtins.some((x) => x.id === P.id);
+    const open = localStorage.getItem('sgb_pr_builtin_open') === '1' || (curBuiltin && P.openGroup);
+    const grp = el('details', { class: 'pr-group', open }, [el('summary', {}, [el('b', { text: `📦 기본 프롬프트 (${builtins.length})` }),
+      el('div', { class: 'muted small-note', text: '지울 수 없고, 고친 뒤 [기본값으로 되돌리기] 가능' })]), ...builtins.map(item)]);
+    grp.addEventListener('toggle', () => { try { localStorage.setItem('sgb_pr_builtin_open', grp.open ? '1' : '0'); } catch (e) { /* 무시 */ } });
+    list.appendChild(grp);
+    if (mine.length) list.appendChild(el('div', { class: 'pr-mine-title', text: `직접 만든 프롬프트 (${mine.length})` }));
+    mine.forEach((x) => list.appendChild(item(x)));
     const cur = r.prompts.find((x) => x.id === P.id);
     $('prName').value = cur.name;
     $('prName').disabled = !!cur.builtin;

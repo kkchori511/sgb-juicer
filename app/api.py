@@ -980,6 +980,27 @@ class Api:
         return {"done": done, "skipped": skipped, "changed": changed, "states": states}
 
     @safe
+    def records_set_field(self, record_ids, field, value, year=None):
+        """태그별 기록: 고른 기록의 활동명·날짜를 한꺼번에 같은 값으로(되돌리기 가능)."""
+        self._editable(year)
+        rec = self._rec()
+        pairs = rec.set_field_changed(record_ids, field, value)
+        return {"pairs": pairs, "states": {str(p[0]): rec.record_state(p[0]) for p in pairs}}
+
+    @safe
+    def undo_records_field(self, pairs, field, year=None):
+        self._editable(year)
+        rec = self._rec()
+        done, skipped, changed = rec.undo_field_pairs(pairs, field)
+        states = {}
+        for p in pairs or []:
+            try:
+                states[str(int(p[0]))] = rec.record_state(int(p[0]))
+            except db.DbError:
+                pass
+        return {"done": done, "skipped": skipped, "changed": changed, "states": states}
+
+    @safe
     def copy_text(self, text):
         export.write_clipboard(text or "")
         return {}
