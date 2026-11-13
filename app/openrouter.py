@@ -117,6 +117,7 @@ def _explain(status: int, msg: str, privacy_block: bool) -> str:
 
 # 바로 중지: cancel()은 진행 중인 요청 연결을 모두 닫고, 끝나기 전까지 새 요청·결과를 막는다(reset()으로 풀림).
 _cancel = threading.Event()
+_gen = [0]  # 중지할 때마다 1씩: 중지 전에 시작한 요청은 reset() 뒤에 답이 와도 버린다
 _active = set()
 _active_lock = threading.Lock()
 
@@ -127,6 +128,7 @@ class Cancelled(LlmError):
 
 
 def cancel():
+    _gen[0] += 1
     _cancel.set()
     with _active_lock:
         live = list(_active)
@@ -143,6 +145,10 @@ def reset():
 
 def cancelled() -> bool:
     return _cancel.is_set()
+
+
+def generation() -> int:
+    return _gen[0]
 
 
 def _check():

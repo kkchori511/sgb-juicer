@@ -51,12 +51,19 @@ def norm_chain(chain):
     return {"src": src, "steps": steps}
 
 
-def step_system(chain, i):
-    """i번째 단계에 보낼 시스템 글. 이어 고치는 단계는 전체 프롬프트를 새로 주지 않았으면 첫 단계 지침을 그대로 쓴다."""
+def effective(chain, i):
+    """i번째 단계에 쓰는 지침·예시: 그 단계까지 마지막으로 전체를 고친 단계의 것(이어 고칠 때 그대로 이어짐)."""
     steps = chain["steps"]
-    s = steps[i]
-    base = s["prompt"] or steps[0]["prompt"]
-    example = s["example"] if s["prompt"] else steps[0]["example"]
+    for j in range(i, -1, -1):
+        if steps[j]["prompt"]:
+            return steps[j]["prompt"], steps[j]["example"]
+    return steps[0]["prompt"], steps[0]["example"]
+
+
+def step_system(chain, i):
+    """i번째 단계에 보낼 시스템 글. 이어 고치는 단계는 전체 프롬프트를 새로 주지 않았으면 앞 단계 지침을 그대로 쓴다."""
+    s = chain["steps"][i]
+    base, example = effective(chain, i)
     system = prompts.build_system(base, example, 0)
     if i == 0:
         return system + (FIRST_REQ_RULE.format(req=s["request"]) if s["request"] else "")
@@ -73,8 +80,8 @@ class TagWork:
         self.rec = Records(d)
 
     # ---------- 작업 ----------
-    def work_for_tag(self, tag_id):
-        """태그의 작업(없으면 만든다). 한 태그에 작업 하나를 이어 쓴다."""
+    def work_for_tag(self, tag_id, create=True):
+        """태그의 작업(없으면 만든다). 한 태그에 작업 하나를 이어 쓴다. create=False면 없을 때 None(보관 학년도)."""
         tag_id = int(tag_id)
         t = self.d.q("SELECT id, name FROM tags WHERE id=?", (tag_id,))
         if not t:
@@ -87,6 +94,8 @@ class TagWork:
                     c.execute("UPDATE tag_works SET tag_name=? WHERE id=?", (t[0]["name"], w["id"]))
                 w["tag_name"] = t[0]["name"]
             return self._work_out(w)
+        if not create:
+            return None
         with self.d.tx() as c:
             wid = c.execute("INSERT INTO tag_works(tag_id, tag_name) VALUES(?,?)", (tag_id, t[0]["name"])).lastrowid
         return self.work(wid)
@@ -103,6 +112,9 @@ class TagWork:
     def save_draft(self, wid, draft):
         d = draft or {}
         keep = {k: str(d.get(k) or "")[:20000] for k in ("prompt", "example", "lib_id", "lib_name")}
+        old = _j(self.d.q("SELECT draft FROM tag_works WHERE id=?", (int(wid),))[0]["draft"] if self.d.q("SELECT 1 FROM tag_works WHERE id=?", (int(wid),)) else "{}", {})
+        if old.get("_vers"):
+            keep["_vers"] = old["_vers"]
         with self.d.tx() as c:
             c.execute("UPDATE tag_works SET draft=?, updated_at=datetime('now','localtime') WHERE id=?",
                       (json.dumps(keep, ensure_ascii=False), int(wid)))
@@ -137,13 +149,28 @@ class TagWork:
         return [self._cand_out(x, sigs) for x in rows]
 
     def _ver_map(self, wid):
-        """같은 단계(프롬프트·요청·원문 종류)면 같은 번호: 이 작업에서 처음 나온 순서대로 1, 2, 3…"""
-        out = {}
-        for x in self.d.q("SELECT steps FROM tag_cands WHERE work_id=? ORDER BY id", (int(wid),)):
-            sig = x["steps"]
-            if sig not in out:
-                out[sig] = len(out) + 1
-        return out
+        """같은 단계(프롬프트·요청·원문 종류)면 같은 번호. 처음 나온 순서대로 1, 2, 3…을 작업에 저장해 두어 후보가 지워져도 번호가 바뀌지 않는다."""
+        rows = self.d.q("SELECT draft FROM tag_works WHERE id=?", (int(wid),))
+        vers = dict(_j(rows[0]["draft"], {}).get("_vers") or {}) if rows else {}
+        for x in self.d.q("SELECT steps FROM tag_cands WHERE work_id=? ORDER BY id", (int(wid),)):  # 예전 자료(번호 저장 전)
+            if x["steps"] not in vers:
+                vers[x["steps"]] = max(vers.values() or [0]) + 1
+        return vers
+
+    def _ver_of(self, c, wid, sig):
+        """트랜잭션 안에서: 이 단계의 번호(없으면 새로 매겨 저장)."""
+        row = c.execute("SELECT draft FROM tag_works WHERE id=?", (int(wid),)).fetchone()
+        draft = _j(row[0] if row else "{}", {})
+        vers = dict(draft.get("_vers") or {})
+        if sig not in vers:
+            for x in c.execute("SELECT steps FROM tag_cands WHERE work_id=? ORDER BY id", (int(wid),)):
+                if x[0] not in vers:
+                    vers[x[0]] = max(vers.values() or [0]) + 1
+            if sig not in vers:
+                vers[sig] = max(vers.values() or [0]) + 1
+            draft["_vers"] = vers
+            c.execute("UPDATE tag_works SET draft=? WHERE id=?", (json.dumps(draft, ensure_ascii=False), int(wid)))
+        return vers[sig]
 
     def _cand_out(self, x, sigs=None):
         chain = _j(x["steps"], {"src": "original", "steps": []})
@@ -157,9 +184,15 @@ class TagWork:
         if len(rows) >= TRIAL_MAX and all(r["locked"] for r in rows):
             raise DbError("시험 후보 3개가 모두 잠겨 있습니다. 하나를 잠금 해제하거나 지운 뒤 다시 해 주세요.")
 
-    def add_trial(self, wid, r, chain, parent_id, input_src, input_text, text, model, cost, meta):
-        """시험 후보를 넣고, 3개를 넘으면 잠기지 않은 가장 오래된 시험 후보를 지운다. 반환: (새 id, 지운 id)"""
+    def add_trial(self, wid, r, chain, parent_id, input_src, input_text, text, model, cost, meta, base=None):
+        """시험 후보를 넣고, 3개를 넘으면 잠기지 않은 가장 오래된 시험 후보를 지운다. 반환: (새 id, 지운 id)
+        base: 원자료 기준(record_ver, record_text). 이어 고친 후보는 앞 후보의 기준을 그대로 물려받는다."""
+        rv, rt = base if base else (r.get("content_ver") or 0, r["content"])
         with self.d.tx() as c:
+            now = c.execute("SELECT content_ver, content FROM records WHERE id=?", (r["id"],)).fetchone()
+            if not now or ((now[0] or 0), now[1]) != ((rv or 0), rt):
+                raise DbError("변환하는 동안 기록이 바뀌어 후보를 저장하지 않았습니다. 다시 시험해 주세요.")
+            self._ver_of(c, wid, signature(chain))
             rows = [dict(x) for x in c.execute(
                 "SELECT id, locked FROM tag_cands WHERE work_id=? AND record_id=? AND kind='trial' ORDER BY id", (int(wid), r["id"]))]
             dropped = None
@@ -172,7 +205,7 @@ class TagWork:
             nid = c.execute(
                 "INSERT INTO tag_cands(work_id, record_id, kind, parent_id, steps, input_src, input_text, record_ver, record_text, text, model, cost, meta) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (int(wid), r["id"], "trial", parent_id, signature(chain), input_src, input_text, r.get("content_ver") or 0, r["content"],
+                (int(wid), r["id"], "trial", parent_id, signature(chain), input_src, input_text, rv, rt,
                  text, model, float(cost or 0), json.dumps(meta or {}, ensure_ascii=False))).lastrowid
         return nid, dropped
 
@@ -238,7 +271,7 @@ class TagWork:
     def _latest_ok_bulk(self, wid):
         return {x["record_id"] for x in self.d.q("SELECT record_id FROM tag_cands WHERE work_id=? AND kind='bulk' AND status='ok'", (int(wid),))}
 
-    def create_run(self, wid, record_ids, flt):
+    def create_run(self, wid, record_ids, flt, role):
         w = self.work(wid)
         if not w["confirmed"]:
             raise DbError("먼저 시험 후보 하나를 [확정]해 주세요.")
@@ -248,6 +281,19 @@ class TagWork:
                 ids.append(int(x))
         if not ids:
             raise DbError("변환할 기록을 고르세요.")
+        # 지금 이 태그·조건의 대상인지 서버에서 다시 확인(화면이 오래됐거나 다른 태그 기록이 섞이지 않게)
+        if w["tag_id"] is None or not self.d.q("SELECT 1 FROM tags WHERE id=?", (w["tag_id"],)):
+            raise DbError("태그가 지워져 새로 변환할 수 없습니다.")
+        view = {r["id"]: r for r in self.rec.tag_view(role, w["tag_id"], flt or {})["records"]}
+        bad = [i for i in ids if i not in view]
+        if bad:
+            raise DbError(f"대상이 바뀌었습니다({len(bad)}건이 지금 조건에 없음). [대상 다시 불러오기]를 눌러 주세요.")
+        blocked = [i for i in ids if view[i]["closed"] or not view[i]["active"] or view[i].get("gone")]
+        if blocked:
+            raise DbError(f"마감·비활성 기록 {len(blocked)}건이 들어 있습니다. [대상 다시 불러오기]를 눌러 주세요.")
+        slots = {(view[i]["group_id"], view[i]["item"]) for i in ids}
+        if len(slots) > 1:
+            raise DbError("서로 다른 항목(담당)의 기록이 섞여 있습니다. 위 항목 필터로 하나만 골라 나눠 실행해 주세요.")
         with self.d.tx() as c:
             rid = c.execute("INSERT INTO tag_runs(work_id, steps, filter, targets) VALUES(?,?,?,?)",
                             (int(wid), signature(w["confirmed"]["chain"]), json.dumps(flt or {}, ensure_ascii=False), json.dumps(ids))).lastrowid
@@ -272,9 +318,20 @@ class TagWork:
     def run_has_ok(self, run_id, rid):
         return bool(self.d.q("SELECT 1 FROM tag_cands WHERE run_id=? AND record_id=? AND status='ok'", (int(run_id), int(rid))))
 
+    def failed_partial(self, run_id, rid):
+        """앞 실패에서 이미 끝낸 단계(같은 원자료일 때만 이어서): {ver, text, outs, cost}"""
+        rows = self.d.q("SELECT record_ver, record_text, meta, cost FROM tag_cands WHERE run_id=? AND record_id=? AND status='failed' ORDER BY id DESC LIMIT 1",
+                        (int(run_id), int(rid)))
+        if not rows:
+            return None
+        m = _j(rows[0]["meta"], {})
+        return {"ver": rows[0]["record_ver"] or 0, "text": rows[0]["record_text"], "outs": m.get("steps_out") or [], "input": m.get("input") or "",
+                "cost": rows[0]["cost"] or 0}
+
     def save_bulk(self, run, r, input_text, text, model, cost, meta, error=None):
         """일괄 결과 한 건. 같은 실행·기록의 실패 결과는 바꿔 쓴다(성공은 다시 만들지 않음)."""
         with self.d.tx() as c:
+            self._ver_of(c, run["work_id"], signature(run["chain"]))
             if c.execute("SELECT 1 FROM tag_cands WHERE run_id=? AND record_id=? AND status='ok'", (run["id"], r["id"])).fetchone():
                 return None
             c.execute("DELETE FROM tag_cands WHERE run_id=? AND record_id=? AND status='failed'", (run["id"], r["id"]))
@@ -313,7 +370,9 @@ class TagWork:
             x = cands.get(rid)
             s = stu.get(r["student_no"]) if r else None
             state = "missing" if not r else ("none" if not x else ("failed" if x["status"] == "failed" else "ok"))
+            act = self.d.q("SELECT active FROM memberships WHERE group_id=? AND student_no=?", (r["group_id"], r["student_no"])) if r else []
             row = {"record_id": rid, "state": state, "name": (s or {}).get("name", ""), "student_no": r["student_no"] if r else "",
+                   "active": bool(act and act[0]["active"]), "seq": (r or {}).get("seq"), "date": (r or {}).get("date") or "", "kind": (r or {}).get("kind") or "",
                    "grade": (s or {}).get("grade"), "class_no": (s or {}).get("class_no"), "number": (s or {}).get("number"),
                    "group_id": r["group_id"] if r else None, "item": r["item"] if r else "", "title": (r or {}).get("title") or "",
                    "content": (r or {}).get("content") or "", "closed": bool(r and self.rec.is_closed(r["group_id"], r["item"], r["student_no"])),
@@ -417,6 +476,10 @@ class TagWork:
                 if self.rec.is_closed(r["group_id"], r["item"], r["student_no"]):
                     skipped.append({"record_id": r["id"], "why": "마감됨"})
                     continue
+                m = c.execute("SELECT active FROM memberships WHERE group_id=? AND student_no=?", (r["group_id"], r["student_no"])).fetchone()
+                if not m or not m[0]:
+                    skipped.append({"record_id": r["id"], "why": "비활성 학생"})
+                    continue
                 c.execute("UPDATE records SET content=?, updated_at=datetime('now','localtime') WHERE id=?", (a["before_text"], r["id"]))
                 c.execute("UPDATE tag_applies SET undone_at=datetime('now','localtime') WHERE id=?", (a["id"],))
                 self.rec._stale(c, r["group_id"], r["item"], r["student_no"])
@@ -424,20 +487,50 @@ class TagWork:
         return {"undone": done, "skipped": skipped}
 
     # ---------- 현황판 ----------
+    def progress(self, wid):
+        """작업 전체(모든 일괄 실행)에서 기록마다 가장 최근 일괄 결과로 센다: 검토 전·실패·결과 없음(중지·종료로 못 한 것)."""
+        applied = {x["cand_id"] for x in self.d.q("SELECT cand_id FROM tag_applies WHERE work_id=? AND undone_at IS NULL AND cand_id IS NOT NULL", (int(wid),))}
+        applied_rec = self._applied_records(wid)
+        latest = {}
+        for x in self.d.q("SELECT id, record_id, status FROM tag_cands WHERE work_id=? AND kind='bulk' ORDER BY id", (int(wid),)):
+            latest[x["record_id"]] = x
+        targets = set()
+        for x in self.d.q("SELECT targets FROM tag_runs WHERE work_id=?", (int(wid),)):
+            targets.update(_j(x["targets"], []))
+        pending = failed = notrun = 0
+        for rid in targets:
+            x = latest.get(rid)
+            if not x:
+                if rid not in applied_rec:
+                    notrun += 1
+            elif x["status"] == "failed":
+                failed += 1
+            elif x["id"] not in applied and rid not in applied_rec:
+                pending += 1
+        return {"pending": pending, "failed": failed, "notrun": notrun}
+
     def summary(self):
-        """진행 중인 태그 작업: 검토 전(반영하지 않은 일괄 결과)·실패 건수."""
+        """진행 중인 태그 작업(태그가 남아 있는 것): 검토 전·실패·결과 없음 건수, 시험 중."""
+        out = []
+        tags = {x["id"] for x in self.d.q("SELECT id FROM tags")}
+        for w in self.d.q("SELECT * FROM tag_works ORDER BY updated_at DESC"):
+            if w["tag_id"] not in tags:
+                continue
+            p = self.progress(w["id"])
+            trials = self.d.q("SELECT COUNT(*) n FROM tag_cands WHERE work_id=? AND kind='trial'", (w["id"],))[0]["n"]
+            trying = bool(trials and not _j(w["confirmed"], None))
+            if p["pending"] or p["failed"] or p["notrun"] or trying:
+                out.append({"work_id": w["id"], "tag_id": w["tag_id"], "tag_name": w["tag_name"], **p, "trying": trying})
+        return out
+
+    def orphans(self):
+        """지운 태그의 작업(반영 기록이 있는 것): 태그별 기록에서 이력 보기·되돌리기용."""
+        tags = {x["id"] for x in self.d.q("SELECT id FROM tags")}
         out = []
         for w in self.d.q("SELECT * FROM tag_works ORDER BY updated_at DESC"):
-            last = self.d.q("SELECT id FROM tag_runs WHERE work_id=? ORDER BY id DESC LIMIT 1", (w["id"],))
-            pending = failed = 0
-            if last:
-                rows = self.d.q("SELECT c.id, c.status FROM tag_cands c WHERE c.run_id=? AND c.id NOT IN "
-                                "(SELECT cand_id FROM tag_applies WHERE work_id=? AND undone_at IS NULL AND cand_id IS NOT NULL)",
-                                (last[0]["id"], w["id"]))
-                pending = sum(1 for x in rows if x["status"] == "ok")
-                failed = sum(1 for x in rows if x["status"] == "failed")
-            trials = self.d.q("SELECT COUNT(*) n FROM tag_cands WHERE work_id=? AND kind='trial'", (w["id"],))[0]["n"]
-            if pending or failed or (trials and not _j(w["confirmed"], None)):
-                out.append({"work_id": w["id"], "tag_id": w["tag_id"], "tag_name": w["tag_name"], "pending": pending, "failed": failed,
-                            "trying": bool(trials and not _j(w["confirmed"], None))})
+            if w["tag_id"] in tags:
+                continue
+            n = self.d.q("SELECT COUNT(*) n, SUM(undone_at IS NULL) live FROM tag_applies WHERE work_id=?", (w["id"],))[0]
+            if n["n"]:
+                out.append({"work_id": w["id"], "tag_name": w["tag_name"], "applies": n["n"], "live": n["live"] or 0})
         return out

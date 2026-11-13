@@ -3027,20 +3027,20 @@
   }
   const tvHasDiff = (st) => Object.keys(tvDiff(st)).length > 0;
   function tvDirty() {
-    if (TV.queue.size || TV.ops.size) return true;
+    if (TV.queue.size || TV.ops.size || twDirty()) return true;
     for (const st of TV.rec.values()) if (tvHasDiff(st)) return true;
     return false;
   }
   // 저장 대기·진행 중인 것과 되돌리기·일괄 작업을 모두 끝낸다. 남은 글이 있으면 false(화면을 바꾸지 않는다)
   async function flushTagView() {
-    await twFlush(); // 태그 AI 변환: 프롬프트 초안·고친 결과 저장
+    const twOk = await twFlush(); // 태그 AI 변환: 프롬프트 초안·고친 결과 저장
     const jobs = [...TV.ops];
     for (const [rid, st] of TV.rec) if (tvHasDiff(st) && !(st.err && st.err.code)) jobs.push(tvSave(rid));
     jobs.push(...TV.queue.values());
     await Promise.all(jobs);
     tvSaveSummary();
     for (const st of TV.rec.values()) if (tvHasDiff(st)) return false;
-    return true;
+    return twOk;
   }
   // 기록 하나의 작업 줄(저장·되돌리기)에 이어 붙인다
   function tvEnqueue(rid, fn) {
@@ -3209,6 +3209,7 @@
   async function renderTagView(keepScroll) {
     if (TV.year !== ys.year) {
       TV.year = ys.year; TV.data = null; TV.rec.clear(); TV.sel.clear(); TV.out.clear(); TV.undo.clear(); TV.flt = TV_FLT0(); TV.bulk = null; TV.anchor = null;
+      if (TW.year !== ys.year) twReset();
       const saved = localStorage.getItem(tvTagKey()); TV.tag = saved === null || saved === '' ? null : +saved;
     }
     const seq = ++TV.seq, year = ys.year;
@@ -3287,12 +3288,18 @@
       el('button', { type: 'button', class: 'tv-tag untag' + (TV.tag === 0 ? ' active' : ''), 'aria-pressed': TV.tag === 0 ? 'true' : 'false', onclick: () => tvPickTag(0) }, [el('span', { class: 'nm', text: '태그 없음' }), el('span', { class: 'cnt', text: `${d.untagged}건` })]),
       el('p', { class: 'hint', text: '숫자는 위 필터를 적용한 기록 수입니다. 한 기록에 태그가 여럿이면 각각 셉니다.' }),
       el('button', { type: 'button', class: 'link', text: '태그 관리로 →', onclick: () => showPanel('tags') }));
+    rawCall('tag_orphans', ys.year).then((o) => {
+      if (!o || !o.ok || !o.works.length || !box.isConnected) return;
+      box.append(el('div', { class: 'tv-sep' }), el('div', { class: 'tv-tags-title', text: '지운 태그의 AI 변환' }),
+        ...o.works.map((w) => el('button', { type: 'button', class: 'tv-tag', title: '반영 기록 보기·되돌리기', onclick: () => twOrphanSheet(w) },
+          [el('span', { class: 'nm', text: `${w.tag_name}(지움)` }), el('span', { class: 'cnt', text: `반영 ${w.live}건` })])));
+    });
   }
   async function tvPickTag(id) {
     if (id === TV.tag) return;
     if (!(await leaveOk())) { if (TV.data) tvRenderFilters(); return; }
     const prev = TV.tag;
-    TV.tag = id; TV.limit = 100;
+    TV.tag = id; TV.limit = 100; TW.plan = null; TW.review = null; TW.seq += 1;
     if (await renderTagView()) {
       if (TV.sel.size) toast('태그를 바꿔 선택을 풀었습니다.');
       TV.sel.clear(); TV.bulk = null; tvRenderBulk(); tvRenderSum();
@@ -3302,7 +3309,7 @@
   async function tvSetFilter(patch) {
     if (!(await leaveOk())) { if (TV.data) tvRenderFilters(); return; }
     const prev = { ...TV.flt };
-    Object.assign(TV.flt, patch); TV.limit = 100;
+    Object.assign(TV.flt, patch); TV.limit = 100; TW.plan = null; TW.seq += 1;
     if (await renderTagView()) {
       if (TV.sel.size) toast('조건을 바꿔 선택을 풀었습니다.');
       TV.sel.clear(); TV.bulk = null; tvRenderBulk(); tvRenderSum();
@@ -3592,19 +3599,54 @@
   // ① 시험: 기록 한 건으로 프롬프트를 바꿔 가며 후보 3칸 → ✔ 확정(그 기록에 반영 + 단계가 태그 설정)
   // ② 나머지 변환: 확정 단계를 대상마다 그대로 재현(결과는 후보, 기록은 아직 안 바뀜)
   // ③ 검토·반영: 체크한 것만 기록에 반영, 반영 묶음 되돌리기
-  const TW = { open: false, tag: null, step: 'trial', work: null, trials: [], batches: [], runs: [], rid: null, src: 'original', req: '',
-    lib: null, plan: null, pick: new Set(), review: null, rfilter: 'all', saving: new Set(), draftTimer: null, cont: null };
+  const TW = { open: false, tag: null, year: null, seq: 0, step: 'trial', work: null, trials: [], batches: [], runs: [], rid: null, src: 'original', req: '',
+    lib: null, plan: null, planFlt: null, pick: new Set(), review: null, reviewRun: null, rfilter: 'all', saving: new Set(), draftTimer: null, draftDirty: false, cont: null,
+    edits: new Map(), editTimers: new Map(), editChain: new Map(), lastApplied: [] };
+  // 학년도가 바뀌면 태그 변환 상태를 모두 버린다(학년도마다 id가 겹침)
+  function twReset() {
+    TW.draftTimer && clearTimeout(TW.draftTimer);
+    TW.editTimers.forEach((t) => clearTimeout(t));
+    Object.assign(TW, { open: false, tag: null, year: null, work: null, trials: [], batches: [], runs: [], rid: null, plan: null, planFlt: null, review: null, reviewRun: null,
+      draftTimer: null, draftDirty: false, cont: null, lastApplied: [] });
+    TW.edits.clear(); TW.editTimers.clear(); TW.editChain.clear(); TW.pick.clear(); TW.seq += 1;
+  }
+  const twDirty = () => TW.draftDirty || TW.edits.size > 0;
   const TW_STEPS = [['trial', '① 시험'], ['bulk', '② 나머지 변환'], ['review', '③ 검토·반영']];
   function twTrack(p) { TW.saving.add(p); p.finally(() => TW.saving.delete(p)); return p; }
+  // 프롬프트 초안·고친 결과를 저장한다. 하나라도 저장하지 못했으면 false(이동·반영·종료를 막음, 글은 화면에 남김)
   async function twFlush() {
-    if (TW.draftTimer) { clearTimeout(TW.draftTimer); TW.draftTimer = null; twTrack(twSaveDraft()); }
+    if (TW.draftTimer) { clearTimeout(TW.draftTimer); TW.draftTimer = null; }
+    if (TW.draftDirty) twTrack(twSaveDraft());
+    TW.editTimers.forEach((t) => clearTimeout(t)); TW.editTimers.clear();
+    [...TW.edits.keys()].forEach((cid) => twTrack(twSaveEdit(cid)));
     await Promise.all([...TW.saving]);
+    return !twDirty();
+  }
+  // 고친 결과 저장: 후보마다 순서대로(늦게 온 응답이 새 글을 덮지 않게)
+  function twSaveEdit(cid) {
+    const prev = TW.editChain.get(cid) || Promise.resolve();
+    const p = prev.then(async () => {
+      if (!TW.edits.has(cid)) return;
+      const text = TW.edits.get(cid), year = TW.year;
+      const r = await rawCall('tag_cand_edit', cid, text, year);
+      if (r && r.ok) { if (TW.edits.get(cid) === text) TW.edits.delete(cid); const c = twFindCand(cid); if (c) c.edited = text.trim() === (c.text || '').trim() ? null : text; }
+      else toast(`고친 결과를 저장하지 못했습니다: ${(r && r.error) || '알 수 없는 오류'}. 글은 화면에 남아 있으니 다시 시도하세요.`, 7000);
+    });
+    TW.editChain.set(cid, p);
+    return p;
+  }
+  function twFindCand(cid) { const rows = TW.review ? TW.review.rows : []; const x = rows.find((y) => y.cand && y.cand.id === cid); return x ? x.cand : null; }
+  async function twFlushOrWarn() {
+    if (await twFlush()) return true;
+    await alertBox('프롬프트 초안이나 고친 결과를 저장하지 못했습니다. 글은 화면에 남아 있습니다.\n잠시 뒤 다시 시도하거나, 필요하면 글을 복사해 두세요.');
+    return false;
   }
   // 다른 화면에서 태그 AI 변환으로 바로 가기(인박스 보내기 뒤·현황판)
-  async function goTagWork(tagId, slot, step) {
+  async function goTagWork(tagId, slot, step, scope) {
     if (!(await leaveOk())) return;
     if (TV.year !== ys.year) { TV.year = ys.year; TV.data = null; TV.rec.clear(); TV.sel.clear(); TV.out.clear(); TV.undo.clear(); TV.bulk = null; TV.anchor = null; }
-    TV.tag = tagId; TV.flt = { ...TV_FLT0(), slot: slot || '' }; TV.limit = 100;
+    if (TW.year !== ys.year) twReset();
+    TV.tag = tagId; TV.flt = { ...TV_FLT0(), slot: slot || '', scope: scope || '' }; TV.limit = 100;
     try { localStorage.setItem(tvTagKey(), String(tagId)); } catch (e) { /* 무시 */ }
     TW.open = true; TW.step = step || 'trial'; TW.tag = null; TW.plan = null; TW.review = null;
     showPanel('tagrec');
@@ -3617,15 +3659,19 @@
     tvRenderMain();
   }
   async function twClose() {
-    await twFlush();
+    if (!(await twFlushOrWarn())) return;
     TW.open = false; TW.plan = null; TW.review = null;
     tvRenderMain();
   }
   async function twLoad() {
-    const r = await call('tag_work', TV.tag);
-    if (!r) { TW.open = false; return false; }
-    if (TW.tag !== TV.tag) { TW.rid = null; TW.plan = null; TW.review = null; TW.reviewRun = null; TW.cont = null; TW.req = ''; }
-    TW.tag = TV.tag; TW.work = r.work; TW.trials = r.trials; TW.batches = r.batches; TW.runs = r.runs;
+    if (TW.year !== ys.year) { twReset(); TW.open = true; }
+    const seq = ++TW.seq, tag = TV.tag, year = ys.year;
+    const r = await rawCall('tag_work', tag, year);
+    if (seq !== TW.seq || tag !== TV.tag || year !== ys.year) return false; // 더 새 요청이 있음
+    if (!r || r.ok === false) { await alertBox((r && r.error) || '불러오지 못했습니다.'); TW.open = false; return false; }
+    if (!r.work) { await alertBox('보관 학년도에서는 새 태그 변환을 시작할 수 없습니다(조회만 가능).'); TW.open = false; return false; }
+    if (TW.tag !== tag) { TW.rid = null; TW.plan = null; TW.review = null; TW.reviewRun = null; TW.cont = null; TW.req = ''; TW.lastApplied = []; }
+    TW.year = year; TW.tag = tag; TW.work = r.work; TW.progress = r.progress; TW.trials = r.trials; TW.batches = r.batches; TW.runs = r.runs;
     if (!TW.lib) { const l = await rawCall('prompt_list'); TW.lib = l && l.ok ? l.prompts : []; }
     if (!TW.work.draft || !TW.work.draft.prompt) { // 처음: 기본 프롬프트에서 시작
       const base = TW.lib.find((p) => p.id === 'default') || TW.lib[0];
@@ -3641,10 +3687,13 @@
   }
   async function twSaveDraft() {
     if (!TW.work) return;
-    const r = await rawCall('tag_draft_save', TW.work.id, TW.work.draft);
-    if (!r || r.ok === false) toast((r && r.error) || '프롬프트 초안을 저장하지 못했습니다.', 5000);
+    const draft = TW.work.draft;
+    const r = await rawCall('tag_draft_save', TW.work.id, draft, TW.year);
+    if (r && r.ok) { if (TW.work && TW.work.draft === draft) TW.draftDirty = false; }
+    else toast(`프롬프트 초안을 저장하지 못했습니다: ${(r && r.error) || '알 수 없는 오류'}. 글은 화면에 남아 있습니다.`, 7000);
   }
   function twDraftChanged() {
+    TW.draftDirty = true;
     if (TW.draftTimer) clearTimeout(TW.draftTimer);
     TW.draftTimer = setTimeout(() => { TW.draftTimer = null; twTrack(twSaveDraft()); }, 700);
   }
@@ -3674,7 +3723,7 @@
     main.innerHTML = '';
     const tagName = (TV.data.tags.find((t) => t.id === TV.tag) || {}).name || '';
     const tabs = el('div', { class: 'tw-tabs', role: 'tablist' }, TW_STEPS.map(([k, label]) => el('button', { type: 'button', role: 'tab', class: 'tw-tab' + (TW.step === k ? ' on' : ''), 'aria-selected': TW.step === k ? 'true' : 'false', text: label,
-      onclick: async () => { await twFlush(); TW.step = k; if (k === 'review') TW.review = null; if (k === 'bulk') TW.plan = null; twRender(); } })));
+      onclick: async () => { if (!(await twFlushOrWarn())) return; TW.step = k; if (k === 'review') TW.review = null; if (k === 'bulk') TW.plan = null; twRender(); } })));
     main.appendChild(el('div', { class: 'tw-head' }, [el('b', { text: `🤖 '${tagName}' AI 변환` }), tabs, el('span', { class: 'spacer' }),
       el('button', { type: 'button', class: 'small', text: '← 기록 목록으로', onclick: () => twClose() })]));
     const body = el('div', { class: 'tw-body' });
@@ -3748,19 +3797,20 @@
       el('b', { text: `프롬프트 ${t.ver_no || '?'}번` }), steps > 1 ? el('span', { class: 'badge', text: `이어 고침 ${steps - 1}번` }) : null,
       t.chain.src === 'current' ? el('span', { class: 'badge', text: '지금 내용에서' }) : null, conf ? el('span', { class: 'badge ok', text: '✔ 확정' }) : null,
       el('span', { class: 'spacer' }),
-      el('button', { type: 'button', class: 'small', title: '잠그면 새 후보가 생겨도 지워지지 않습니다', text: t.locked ? '🔒 잠김' : '🔓', onclick: async () => { if (await mutate('tag_cand_lock', t.id, !t.locked)) { t.locked = !t.locked; twRender(); } } }),
+      el('button', { type: 'button', class: 'small', title: '잠그면 새 후보가 생겨도 지워지지 않습니다', text: t.locked ? '🔒 잠김' : '🔓', onclick: async () => { if (await mutate('tag_cand_lock', t.id, !t.locked, TW.year)) { t.locked = !t.locked; twRender(); } } }),
       el('button', { type: 'button', class: 'small', text: '단계', title: '이 후보를 만든 프롬프트·요청 보기', onclick: () => twChainInfo(t.chain) }),
-      el('button', { type: 'button', class: 'small link danger-text', text: '지우기', onclick: async () => { if (await mutate('tag_cand_delete', t.id)) { TW.trials = TW.trials.filter((x) => x.id !== t.id); twRender(); } } })]));
+      el('button', { type: 'button', class: 'small link danger-text', text: '지우기', onclick: async () => { if (await mutate('tag_cand_delete', t.id, TW.year)) { TW.trials = TW.trials.filter((x) => x.id !== t.id); twRender(); } } })]));
     card.appendChild(el('div', { class: 'tw-cand-text', text: t.text }));
     card.appendChild(el('div', { class: 'muted tw-cand-meta', text: `${bytesOf(t.text)}B · ${t.model || ''} · ${fmtCredit(t.cost)} 크레딧 · ${t.created_at.slice(5, 16)}` }));
     const foot = el('div', { class: 'tw-cand-foot' });
     if (TW.cont === t.id) {
       const rq = el('input', { type: 'text', placeholder: '이어서 고칠 요청: 예) 조금 더 짧게, 마지막 문장은 빼고', 'aria-label': '이어서 고칠 요청' });
-      const fp = el('textarea', { rows: 8, 'aria-label': '이 단계의 전체 프롬프트' }); fp.value = t.chain.steps[0].prompt;
-      const det = el('details', {}, [el('summary', { text: '전체 프롬프트 고치기(선택)' }), el('p', { class: 'hint', text: '비워 두거나 그대로 두면 1단계 지침을 그대로 지키며 요청만 반영합니다.' }), fp]);
+      const eff = [...t.chain.steps].reverse().find((x) => x.prompt) || t.chain.steps[0];
+      const fp = el('textarea', { rows: 8, 'aria-label': '이 단계의 전체 프롬프트' }); fp.value = eff.prompt;
+      const det = el('details', {}, [el('summary', { text: '전체 프롬프트 고치기(선택)' }), el('p', { class: 'hint', text: '그대로 두면 지금까지의 지침을 그대로 지키며 요청만 반영합니다. 고치면 이 단계부터 고친 지침을 씁니다.' }), fp]);
       const run = el('button', { type: 'button', class: 'primary ai-btn small', text: '✨ 이어서 고치기' });
       run.addEventListener('click', () => {
-        const changed = fp.value.trim() && fp.value.trim() !== t.chain.steps[0].prompt.trim();
+        const changed = fp.value.trim() && fp.value.trim() !== eff.prompt.trim();
         if (!rq.value.trim() && !changed) { toast('고칠 요청을 적어 주세요.'); rq.focus(); return; }
         twRunTrial(rec, { src: t.chain.src, steps: [...t.chain.steps, { prompt: changed ? fp.value : '', example: '', request: rq.value.trim() }] }, t.id, model, run);
       });
@@ -3778,9 +3828,9 @@
   }
   async function twRunTrial(rec, chain, parentId, model, btn) {
     if (!(chain.steps[0].prompt || '').trim()) { toast('프롬프트(지침)를 입력해 주세요.'); return; }
-    await twFlush();
+    if (!(await twFlushOrWarn())) return;
     const out = await busyRun(btn, `tw${rec.id}`, () => aiRun({ title: parentId ? '이어서 고치기' : '시험 변환', skipConfirm: true,
-      jobs: [{ label: twRecLabel(rec), run: () => api.tag_trial_run(TW.work.id, rec.id, chain, parentId, model.value) }] }));
+      jobs: [{ label: twRecLabel(rec), run: () => api.tag_trial_run(TW.work.id, rec.id, chain, parentId, model.value, TW.year) }] }));
     if (!out || !out.done) return;
     TW.cont = null;
     if (out.results[0].dropped) toast('새 후보를 만들고 잠기지 않은 가장 오래된 후보를 지웠습니다.');
@@ -3802,7 +3852,7 @@
     if (nm) nm.addEventListener('input', () => { name = nm.value.trim(); });
     const ok = await p;
     if (!ok) return;
-    const r = await call('tag_confirm', t.id, true);
+    const r = await call('tag_confirm', t.id, true, TW.year);
     if (!r) return;
     if (save) {
       const s = await rawCall('prompt_save', { name: name || '태그 변환', prompt: t.chain.steps[0].prompt, example: t.chain.steps[0].example || '' });
@@ -3829,19 +3879,21 @@
       el('button', { type: 'button', class: 'link', text: '자세히', onclick: () => twChainInfo(w.confirmed.chain, '확정한 설정') })]));
     if (!TW.plan) {
       body.appendChild(el('p', { class: 'muted', text: '대상을 불러오는 중…' }));
-      const r = await call('tag_plan', w.id, { ...TV.flt });
-      if (!r) return;
-      TW.plan = r; TW.pick = new Set(r.targets.filter((x) => x.default).map((x) => x.id));
+      const seq = TW.seq, flt = { ...TV.flt };
+      const label = [flt.scope ? $('tvScope').selectedOptions[0].textContent : '', flt.slot ? $('tvSlot').selectedOptions[0].textContent : '', flt.status !== 'all' ? $('tvStatus').selectedOptions[0].textContent : '', flt.q ? `'${flt.q}' 찾기` : ''].filter(Boolean);
+      const r = await call('tag_plan', w.id, flt, TW.year);
+      if (!r || seq !== TW.seq || TW.step !== 'bulk') return;
+      TW.plan = r; TW.planFlt = { flt, label }; TW.pick = new Set(r.targets.filter((x) => x.default).map((x) => x.id));
       twRender();
       return;
     }
     const pl = TW.plan, ts = pl.targets;
     const can = (x) => !x.blocked;
     const steps = w.confirmed.chain.steps.length;
-    const flt = [TV.flt.scope ? $('tvScope').selectedOptions[0].textContent : '', TV.flt.slot ? $('tvSlot').selectedOptions[0].textContent : '', TV.flt.status !== 'all' ? $('tvStatus').selectedOptions[0].textContent : '', TV.flt.q ? `'${TV.flt.q}' 찾기` : ''].filter(Boolean);
+    const flt = TW.planFlt.label;
     body.appendChild(el('p', { class: 'hint', text: `지금 화면 조건(${flt.join(' · ') || '조건 없음: 이 학년도의 이 태그 전체'})의 기록입니다. 체크를 풀면 뺍니다. 이미 반영한 기록과 기존 완성문은 체크가 풀린 채 시작합니다. 변환 결과는 바로 반영되지 않고 ③에서 검토합니다.` }));
     const items = Object.entries(pl.items);
-    if (items.length > 1) body.appendChild(el('div', { class: 'warn', text: `다른 항목 기록이 섞여 있습니다: ${items.map(([k, n]) => `${k} ${n}건`).join(' · ')}. 항목 필터로 나눠 실행하는 것을 권합니다.` }));
+    if (items.length > 1) body.appendChild(el('div', { class: 'warn', text: `다른 항목(담당) 기록이 섞여 있습니다: ${items.map(([k, n]) => `${k} ${n}건`).join(' · ')}. 한 번에 한 항목만 변환할 수 있으니 위 항목 필터로 하나를 고르세요.` }));
     const nPick = () => ts.filter((x) => TW.pick.has(x.id) && can(x)).length;
     const est = el('div', { class: 'tw-est' });
     const goBtn = el('button', { type: 'button', class: 'primary ai-btn' });
@@ -3850,8 +3902,11 @@
     const drawEst = () => {
       const n = nPick(), calls = n * steps;
       const per = pl.cost_per_call;
-      est.textContent = `${n}건 · 단계 ${steps}개 → AI ${calls}회${per ? ` · 예상 약 ${fmtCredit(per * calls * 0.7)}~${fmtCredit(per * calls * 1.5)} 크레딧(시험 비용 기준, 모델을 바꾸면 달라짐)` : ''}`;
-      goBtn.textContent = `✨ ${n}건 변환 시작`; goBtn.disabled = !n;
+      const kinds = new Set(ts.filter((x) => TW.pick.has(x.id) && can(x)).map((x) => `${x.group_id}:${x.item}`));
+      est.textContent = kinds.size > 1 ? `서로 다른 항목(담당) ${kinds.size}곳의 기록이 골라져 있습니다. 위 항목 필터로 하나만 골라 나눠 실행하세요.`
+        : `${n}건 · 단계 ${steps}개 → AI ${calls}회${per ? ` · 예상 약 ${fmtCredit(per * calls * 0.7)}~${fmtCredit(per * calls * 1.5)} 크레딧(시험 비용 기준, 모델을 바꾸면 달라짐)` : ''}`;
+      est.classList.toggle('danger-text', kinds.size > 1);
+      goBtn.textContent = `✨ ${n}건 변환 시작`; goBtn.disabled = !n || kinds.size > 1;
     };
     const drawTbl = () => {
       tbl.innerHTML = '';
@@ -3883,9 +3938,9 @@
     const low = bal && bal.ok && typeof bal.balance === 'number' && estHi && estHi > bal.balance;
     const msg = `${list.length}건을 확정한 단계로 변환합니다(AI ${list.length * steps}회${per ? `, 예상 약 ${fmtCredit(per * list.length * steps * 0.7)}~${fmtCredit(estHi)} 크레딧` : ''}).\n대상 조건: ${flt.join(' · ') || '이 태그 전체'}\n결과는 ③ 검토·반영에서 확인한 뒤 반영합니다(기록은 아직 바뀌지 않음).${low ? `\n\n⚠ 남은 크레딧(${fmtCredit(bal.balance)})보다 많이 들 수 있습니다.` : ''}`;
     if (!(await confirmBox(msg, '변환 시작'))) return;
-    await twFlush();
-    const r = await call('tag_run_create', TW.work.id, list.map((x) => x.id), { ...TV.flt });
-    if (!r) return;
+    if (!(await twFlushOrWarn())) return;
+    const r = await call('tag_run_create', TW.work.id, list.map((x) => x.id), TW.planFlt.flt, TW.year);
+    if (!r) { TW.plan = null; twRender(); return; }
     await twRunItems(r.run.id, list.map((x) => ({ id: x.id, label: `${x.name} ${x.seq ? `${x.seq}회` : ''}`.trim() })), model.value);
   }
   async function twRunItems(runId, list, modelValue) {
@@ -3893,13 +3948,13 @@
     let out;
     try {
       out = await aiRun({ title: '태그 변환', skipConfirm: true,
-        jobs: list.map((x) => ({ label: x.label, run: () => api.tag_run_item(runId, x.id, modelValue) })),
+        jobs: list.map((x) => ({ label: x.label, run: () => api.tag_run_item(runId, x.id, modelValue, TW.year) })),
         summary: (o) => `${o.cancelled ? '바로 중지했습니다(처리 중이던 건은 저장하지 않음). ' : ''}완료 ${o.done}건 · 실패 ${o.fail}건${o.skipped ? ` · 처리하지 않음 ${o.skipped}건` : ''}\n③ 검토·반영에서 결과를 확인하고 체크한 것만 반영하세요.` });
     } finally { await jobEnd(); }
-    await rawCall('tag_run_finish', runId, out && (out.stopped || out.cancelled) ? 'stopped' : 'done');
+    await rawCall('tag_run_finish', runId, out && (out.stopped || out.cancelled) ? 'stopped' : 'done', TW.year);
     refreshBalance();
     await twLoad();
-    TW.step = 'review'; TW.review = null; TW.plan = null;
+    TW.step = 'review'; TW.review = null; TW.plan = null; TW.reviewRun = runId;
     twRender();
   }
 
@@ -3908,21 +3963,23 @@
     const w = TW.work;
     if (!TW.review) {
       body.appendChild(el('p', { class: 'muted', text: '불러오는 중…' }));
-      const r = await call('tag_review', w.id, TW.reviewRun || null);
-      if (!r) return;
+      const seq = TW.seq;
+      const r = await call('tag_review', w.id, TW.reviewRun || null, TW.year);
+      if (!r || seq !== TW.seq || TW.step !== 'review') return;
       TW.review = r;
       twRender();
       return;
     }
     const rv = TW.review;
     twBatches(body, rv.batches);
+    if (TW.lastApplied && TW.lastApplied.length) body.appendChild(el('div', { class: 'tw-row' }, [el('button', { type: 'button', class: 'small', text: `바뀐 학생 목록(${TW.lastApplied.length}건) — 항목별 기록에서 하나씩 보기`, onclick: () => twAppliedSheet() })]));
     if (!rv.run) {
       body.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '아직 나머지 변환을 하지 않았습니다.' }), el('button', { type: 'button', class: 'primary', text: '② 나머지 변환으로', onclick: () => { TW.step = 'bulk'; TW.plan = null; twRender(); } })]));
       return;
     }
     const rows = rv.rows;
-    const stOf = (x) => (x.state === 'missing' ? '기록 없음' : x.state === 'none' ? '결과 없음' : x.state === 'failed' ? '실패' : x.applied ? '반영함' : x.changed ? '원문 바뀜' : x.closed ? '마감' : '반영 전');
-    const canApply = (x) => x.state === 'ok' && !x.applied && !x.changed && !x.closed;
+    const stOf = (x) => (x.state === 'missing' ? '기록 없음' : x.state === 'none' ? '결과 없음' : x.state === 'failed' ? '실패' : x.applied ? '반영함' : x.changed ? '원문 바뀜' : x.closed ? '마감' : !x.active ? '비활성' : '반영 전');
+    const canApply = (x) => x.state === 'ok' && !x.applied && !x.changed && !x.closed && x.active;
     const cnt = (f) => rows.filter(f).length;
     const runSel = el('select', { 'aria-label': '변환 실행', onchange: (e) => { TW.reviewRun = +e.target.value; TW.review = null; twRender(); } },
       rv.runs.map((x) => el('option', { value: x.id, selected: x.id === rv.run.id, text: `${x.created_at.slice(5, 16)} · ${x.total}건(성공 ${x.ok} · 실패 ${x.failed})${x.status === 'stopped' ? ' · 중지됨' : ''}` })));
@@ -3941,7 +3998,7 @@
     const setCheck = async (list, on) => {
       const ids = list.filter(canApply).map((x) => x.cand.id);
       if (!ids.length) return;
-      if (!(await mutate('tag_cand_check', ids, on))) return;
+      if (!(await mutate('tag_cand_check', ids, on, TW.year))) return;
       list.forEach((x) => { if (canApply(x)) x.cand.checked = on ? 1 : 0; });
       twRender();
     };
@@ -3960,18 +4017,19 @@
     const c = x.cand;
     const row = el('div', { class: 'tw-rv' + (can ? '' : ' off') });
     const cb = el('input', { type: 'checkbox', disabled: !can, checked: !!(c && c.checked && can), 'aria-label': `${x.name} 결과 반영 체크` });
-    cb.addEventListener('change', async () => { if (await mutate('tag_cand_check', [c.id], cb.checked)) { c.checked = cb.checked ? 1 : 0; onCheck(); } else cb.checked = !cb.checked; });
+    cb.addEventListener('change', async () => { if (await mutate('tag_cand_check', [c.id], cb.checked, TW.year)) { c.checked = cb.checked ? 1 : 0; onCheck(); } else cb.checked = !cb.checked; });
     const who = el('div', { class: 'tw-rv-who' }, [cb, el('b', { text: `${x.grade || ''}-${x.class_no || ''}-${x.number || ''} ${x.name}` }),
-      el('span', { class: `st-chip ${x.applied ? 'confirmed' : can ? 'suggested' : 'excluded'}`, text: st }),
+      el('span', { class: `tw-chip ${x.applied ? 'tw-applied' : x.closed ? 'tw-closed' : can ? 'tw-todo' : 'tw-off'}`, text: st }),
+      el('span', { class: 'muted', text: [ITEM_LABELS[x.item] || '', x.kind === 'existing' ? '기존 완성문' : x.seq ? `${x.seq}회` : '', x.title, x.date ? md(x.date) : ''].filter(Boolean).join(' · ') }),
       x.group_id ? el('button', { type: 'button', class: 'link', text: '항목별 기록 ↗', onclick: () => openRecords(x.group_id, x.item, x.student_no) }) : null]);
     row.appendChild(who);
     if (!c) { row.appendChild(el('div', { class: 'muted', text: x.state === 'missing' ? '기록이 지워졌습니다.' : '결과가 없습니다(중지됐거나 아직 변환하지 않음).' })); return row; }
     if (c.status === 'failed') { row.appendChild(el('div', { class: 'danger-text', text: c.error || '실패' })); return row; }
-    const ta = el('textarea', { rows: 5, disabled: !!x.applied, 'aria-label': `${x.name} 변환 결과` }); ta.value = c.edited !== null && c.edited !== undefined ? c.edited : c.text;
-    let timer = null;
-    const save = () => { timer = null; const v = ta.value; twTrack(rawCall('tag_cand_edit', c.id, v).then((r) => { if (r && r.ok) c.edited = v.trim() === c.text.trim() ? null : v; else toast((r && r.error) || '고친 글을 저장하지 못했습니다.', 5000); })); };
-    ta.addEventListener('input', () => { if (timer) clearTimeout(timer); timer = setTimeout(save, 600); });
-    ta.addEventListener('blur', () => { if (timer) { clearTimeout(timer); save(); } });
+    const ta = el('textarea', { rows: 5, disabled: !!x.applied, 'aria-label': `${x.name} 변환 결과` });
+    ta.value = TW.edits.has(c.id) ? TW.edits.get(c.id) : c.edited !== null && c.edited !== undefined ? c.edited : c.text;
+    const save = () => { const t = TW.editTimers.get(c.id); if (t) clearTimeout(t); TW.editTimers.delete(c.id); twTrack(twSaveEdit(c.id)); };
+    ta.addEventListener('input', () => { TW.edits.set(c.id, ta.value); const t = TW.editTimers.get(c.id); if (t) clearTimeout(t); TW.editTimers.set(c.id, setTimeout(save, 600)); });
+    ta.addEventListener('blur', () => { if (TW.editTimers.has(c.id)) save(); });
     row.appendChild(el('div', { class: 'tw-rv-cols' }, [
       el('div', {}, [el('div', { class: 'col-label', text: x.changed && !x.applied ? '보낸 원문 (그 뒤 기록이 바뀜)' : '보낸 원문' }), el('div', { class: 'cmp-text', text: c.input_text })]),
       el('div', {}, [el('div', { class: 'col-label', text: `변환 결과${c.edited !== null && c.edited !== undefined ? ' (고침)' : ''} · ${fmtCredit(c.cost)} 크레딧` }), ta])]));
@@ -3979,29 +4037,58 @@
   }
   async function twApply(list) {
     if (!list.length) return;
-    await twFlush();
+    if (!(await twFlushOrWarn())) return;
     if (!(await confirmBox(`${list.length}건의 기록 내용을 변환 결과로 바꿉니다.\n처음 원문은 남고, 아래 '반영 기록'의 [되돌리기]로 이번 반영을 되돌릴 수 있습니다(앱을 껐다 켜도 가능).\n최종안은 바뀌지 않고 '확인 필요'로 표시됩니다.`, '반영'))) return;
-    const r = await mutate('tag_apply', TW.work.id, list.map((x) => x.cand.id));
+    const r = await mutate('tag_apply', TW.work.id, list.map((x) => x.cand.id), TW.year);
     if (!r) return;
     if (r.skipped.length) await alertBox(`${r.applied.length}건을 반영했습니다.\n반영하지 않은 ${r.skipped.length}건:\n${r.skipped.map((s) => `· ${(list.find((x) => x.record_id === s.record_id) || {}).name || s.record_id}: ${s.why}`).join('\n')}`);
     TW.review = null;
     await renderTagView(true);
-    const first = r.applied[0];
-    if (first) actionToast(`${r.applied.length}건을 기록에 반영했습니다.`, '바뀐 학생 항목별 기록 보기', () => openRecords(first.group_id, first.item, first.student_no), 15000);
+    TW.lastApplied = r.applied;
+    if (r.applied.length) actionToast(`${r.applied.length}건을 기록에 반영했습니다.`, '바뀐 학생 목록 보기', () => twAppliedSheet(), 15000);
   }
-  function twBatches(body, batches) {
+  // 지운 태그의 작업: 반영 기록 보기·되돌리기
+  async function twOrphanSheet(w) {
+    const r = await call('tag_batches', w.work_id, ys.year);
+    if (!r) return;
+    openSheet((box) => {
+      box.style.height = 'auto'; box.style.width = 'min(560px, 92vw)';
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `'${w.tag_name}' 태그(지움)의 반영 기록` })]),
+        el('p', { class: 'hint', text: '태그는 지웠지만 AI 변환으로 기록을 바꾼 이력은 남아 있습니다. 반영 한 번 단위로 되돌릴 수 있습니다.' }));
+      const body = el('div', {});
+      twBatches(body, r.batches, w.work_id);
+      box.append(body, el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '닫기', onclick: closeSheet })]));
+    });
+  }
+  // 반영한 학생 목록: 하나씩 항목별 기록으로 열기
+  function twAppliedSheet() {
+    const list = TW.lastApplied || [];
+    if (!list.length) return;
+    const recs = new Map((TV.data ? TV.data.records : []).map((x) => [x.id, x]));
+    openSheet((box) => {
+      box.style.height = 'auto'; box.style.width = 'min(560px, 92vw)';
+      const seen = new Set();
+      const rows = list.filter((a) => { const k = `${a.group_id}:${a.item}:${a.student_no}`; if (seen.has(k)) return false; seen.add(k); return true; });
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `이번에 반영한 학생 ${rows.length}명` })]),
+        el('p', { class: 'hint', text: '학생을 누르면 항목별 기록에서 그 학생을 엽니다. 이 목록은 [바뀐 학생 목록] 버튼(③ 위)으로 다시 볼 수 있습니다.' }),
+        el('div', { class: 'tw-applied-list' }, rows.map((a) => { const x = recs.get(a.record_id) || {}; return el('button', { type: 'button', text: `${x.name || a.student_no} · ${ITEM_LABELS[a.item] || a.item}`, onclick: () => { closeSheet(); openRecords(a.group_id, a.item, a.student_no); } }); })),
+        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '닫기', onclick: closeSheet })]));
+    });
+  }
+  function twBatches(body, batches, wid) {
     if (!batches || !batches.length) return;
     const live = batches.filter((b) => b.undone < b.count);
-    const box = el('details', { class: 'tw-batches', open: false }, [el('summary', { text: `반영 기록 ${batches.length}번${live.length ? ` (되돌릴 수 있음 ${live.length}번)` : ''}` })]);
+    const box = el('details', { class: 'tw-batches', open: !!wid }, [el('summary', { text: `반영 기록 ${batches.length}번${live.length ? ` (아직 되돌리지 않은 반영 ${live.length}번)` : ''}` })]);
     batches.forEach((b) => box.appendChild(el('div', { class: 'tw-row' }, [el('span', { text: `${b.at.slice(5, 16)} · ${b.count}건${b.undone ? ` (되돌림 ${b.undone}건)` : ''}` }),
-      b.undone < b.count ? el('button', { type: 'button', class: 'small', text: '이 반영 되돌리기', onclick: () => twUndo(b) }) : el('span', { class: 'muted', text: '되돌림' })])));
+      b.undone < b.count ? el('button', { type: 'button', class: 'small', text: '이 반영 되돌리기', onclick: () => twUndo(b, wid) }) : el('span', { class: 'muted', text: '되돌림' })])));
     body.appendChild(box);
   }
-  async function twUndo(b) {
+  async function twUndo(b, wid) {
     if (!(await confirmBox(`${b.at.slice(5, 16)}에 반영한 ${b.count - b.undone}건을 반영 전 내용으로 되돌립니다.\n반영 뒤 직접 고쳤거나 마감한 기록은 그대로 두고 알려 드립니다.`, '되돌리기'))) return;
-    const r = await mutate('tag_undo', TW.work.id, b.batch);
+    const r = await mutate('tag_undo', wid || TW.work.id, b.batch, TW.year || ys.year);
     if (!r) return;
     await alertBox(`${r.undone.length}건을 되돌렸습니다.${r.skipped.length ? `\n그대로 둔 ${r.skipped.length}건: ${[...new Set(r.skipped.map((s) => s.why))].join(', ')}` : ''}`);
+    if (wid) { closeSheet(); toast('되돌렸습니다.'); await renderTagView(true); return; }
     TW.review = null;
     await renderTagView(true);
     await twLoad();
@@ -4020,7 +4107,7 @@
       const name = el('input', { type: 'text', value: tg.name, disabled: !!ys.archived });
       name.addEventListener('change', async () => { if (await mutate('rename_tag', tg.id, name.value)) { toast('이름을 바꿨습니다. 모든 기록에 반영됩니다.'); renderTags(); } else name.value = tg.name; });
       t.appendChild(el('tr', {}, [el('td', { class: 'tag-name-cell' }, [el('span', { class: 'tdot' + tagC(tg.id) }), name]), el('td', { text: `${tg.used}건${tg.used_closed ? ` (마감 ${tg.used_closed})` : ''}${tg.used_inbox ? ` · 인박스 ${tg.used_inbox}` : ''}` }), el('td', {}, [el('button', { type: 'button', class: 'link danger-text edit-only', text: '삭제', onclick: async () => {
-        if ((tg.used || tg.used_inbox) && !(await typedConfirm(`'${tg.name}' 태그를 지우면 기록 ${tg.used}건${tg.used_closed ? `(마감된 기록 ${tg.used_closed}건 포함)` : ''}${tg.used_inbox ? `과 보내기 전 인박스 묶음 ${tg.used_inbox}개` : ''}에서 빠집니다. 태그 정리는 마감과 관계없이 반영됩니다.`, '삭제'))) return;
+        if ((tg.used || tg.used_inbox) && !(await typedConfirm(`'${tg.name}' 태그를 지우면 기록 ${tg.used}건${tg.used_closed ? `(마감된 기록 ${tg.used_closed}건 포함)` : ''}${tg.used_inbox ? `과 보내기 전 인박스 묶음 ${tg.used_inbox}개` : ''}에서 빠집니다. 태그 정리는 마감과 관계없이 반영됩니다. 이 태그로 한 AI 변환의 반영 기록은 남고, 태그별 기록 왼쪽 '지운 태그의 AI 변환'에서 되돌릴 수 있습니다.`, '삭제'))) return;
         if (await mutate('delete_tag', tg.id)) renderTags();
       } })])]));
     });
@@ -4654,10 +4741,8 @@
       const res = await mutate('inbox_send', b.id, action);
       if (!res) return;
       const tids = [...tagSet];
-      if (tids.length) {
-        const slot = (ys.groups || []).some((g) => g.id === b.group_id && g.kind === 'homeroom') ? `i:${b.item}` : `g:${b.group_id}:${b.item}`;
-        actionToast(`${res.students}명 ${res.records}건 보냈습니다.`, '이 태그로 AI 변환하기', () => goTagWork(tids[0], slot, 'trial'), 15000);
-      } else toast(`${res.students}명 ${res.records}건 보냈습니다.`);
+      if (tids.length) actionToast(`${res.students}명 ${res.records}건 보냈습니다.`, tids.length > 1 ? '태그 골라 AI 변환하기' : '이 태그로 AI 변환하기', () => batchTagWork(b, tids), 15000);
+      else toast(`${res.students}명 ${res.records}건 보냈습니다.`);
       await refreshInboxBadge();
       renderInboxList();
       loadBatch();
@@ -4713,8 +4798,27 @@
     if (!info) return;
     const ids = Object.entries(info.tag_counts || {}).sort((x, y) => y[1] - x[1]).map(([id]) => +id);
     if (!ids.length) { toast('이 묶음 기록에 붙은 태그가 없습니다. 먼저 [🏷 이 묶음 기록에 태그 지정]으로 태그를 붙이세요.', 6000); return; }
-    const slot = (ys.groups || []).some((g) => g.id === b.group_id && g.kind === 'homeroom') ? `i:${b.item}` : `g:${b.group_id}:${b.item}`;
-    goTagWork(ids[0], slot, 'trial');
+    batchTagWork(b, ids);
+  }
+  // 묶음의 담당·항목 범위로 태그 변환 열기. 태그가 여럿이면 고르게 한다.
+  async function batchTagWork(b, ids) {
+    const g = (ys.groups || []).find((x) => x.id === b.group_id);
+    const scope = g && g.kind === 'homeroom' ? `c:${g.grade}-${g.class_no}` : '';
+    const slot = g && g.kind === 'homeroom' ? `i:${b.item}` : `g:${b.group_id}:${b.item}`;
+    let tid = ids[0];
+    if (ids.length > 1) {
+      const all = await call('tags');
+      const names = Object.fromEntries(((all && all.tags) || []).map((t) => [t.id, t.name]));
+      tid = await new Promise((resolve) => openSheet((box) => {
+        box.style.height = 'auto'; box.style.width = 'min(480px, 92vw)';
+        box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: '어느 태그로 AI 변환할까요?' })]),
+          el('p', { class: 'hint', text: `범위: ${g ? g.label || g.name : ''} · ${ITEM_LABELS[b.item] || b.item}` }),
+          el('div', { class: 'tw-applied-list' }, ids.map((id) => el('button', { type: 'button', text: names[id] || `태그 ${id}`, onclick: () => { closeSheet(); resolve(id); } }))),
+          el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: () => { closeSheet(); resolve(null); } })]));
+      }));
+      if (!tid) return;
+    }
+    goTagWork(tid, slot, 'trial', scope);
   }
   // 보낸 묶음: 이 묶음으로 넣은 기록을 모든 학생에서 지우기(되돌릴 수 없음 → '확인했어요' 입력)
   async function sentDelete(b) {

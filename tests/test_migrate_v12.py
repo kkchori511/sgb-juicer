@@ -16,7 +16,11 @@ def snap(path):
         out = {t: con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in TABLES}
         out["rec"] = con.execute("SELECT id, content, original, tags_ver FROM records ORDER BY id").fetchall()
         out["res"] = con.execute("SELECT id, record_id, text, meta FROM results ORDER BY id").fetchall()
-        out["fin"] = con.execute("SELECT student_no, text FROM finals ORDER BY student_no").fetchall()
+        out["fin"] = con.execute("SELECT group_id, item, student_no, text, source, meta, stale, closed FROM finals ORDER BY group_id, item, student_no").fetchall()
+        out["tags"] = con.execute("SELECT record_id, tag_id FROM record_tags ORDER BY record_id, tag_id").fetchall()
+        out["ib"] = con.execute("SELECT id, title, group_id, item, meta FROM inbox_batches ORDER BY id").fetchall()
+        out["std"] = con.execute("SELECT * FROM standards").fetchall()
+        out["mem"] = con.execute("SELECT group_id, student_no, active, section FROM memberships ORDER BY group_id, student_no").fetchall()
         return out
     finally:
         con.close()

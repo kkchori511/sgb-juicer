@@ -649,9 +649,10 @@ class Api:
         for w in TagWork(d).summary()[:3]:  # 진행 중인 태그 AI 변환
             if w["tag_id"] is None:
                 continue
-            what = (f"검토 전 {w['pending']}건" if w["pending"] else "") + (f" 실패 {w['failed']}건" if w["failed"] else "") or "시험 중"
-            todo.append({"kind": "tagwork", "label": f"'{w['tag_name']}' 태그 변환 {what.strip()}", "tag_id": w["tag_id"],
-                         "step": "review" if (w["pending"] or w["failed"]) else "trial"})
+            what = " ".join(x for x in (f"검토 전 {w['pending']}건" if w["pending"] else "", f"실패 {w['failed']}건" if w["failed"] else "",
+                                        f"결과 없음 {w['notrun']}건" if w["notrun"] else "") if x) or "시험 중"
+            todo.append({"kind": "tagwork", "label": f"'{w['tag_name']}' 태그 변환 {what}", "tag_id": w["tag_id"],
+                         "step": "review" if (w["pending"] or w["failed"] or w["notrun"]) else "trial"})
         for kind, n, label, flt in (("stale", todo_stale, "채택 후 기록 변경", "stale"), ("final", todo_final, "최종안 만들기", "progress"),
                                     ("close", todo_close, "마감 검토", "final")):
             if n:
@@ -732,39 +733,54 @@ class Api:
         return Records(d).tag_view(d.role(), tag_id, flt or {})
 
     # ---------- 태그 AI 변환(tagwork.py) ----------
-    def _tw(self):
+    # 모든 쓰기·AI 호출은 화면이 연 학년도(year)를 받아 지금 학년도와 같은지 확인한다(학년도마다 id가 겹치므로).
+    def _tw(self, year=None):
+        if year is not None and int(year) != config.load()["current_year"]:
+            raise db.DbError("학년도가 바뀌었습니다. 화면을 다시 열어 주세요.")
         return TagWork(self._db())
 
     @safe
-    def tag_work(self, tag_id):
-        """태그 작업 열기: 작업·시험 후보·반영 묶음·일괄 실행 목록."""
-        tw = self._tw()
+    def tag_work(self, tag_id, year=None):
+        """태그 작업 열기: 작업·시험 후보·반영 묶음·일괄 실행 목록. 보관 학년도에서는 새 작업을 만들지 않는다."""
         if not ys_ok(self):
             raise db.DbError("학년도를 먼저 고르세요.")
-        w = tw.work_for_tag(tag_id)
-        return {"work": w, "trials": tw.trials(w["id"]), "batches": tw.batches(w["id"]), "runs": tw.runs(w["id"])}
+        tw = self._tw(year)
+        st = self.year_state()
+        w = tw.work_for_tag(tag_id, create=not (st.get("ok") and st.get("archived")))
+        if not w:
+            return {"work": None, "trials": [], "batches": [], "runs": [], "progress": {}}
+        return {"work": w, "trials": tw.trials(w["id"]), "batches": tw.batches(w["id"]), "runs": tw.runs(w["id"]), "progress": tw.progress(w["id"])}
 
     @safe
-    def tag_draft_save(self, wid, draft):
-        self._editable()
-        return {"draft": self._tw().save_draft(wid, draft)}
+    def tag_draft_save(self, wid, draft, year=None):
+        self._editable(year)
+        return {"draft": self._tw(year).save_draft(wid, draft)}
+
+    def _tag_has(self, tw, w, r):
+        if w["tag_id"] is None or not tw.d.q("SELECT 1 FROM record_tags WHERE record_id=? AND tag_id=?", (r["id"], w["tag_id"])):
+            raise db.DbError("이 태그가 붙은 기록이 아닙니다. 화면을 다시 불러와 주세요.")
 
     @safe
-    def tag_trial_run(self, wid, rid, chain, parent_id=None, model_index=None):
+    def tag_trial_run(self, wid, rid, chain, parent_id=None, model_index=None, year=None):
         """시험 변환 한 번: 처음이면 원문(또는 지금 내용)에 첫 단계, 이어 고치기면 앞 후보 글에 마지막 단계만 적용한다."""
-        self._editable()
-        tw = self._tw()
+        self._editable(year)
+        tw = self._tw(year)
         w = tw.work(wid)
         r = tw.record_info(rid)
+        self._tag_has(tw, w, r)
         tw.check_target(r)
         tw.trial_room(w["id"], r["id"])
         chain = norm_chain(chain)
+        base = None
         if parent_id:
             par = tw.cand(parent_id)
             if par["record_id"] != r["id"] or par["work_id"] != w["id"]:
                 raise db.DbError("이어서 고칠 후보가 이 기록의 후보가 아닙니다.")
             if signature({**par["chain"], "steps": chain["steps"][:-1]}) != signature(par["chain"]) or chain["src"] != par["chain"]["src"]:
                 raise db.DbError("앞 후보의 단계와 맞지 않습니다. 화면을 다시 열어 주세요.")
+            if (par["record_ver"] or 0) != (r.get("content_ver") or 0) or par["record_text"] != r["content"]:
+                raise db.DbError("이 후보를 만든 뒤 기록 내용이 바뀌었습니다. 바뀐 내용으로 처음부터 다시 시험해 주세요.")
+            base = (par["record_ver"] or 0, par["record_text"])
             src_text, input_src = (par["edited"] if par["edited"] is not None else par["text"]), "cand"
         else:
             if len(chain["steps"]) != 1:
@@ -778,106 +794,137 @@ class Api:
         try:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, len(chain["steps"]) - 1), src_text,
                                        cfg["privacy_block"], extra=False)
-            nid, dropped = tw.add_trial(w["id"], r, chain, int(parent_id) if parent_id else None, input_src, src_text, text, model, cost, {})
+            nid, dropped = tw.add_trial(w["id"], r, chain, int(parent_id) if parent_id else None, input_src, src_text, text, model, cost, {},
+                                        base=base)
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
         finally:
             self._release(key)
 
     @safe
-    def tag_cand_lock(self, cid, locked):
-        self._editable()
-        self._tw().lock_cand(cid, bool(locked))
+    def tag_cand_lock(self, cid, locked, year=None):
+        self._editable(year)
+        self._tw(year).lock_cand(cid, bool(locked))
         return {}
 
     @safe
-    def tag_cand_delete(self, cid):
-        self._editable()
-        self._tw().delete_trial(cid)
+    def tag_cand_delete(self, cid, year=None):
+        self._editable(year)
+        self._tw(year).delete_trial(cid)
         return {}
 
     @safe
-    def tag_confirm(self, cid, apply=True):
+    def tag_confirm(self, cid, apply=True, year=None):
         """시험 후보 확정(그 기록에 반영 + 이 태그 설정으로)."""
-        self._editable()
-        return self._tw().confirm(cid, bool(apply))
+        self._editable(year)
+        return self._tw(year).confirm(cid, bool(apply))
 
     @safe
-    def tag_plan(self, wid, flt=None):
+    def tag_plan(self, wid, flt=None, year=None):
         d = self._db()
+        self._tw(year)
         return TagWork(d).plan(wid, d.role(), flt or {})
 
     @safe
-    def tag_run_create(self, wid, record_ids, flt=None):
-        self._editable()
-        return {"run": self._tw().create_run(wid, record_ids, flt or {})}
+    def tag_run_create(self, wid, record_ids, flt=None, year=None):
+        self._editable(year)
+        d = self._db()
+        return {"run": self._tw(year).create_run(wid, record_ids, flt or {}, d.role())}
 
     @safe
-    def tag_run_item(self, run_id, rid, model_index=None):
-        """일괄 변환 한 건: 확정 단계를 처음부터 그대로 재현한다. 실패도 기록해 [실패한 것만 다시]에 쓴다."""
-        self._editable()
-        tw = self._tw()
+    def tag_run_item(self, run_id, rid, model_index=None, year=None):
+        """일괄 변환 한 건: 확정 단계를 처음부터 그대로 재현한다. 실패도 기록해 [실패한 것만 다시]에 쓴다.
+        앞 실패에서 끝낸 단계가 있고 원자료가 그대로면 그다음 단계부터 이어서 한다(이미 쓴 비용을 다시 쓰지 않음)."""
+        self._editable(year)
+        tw = self._tw(year)
         run = tw.run(run_id)
         if int(rid) not in run["targets"]:
             raise db.DbError("이번 변환 대상이 아닙니다.")
-        if tw.run_has_ok(run["id"], rid):
-            return {"skipped": True, "cost": 0, "run_cost": self._run_cost}
-        r = tw.record_info(rid)
         chain = run["chain"]
         cfg, model = self._model(model_index)
-        key = ("tag", int(r["id"]))
+        key = ("tag", int(rid))
         self._guard(key)
         try:
+            if tw.run_has_ok(run["id"], rid):  # 잠근 뒤 다시 확인(같은 건을 두 번 부르지 않게)
+                return {"skipped": True, "cost": 0, "run_cost": self._run_cost}
+            r = tw.record_info(rid)
             tw.check_target(r)
-            text = tw.source_text(r, chain.get("src", "original"))
-            first = text
-            if not text.strip():
+            first = tw.source_text(r, chain.get("src", "original"))
+            if not first.strip():
                 raise db.DbError("기록 내용이 비어 있습니다.")
-            total, outs = 0.0, []
-            for i in range(len(chain["steps"])):
-                text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, i), text, cfg["privacy_block"], extra=False)
-                total += cost
-                outs.append(text)
-            nid = tw.save_bulk(run, r, first, text, model, total, {"steps_out": outs[:-1]})
+            part = tw.failed_partial(run["id"], rid)
+            outs, total = [], 0.0
+            if part and part["ver"] == (r.get("content_ver") or 0) and part["text"] == r["content"] and part["input"] == first and part["outs"]:
+                outs, total = list(part["outs"])[: len(chain["steps"]) - 1], float(part["cost"] or 0)
+            text = outs[-1] if outs else first
+            try:
+                for i in range(len(outs), len(chain["steps"])):
+                    text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, i), text, cfg["privacy_block"], extra=False)
+                    total += cost
+                    outs.append(text)
+            except openrouter.Cancelled:
+                raise
+            except (db.DbError, openrouter.LlmError) as e:  # 끝낸 단계·비용은 남겨 다음에 이어서
+                tw.save_bulk(run, r, first, "", model, total, {"steps_out": outs, "input": first}, error=str(e))
+                raise
+            nid = tw.save_bulk(run, r, first, text, model, total, {"steps_out": outs[:-1], "input": first})
             return self._ai_out({"id": nid, "cost": total})
         except openrouter.Cancelled:
             raise
-        except (db.DbError, openrouter.LlmError) as e:
-            tw.save_bulk(run, r, "", "", model, 0, {}, error=str(e))
+        except db.DbError as e:
+            if "비어" in str(e) or isinstance(e, db.ClosedError) or "비활성" in str(e) or "명렬" in str(e):
+                try:
+                    r0 = tw.record_info(rid)
+                    tw.save_bulk(run, r0, "", "", model, 0, {}, error=str(e))
+                except db.DbError:
+                    pass
             raise
         finally:
             self._release(key)
 
     @safe
-    def tag_run_finish(self, run_id, status="done"):
-        self._tw().finish_run(run_id, status)
+    def tag_run_finish(self, run_id, status="done", year=None):
+        self._tw(year).finish_run(run_id, status)
         return {}
 
     @safe
-    def tag_review(self, wid, run_id=None):
-        tw = self._tw()
-        return {**tw.review(wid, run_id), "runs": tw.runs(wid), "batches": tw.batches(wid)}
+    def tag_review(self, wid, run_id=None, year=None):
+        tw = self._tw(year)
+        return {**tw.review(wid, run_id), "runs": tw.runs(wid), "batches": tw.batches(wid), "progress": tw.progress(wid)}
 
     @safe
-    def tag_cand_edit(self, cid, text):
-        self._editable()
-        self._tw().edit_cand(cid, text)
+    def tag_cand_edit(self, cid, text, year=None):
+        self._editable(year)
+        self._tw(year).edit_cand(cid, text)
         return {}
 
     @safe
-    def tag_cand_check(self, cids, checked):
-        self._editable()
-        self._tw().check_cands(cids, bool(checked))
+    def tag_cand_check(self, cids, checked, year=None):
+        self._editable(year)
+        self._tw(year).check_cands(cids, bool(checked))
         return {}
 
     @safe
-    def tag_apply(self, wid, cids):
-        self._editable()
-        return self._tw().apply(wid, cids)
+    def tag_apply(self, wid, cids, year=None):
+        self._editable(year)
+        return self._tw(year).apply(wid, cids)
 
     @safe
-    def tag_undo(self, wid, batch):
-        self._editable()
-        return self._tw().undo(wid, batch)
+    def tag_undo(self, wid, batch, year=None):
+        self._editable(year)
+        return self._tw(year).undo(wid, batch)
+
+    @safe
+    def tag_orphans(self, year=None):
+        """지운 태그의 작업(반영 기록 있음)."""
+        if not ys_ok(self):
+            return {"works": []}
+        return {"works": self._tw(year).orphans()}
+
+    @safe
+    def tag_batches(self, wid, year=None):
+        """작업의 반영 기록(지운 태그 작업의 되돌리기용)."""
+        tw = self._tw(year)
+        return {"work": tw.work(wid), "batches": tw.batches(wid)}
 
     @safe
     def tag_summary(self):
@@ -1115,10 +1162,11 @@ class Api:
                       "- 위 요청을 반영하되, 앞의 규칙(학번·이름 쓰지 않기, 분량, 없는 사실 지어내지 않기, 원문 보존, 출력 형식)이 항상 우선한다.")
         if openrouter.cancelled():
             raise openrouter.Cancelled()
+        gen = openrouter.generation()
         text, cost = openrouter.chat(key, model, system, user, privacy)
         with self._ai_lock:
             self._run_cost += cost
-        if openrouter.cancelled():  # [바로 중지] 뒤에 도착한 답은 저장하지 않는다
+        if openrouter.cancelled() or openrouter.generation() != gen:  # [바로 중지] 뒤에 도착한 답은 저장하지 않는다(새 실행이 시작됐어도)
             raise openrouter.Cancelled()
         if not text.strip():
             raise openrouter.LlmError("AI가 빈 결과를 돌려주었습니다. 다시 시도하거나 다른 모델을 고르세요.")

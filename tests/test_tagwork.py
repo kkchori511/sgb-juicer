@@ -17,6 +17,7 @@ def fake_chat(key, model, system, user, privacy_block=False):
 
 
 openrouter.chat = fake_chat
+openrouter.balance = lambda key: 1.0  # 잔액 조회 HTTP를 보내지 않음
 from app.api import Api  # noqa: E402
 
 

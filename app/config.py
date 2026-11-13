@@ -101,10 +101,12 @@ def _read(path, tries=10, wait=0.3):
 
 def _set_aside(path):
     """깨진 설정 파일은 지우지 않고 옆에 이름을 바꿔 둔다(다음부터는 새 설정으로)."""
-    name = f"{path.stem}.깨짐_{time.strftime('%Y%m%d_%H%M%S')}{path.suffix}"
+    name = f"{path.stem}.깨짐_{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}_{int(time.time() * 1000) % 1000:03d}{path.suffix}"
     try:
         os.replace(path, path.with_name(name))
         return name
+    except FileNotFoundError:  # 다른 스레드가 먼저 옮김
+        return "(이미 옮겨 둠)"
     except OSError:
         return None
 
@@ -115,10 +117,16 @@ def load() -> dict:
     try:
         saved = _read(path)
         _state["error"] = None
+        if saved is not None and not isinstance(saved, dict):
+            raise ValueError("설정 파일 형식이 아님")
     except ValueError:
         saved = None
-        _state["error"] = None
-        _state["broken"] = _set_aside(path) or "(옮기지 못함)"
+        moved = _set_aside(path)
+        if moved:
+            _state["error"] = None
+            _state["broken"] = moved
+        else:  # 깨진 원본을 옮겨 두지 못하면 덮어쓰지 않는다
+            _state["error"] = "설정 파일이 깨져 있는데 옆으로 옮겨 두지 못했습니다"
     except OSError as e:
         saved = None
         _state["error"] = f"{e.__class__.__name__}: {getattr(e, 'strerror', '') or e}"
