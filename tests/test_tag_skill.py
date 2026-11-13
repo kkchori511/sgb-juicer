@@ -97,6 +97,13 @@ def test_skill():
     run = ok(api.tag_run_create(w["id"], rids[1:]))["run"]
     assert run["chain"]["steps"][0]["prompt"] == "목록 지침"
     assert not api.tag_confirm_set(w["id"], None, "없는id")["ok"]
+    # ② 예시 불러오기: 확정한 결과(이름 포함)가 맨 앞
+    ex = ok(api.tag_examples(w["id"]))["examples"]
+    assert ex and ex[0]["label"].startswith("확정한 결과 · 20301 김하나") and ex[0]["text"].startswith("결과글")
+    # 항목별 기록 마법사 '바로 쓰기': 작업 종류의 기본 프롬프트로
+    ok(api.prompt_pick_set("refine", pid))
+    assert ok(api.prompt_list())["picks"]["refine"] == pid
+    assert not api.prompt_pick_set("nope", pid)["ok"] and not api.prompt_pick_set("refine", "없음")["ok"]
     # 시험 후보가 아니면 스킬화 불가
     assert not api.tag_skill_compose(999999)["ok"]
 

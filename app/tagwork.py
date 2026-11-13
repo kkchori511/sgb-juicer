@@ -281,6 +281,39 @@ class TagWork:
                       (json.dumps(conf, ensure_ascii=False), int(wid)))
         return conf
 
+    def _who(self, r):
+        n = self.d.q("SELECT name FROM students WHERE student_no=?", (r["student_no"],))
+        return f"{r['student_no']} {n[0]['name']}" if n else r["student_no"]
+
+    def examples(self, wid):
+        """② [✏️ 수정]의 예시 불러오기: 확정한 시험 후보의 완성 결과, 이 작업에서 반영한(되돌리지 않은) 다른 학생 결과."""
+        w = self.work(wid)
+        out, seen = [], set()
+        conf = w["confirmed"] or {}
+        if conf.get("cand_id"):
+            try:
+                x = self.cand(conf["cand_id"])
+                r = self.record_info(x["record_id"])
+                t = x["edited"] if x["edited"] is not None else x["text"]
+                out.append({"label": f"확정한 결과 · {self._who(r)}", "text": t})
+                seen.add(t.strip())
+            except DbError:
+                pass
+        for a in self.d.q("SELECT record_id, after_text FROM tag_applies WHERE work_id=? AND undone_at IS NULL ORDER BY id DESC", (int(wid),)):
+            t = (a["after_text"] or "").strip()
+            if not t or t in seen:
+                continue
+            seen.add(t)
+            try:
+                r = self.record_info(a["record_id"])
+                who = self._who(r)
+            except DbError:
+                who = "(지운 기록)"
+            out.append({"label": f"반영한 결과 · {who}", "text": t})
+            if len(out) >= 30:
+                break
+        return out
+
     # ---------- 나머지 변환 ----------
     def plan(self, wid, role, flt):
         """지금 화면 조건의 대상 목록. 체크 기본값: 학생관찰기록이고 이 작업에서 반영한 적 없으면 체크."""

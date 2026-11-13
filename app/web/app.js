@@ -1682,6 +1682,22 @@
   function modelName(sel) { const o = sel && sel.selectedOptions && sel.selectedOptions[0]; return o ? o.textContent : '-'; }
   // kind: 프롬프트를 고르는 작업이면 'synth'(종합·생성) / 'refine'(기록 정제) / 'polish'(다듬기). 없으면 고정 프롬프트 작업.
   // prefer: 이 실행의 처음 고르기 값(예: 스캔 묶음은 '스캔 내용 정리'). 목록에 없으면 작업별 기억값.
+  // 확인 없이 바로 실행되던 AI 버튼용 확인 창. scope를 주면 '이 창을 닫을 때까지 다시 묻지 않기'(대화·시험처럼 연달아 누르는 곳)
+  const AI_ASK_SKIP = new Set();
+  async function aiAsk(title, rows, scope) {
+    if (scope && AI_ASK_SKIP.has(scope)) return true;
+    const html = `<div class="ai-conf"><b>${escHtml(title)}</b> — AI로 실행할까요?<table>${rows.filter(Boolean).map(([k, v]) => `<tr><th>${escHtml(k)}</th><td>${escHtml(v)}</td></tr>`).join('')}</table>`
+      + `<p class="hint">실행하면 크레딧이 듭니다.</p>`
+      + (scope ? '<label class="inline" style="margin:0"><input type="checkbox" id="aiAskSkip"> 이 창을 닫을 때까지 다시 묻지 않기</label>' : '') + '</div>';
+    $('modalOk').classList.add('ai-btn');
+    const p = modal(html, true, true, 'AI 실행', '취소');
+    let skip = false;
+    const cb = $('aiAskSkip');
+    if (cb) cb.addEventListener('change', () => { skip = cb.checked; });
+    const ok = await p.finally(() => $('modalOk').classList.remove('ai-btn'));
+    if (ok && skip && scope) AI_ASK_SKIP.add(scope);
+    return !!ok;
+  }
   // 프롬프트 고르는 칸: 직접 만든 것(이 태그에서 쓴 것 먼저)을 위에, 기본 프롬프트는 맨 아래 묶음(옅은 색)으로
   function promptOpts(list, { tagName, label, selected } = {}) {
     const lab = label || ((p) => p.name);
@@ -1866,16 +1882,18 @@
   // 현황판·다른 화면에서 들어올 때
   async function openRecords(gid, item, sno, filter) {
     if (!(await loadSlots())) return;
-    const key = gid ? `${gid}:${item}` : (R.slot ? slotKey(R.slot) : (R.slots[0] && slotKey(R.slots[0])));
+    const key = gid ? `${gid}:${item}` : (R.slot ? slotKey(R.slot) : (localStorage.getItem(recSlotKey()) || (R.slots[0] && slotKey(R.slots[0]))));
     R.slot = R.slots.find((s) => slotKey(s) === key) || R.slots[0] || null;
     R.sno = sno || null;
     R.filter = filter || '';
     R.selected.clear();
     showPanel('records');
   }
+  const recSlotKey = () => `sgb_rec_slot_${ys.year}`;
   async function renderRecordsPanel() {
     if (!R.slots.length && !(await loadSlots())) return;
-    if (!R.slot) R.slot = R.slots[0] || null;
+    if (!R.slot) { const k = localStorage.getItem(recSlotKey()); R.slot = R.slots.find((s) => slotKey(s) === k) || R.slots[0] || null; }
+    if (R.slot) localStorage.setItem(recSlotKey(), slotKey(R.slot));
     fillSlotSelect($('recSlot'), R.slot && slotKey(R.slot));
     fillModelSelect($('recModel'));
     if (!R.slot) {
@@ -2122,6 +2140,7 @@
       (() => { const yet = v.records.filter((r) => !r.candidates.length && !r.original); return el('button', { type: 'button', class: 'small', disabled: !yet.length, title: '정제·다듬기 후보가 없고 AI 결과를 반영한 적도 없는 기록만 고릅니다', text: `정제 안 한 기록만 선택 (${yet.length})`, onclick: () => { R.selected = new Set(yet.map((r) => r.id)); renderRecords(); } }); })(),
       el('span', { class: 'muted', text: `선택 ${sel.length}건` }),
       el('button', { type: 'button', class: 'primary ai-btn', disabled: locked || !sel.length || pairFull(), title: pairFull() ? PAIR_FULL_TIP : '', text: `선택 기록 종합하기 (${sel.length})`, onclick: openSynth }),
+      recWizBtn('synth', () => v.records.filter((r) => R.selected.has(r.id)).map((r) => r.content).join('\n\n') || (v.records[0] ? v.records[0].content : ''), locked),
       (() => { const recs = v.records.filter((r) => R.selected.has(r.id) && r.kind !== 'existing'); return el('button', { type: 'button', class: 'ai-btn', disabled: locked || !recs.length, title: '고른 학생관찰기록을 한꺼번에 정제합니다(기존 완성문은 빼고, 다듬기는 카드에서 한 건씩)', text: `선택 기록 정제 (${recs.length})`, onclick: (e) => aiRecords(recs, e.currentTarget) }); })(),
       el('button', { type: 'button', disabled: locked || !sel.length, text: '태그 일괄 지정', onclick: bulkTag }),
       el('button', { type: 'button', disabled: locked || !sel.length, text: '다른 항목으로 이동', onclick: () => openMove(v.records.filter((r) => R.selected.has(r.id))) }),
@@ -2168,8 +2187,8 @@
     aiBtn.addEventListener('click', () => aiRecord(r, aiBtn));
     card.appendChild(el('div', { class: 'rcard-foot' }, [
       bytesEl(r.bytes, r.kind === 'existing' ? R.target : 0), el('span', { class: 'spacer' }),
-      aiBtn,
-      r.kind === 'existing' ? el('button', { type: 'button', disabled: locked, text: '그대로 최종안으로', onclick: async () => { if (await afterFinalSaved(() => mutate('adopt_record', r.id))) { toast('최종안으로 채택했습니다.'); loadStudent(true); } } }) : null,
+      aiBtn, recWizBtn(r.kind === 'existing' ? 'polish' : 'refine', r.content, locked),
+      el('button', { type: 'button', disabled: locked, title: 'AI를 거치지 않고 이 기록 내용을 그대로 최종안으로 넣습니다', text: '그대로 최종안으로', onclick: () => adoptRecordFinal(r) }),
       el('button', { type: 'button', disabled: locked, text: '수정', onclick: () => recordForm(r, r.kind) }),
       el('button', { type: 'button', disabled: locked, title: '이 기록(또는 문단)을 다른 항목으로', text: '이동', onclick: () => openMove([r]) }),
       el('button', { type: 'button', class: 'link danger-text', disabled: locked, text: '삭제', onclick: async () => {
@@ -2187,6 +2206,37 @@
       card.appendChild(c);
     }
     return card;
+  }
+  // ---------- 항목별 기록 › 🪄 프롬프트 마법사 ----------
+  const KIND_NAMES = { refine: '정제', polish: '다듬기', synth: '종합' };
+  function recWizCtx(kind, text) {
+    return { rec: { gid: R.slot.group_id, item: R.slot.item, sno: R.sno, kind, text: text || '', label: `${R.view.student.name} · ${R.slot.label}`, year: ys.year } };
+  }
+  function recWizBtn(kind, text, locked) {
+    return el('button', { type: 'button', class: 'small wiz-btn', disabled: locked, title: `대화하며 다듬거나 양식을 채워 ${KIND_NAMES[kind]} 프롬프트를 만듭니다`, text: '🪄 마법사',
+      onclick: async () => { if (await flushFinal()) openWizardMenu(recWizCtx(kind, typeof text === 'function' ? text() : text)); } });
+  }
+  function recUseFor(rc) {
+    return { label: `이 항목 ${KIND_NAMES[rc.kind]}의 기본 프롬프트로 바로 쓰기`, done: `다음 ${KIND_NAMES[rc.kind]}부터 이 프롬프트가 기본으로 골라집니다.`,
+      apply: async (id) => { await mutate('prompt_pick_set', rc.kind, id); } };
+  }
+  // 최종안에 글 전체 넣기(덮어쓸 때 확인, [되돌리기]로 원래 최종안)
+  async function putFinalText(rc, text) {
+    const v = await rawCall('student_view', rc.gid, rc.item, rc.sno);
+    const prev = v && v.ok && v.final ? v.final.text || '' : null;
+    if (prev && prev.trim() && prev.trim() !== text.trim() && !(await confirmBox(`${rc.label}의 지금 최종안을 이 글로 바꿉니다. 바꾼 직후 [되돌리기]로 원래 최종안을 돌려놓을 수 있습니다.`, '바꾸기'))) return;
+    if (!(await mutate('edit_final', rc.gid, rc.item, rc.sno, text, rc.year))) return;
+    actionToast('최종안에 넣었습니다.', '되돌리기', async () => { if (await mutate('edit_final', rc.gid, rc.item, rc.sno, prev || '', rc.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === rc.sno) loadStudent(true); } }, 20000);
+    if (R.sno === rc.sno && panel === 'records') loadStudent(true);
+  }
+  // 기록 그대로 최종안으로(학생관찰기록·기존 완성문): 덮어쓸 때 확인, [되돌리기]
+  async function adoptRecordFinal(r) {
+    const prev = R.view.final ? R.view.final.text || '' : '';
+    if (prev.trim() && prev.trim() !== (r.content || '').trim() && !(await confirmBox('지금 최종안을 이 기록 내용으로 바꿉니다. 바꾼 직후 [되돌리기]로 원래 최종안을 돌려놓을 수 있습니다.', '바꾸기'))) return;
+    const ctx = { gid: R.slot.group_id, item: R.slot.item, sno: R.sno, year: ys.year };
+    if (!(await afterFinalSaved(() => mutate('adopt_record', r.id)))) return;
+    loadStudent(true);
+    actionToast('최종안으로 채택했습니다.', '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, prev, ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
   }
   // ---------- 후보 문장을 최종안에 넣기 ----------
   function splitSentences(text) {
@@ -2459,6 +2509,7 @@
     finalDraft = { ctx, saved: f ? f.text : '', ta, state: saveState, ro };
     const saveBtn = el('button', { type: 'button', hidden: true, text: '저장' });
     const polishBtn = el('button', { type: 'button', class: 'ai-btn', disabled: ro || !f || pairFull(), title: pairFull() ? PAIR_FULL_TIP : '최종안을 AI로 다듬어 후보로 만듭니다', text: '다듬기(AI)' });
+    const polishWiz = recWizBtn('polish', () => ta.value, ro || !f);
     polishBtn.addEventListener('click', async () => {
       if (!(await flushFinal())) return;
       const out = await busyRun(polishBtn, `synth${R.sno}`, () => aiRun({
@@ -2482,6 +2533,7 @@
         closeBtn.disabled = !has || !!ys.archived;
         closeBtn.title = has ? '검토를 끝내고 편집을 잠급니다' : '최종안이 있어야 마감할 수 있습니다';
         polishBtn.disabled = ro || !has || pairFull();
+        polishWiz.disabled = ro || !has;
       }
       if (R.view !== v) return;
       v.final = has ? { ...(v.final || {}), text, closed: false, stale: false } : null;
@@ -2492,7 +2544,7 @@
       }
     };
     upd();
-    fb.append(ta, el('div', { class: 'final-actions' }, [bc, saveState, el('span', { class: 'spacer' }), saveBtn, polishBtn, closeBtn]));
+    fb.append(ta, el('div', { class: 'final-actions' }, [bc, saveState, el('span', { class: 'spacer' }), saveBtn, polishBtn, polishWiz, closeBtn]));
     if (closed) fb.appendChild(el('div', { class: 'hint', text: `● ${f.closed_at || ''} 마감 — 기록·AI·최종안 편집이 잠겼습니다. 조회·복사·내보내기는 됩니다.` }));
     finSec.appendChild(fb);
 
@@ -3707,6 +3759,7 @@
   async function twClose() {
     if (!(await twFlushOrWarn())) return;
     TW.open = false; TW.plan = null; TW.review = null;
+    AI_ASK_SKIP.delete('tw');
     tvRenderMain();
   }
   async function twLoad() {
@@ -3929,6 +3982,7 @@
   }
   async function twRunTrial(rec, chain, parentId, model, btn) {
     if (!(chain.steps[0].prompt || '').trim()) { toast('프롬프트(지침)를 입력해 주세요.'); return; }
+    if (!(await aiAsk(parentId ? '이어서 고치기' : '시험 변환', [['기록', twRecLabel(rec)], ['모델', modelName(model)], ['AI 호출', '1번']], 'tw'))) return;
     if (!(await twFlushOrWarn())) return;
     const out = await busyRun(btn, `tw${rec.id}`, () => aiRun({ title: parentId ? '이어서 고치기' : '시험 변환', skipConfirm: true,
       jobs: [{ label: twRecLabel(rec), run: () => api.tag_trial_run(TW.work.id, rec.id, chain, parentId, model.value, TW.year) }] }));
@@ -4023,6 +4077,7 @@
       };
       const run = async () => {
         if (SK.running) return;
+        if (!(await aiAsk('스킬화', [['기록', o.label], ['모델', modelName(model)], ['AI 호출', `최대 ${SKILL_TRIES * 5}번(시도마다 5번, 통과하면 멈춤)`]]))) return;
         SK.running = true; draw();
         try {
           let prev = SK.tries.length ? prevOf(SK.tries[SK.tries.length - 1]) : null;
@@ -4039,6 +4094,7 @@
         } finally { SK.running = false; pickBest(); draw(); }
       };
       const reverify = async (text) => {
+        if (!(await aiAsk('고친 프롬프트 검증', [['기록', o.label], ['모델', modelName(model)], ['AI 호출', '4번(변환 2 + 채점 2)']]))) return;
         const base = cur();
         const a = { no: SK.tries.length + 1, prompt: text, example: base ? base.example : '', checks: [], pass: false, edited: true };
         SK.running = true; SK.tries.push(a); SK.sel = SK.tries.length - 1; draw();
@@ -4121,9 +4177,23 @@
           sec.appendChild(pr);
         }
         if (i === 0) {
-          const ex = el('textarea', { rows: 3, placeholder: '예시(선택)', 'aria-label': '예시' }); ex.value = s.example || '';
+          const ex = el('textarea', { rows: 5, placeholder: '예시(선택): 직접 붙여넣거나 [📥 예시 불러오기]로 고르세요. 문체·형식만 따르고 내용은 참고하지 않습니다.', 'aria-label': '예시' }); ex.value = s.example || '';
           ex.addEventListener('input', () => { s.example = ex.value; });
-          sec.append(el('div', { class: 'col-label', text: '예시(선택)' }), ex);
+          const exSel = el('select', { 'aria-label': '예시 불러오기' }, [el('option', { value: '', text: '📥 예시 불러오기…' })]);
+          rawCall('tag_examples', w.id, TW.year).then((r) => {
+            const xs = r && r.ok ? r.examples : [];
+            if (!xs.length) exSel.appendChild(el('option', { value: '', disabled: true, text: '(불러올 결과가 아직 없습니다)' }));
+            xs.forEach((x, k) => exSel.appendChild(el('option', { value: String(k), text: `${x.label} — ${twShort(x.text, 40)}` })));
+            exSel._xs = xs;
+          });
+          exSel.addEventListener('change', async () => {
+            const x = (exSel._xs || [])[+exSel.value];
+            exSel.value = '';
+            if (!x) return;
+            if (ex.value.trim() && ex.value.trim() !== x.text.trim() && !(await confirmBox('지금 예시 칸의 글을 고른 결과로 바꿀까요?', '바꾸기'))) return;
+            ex.value = x.text; s.example = x.text;
+          });
+          sec.append(el('div', { class: 'tw-row' }, [el('div', { class: 'col-label', text: '예시(선택)' }), el('span', { class: 'spacer' }), exSel]), ex);
         }
         const rq = el('input', { type: 'text', value: s.request || '', placeholder: i === 0 ? '추가 요청(선택)' : '이어서 고칠 요청', 'aria-label': `${i + 1}단계 요청` });
         rq.addEventListener('input', () => { s.request = rq.value; });
@@ -4511,14 +4581,16 @@
   const CW = { ctx: null, mode: 'record', tag: null, tagName: '', work: null, rid: null, recs: [], trials: [], cur: null, paste: '', local: [], seq: 0, year: null };
   async function openChatWizard(ctx) {
     if (!(await leaveOk())) return;
-    Object.assign(CW, { ctx: ctx || null, mode: 'record', tag: ctx ? ctx.tag : null, tagName: ctx ? ctx.tagName : '', work: null, rid: ctx ? ctx.rid : null, recs: [], trials: [], cur: null, paste: '', local: [], year: ys.year,
+    AI_ASK_SKIP.delete('cw');
+    const recCtx = ctx && ctx.rec ? ctx.rec : null; // 항목별 기록에서 연 경우: 그 기록 글을 붙여넣기로 시작
+    Object.assign(CW, { ctx: ctx || null, mode: recCtx ? 'paste' : 'record', tag: ctx && !recCtx ? ctx.tag : null, tagName: ctx && !recCtx ? ctx.tagName : '', work: null, rid: ctx && !recCtx ? ctx.rid : null, recs: [], trials: [], cur: null, paste: recCtx ? recCtx.text || '' : '', local: [], year: ys.year,
       firstPrompt: null, firstEx: '', useCurrent: false });
     const [tags, lib] = await Promise.all([call('tags'), rawCall('prompt_list')]);
     CW.allTags = (tags && tags.tags) || [];
     CW.lib = lib && lib.ok ? lib.prompts : [];
-    if (!(ctx && TW.work && TW.work.draft && TW.work.draft.prompt)) { const d = CW.lib.find((p) => p.id === 'default'); if (d) { CW.firstPrompt = d.prompt; CW.firstEx = d.example || ''; } }
+    if (!(ctx && ctx.tag && TW.work && TW.work.draft && TW.work.draft.prompt)) { const d = CW.lib.find((p) => p.id === 'default'); if (d) { CW.firstPrompt = d.prompt; CW.firstEx = d.example || ''; } }
     if (!CW.tag && CW.allTags.length) { CW.tag = CW.allTags[0].id; CW.tagName = CW.allTags[0].name; }
-    if (!CW.tag) CW.mode = 'paste';
+    if (!CW.tag || recCtx) CW.mode = 'paste';
     openSheet((box) => {
       box.style.width = 'min(1280px, 96vw)';
       CW.box = box;
@@ -4547,7 +4619,7 @@
       text: t, onclick: async () => { if (CW.mode === k) return; CW.mode = k; CW.cur = null; if (k === 'record') await cwLoad(); cwRender(); } })));
     const src = el('div', { class: 'cw-src' });
     if (CW.mode === 'record') {
-      const tagSel = el('select', { 'aria-label': '태그', disabled: !!CW.ctx, onchange: async (e) => { CW.tag = +e.target.value; CW.tagName = e.target.selectedOptions[0].textContent; CW.rid = null; CW.cur = null; await cwLoad(); cwRender(); } },
+      const tagSel = el('select', { 'aria-label': '태그', disabled: !!(CW.ctx && CW.ctx.tag), onchange: async (e) => { CW.tag = +e.target.value; CW.tagName = e.target.selectedOptions[0].textContent; CW.rid = null; CW.cur = null; await cwLoad(); cwRender(); } },
         CW.allTags.map((t) => el('option', { value: t.id, selected: t.id === CW.tag, text: t.name })));
       const recSel = el('select', { 'aria-label': '기록', onchange: (e) => { CW.rid = +e.target.value; const m = cwCands(); CW.cur = m.length ? m[m.length - 1] : null; cwRender(); } },
         CW.recs.map((x) => el('option', { value: x.id, selected: x.id === CW.rid, text: `${x.name}${x.seq ? ` · ${x.seq}회` : x.kind === 'existing' ? ' · 기존 완성문' : ''}${x.title ? ` · ${x.title}` : ''} — ${twShort(x.content, 28)}` })));
@@ -4589,8 +4661,9 @@
     if (!cur) {
       const lib = el('select', { 'aria-label': '프롬프트 불러오기' }, [el('option', { value: '', text: '시작 프롬프트 불러오기…' }), ...promptOpts(CW.lib, { tagName: CW.tagName })]);
       const pr = el('textarea', { rows: 7, placeholder: '처음 지침(프롬프트)', 'aria-label': '처음 지침' });
-      pr.value = CW.firstPrompt != null ? CW.firstPrompt : ((CW.ctx && TW.work && TW.work.draft && TW.work.draft.prompt) || '');
-      if (CW.firstPrompt == null && CW.ctx && TW.work && TW.work.draft) CW.firstEx = TW.work.draft.example || '';
+      const tagCtx = CW.ctx && CW.ctx.tag;
+      pr.value = CW.firstPrompt != null ? CW.firstPrompt : ((tagCtx && TW.work && TW.work.draft && TW.work.draft.prompt) || '');
+      if (CW.firstPrompt == null && tagCtx && TW.work && TW.work.draft) CW.firstEx = TW.work.draft.example || '';
       pr.addEventListener('input', () => { CW.firstPrompt = pr.value; });
       lib.addEventListener('change', () => { const p = (CW.lib || []).find((x) => x.id === lib.value); if (p) { pr.value = p.prompt; CW.firstPrompt = p.prompt; CW.firstEx = p.example || ''; } lib.value = ''; });
       const rq = el('input', { type: 'text', placeholder: '(선택) 이번 추가 요청' });
@@ -4622,6 +4695,7 @@
         CW.mode === 'record' ? el('button', { type: 'button', class: 'small', text: t.locked ? '🔒' : '🔓', title: '잠그면 새 결과가 생겨도 지워지지 않습니다', onclick: async () => { if (await mutate('tag_cand_lock', t.id, !t.locked, CW.year)) { t.locked = !t.locked; cwRender(); } } })
           : el('button', { type: 'button', class: 'small', text: t.locked ? '🔒' : '🔓', onclick: () => { t.locked = !t.locked; cwRender(); } })]),
       el('div', { class: 'cw-cand-text', text: twShort(t.text, 160) }),
+      CW.ctx && CW.ctx.rec ? el('button', { type: 'button', class: 'small', text: '이 결과를 최종안으로', title: `${CW.ctx.rec.label}의 최종안에 이 결과 전체를 넣습니다`, onclick: () => putFinalText(CW.ctx.rec, t.text) }) : null,
       el('button', { type: 'button', class: 'small' + (cur && cur.id === t.id ? ' primary' : ''), text: cur && cur.id === t.id ? '지금 이어 가는 중' : '여기서 이어 가기', onclick: () => { CW.cur = t; cwRender(); } })])));
     box.append(
       el('div', { class: 'sheet-head' }, [el('h2', { text: '💬 프롬프트 마법사 · 대화' }), modeSel, el('span', { class: 'spacer' }),
@@ -4633,10 +4707,12 @@
   }
   async function cwClose() {
     closeSheet();
-    if (CW.ctx && TW.open) { await twLoad(); twRender(); }
+    if (CW.ctx && CW.ctx.tag && TW.open) { await twLoad(); twRender(); }
+    if (CW.ctx && CW.ctx.rec && R.sno) loadStudent(true);
   }
   async function cwSend(chain, parent, model, btn) {
     if (!(chain.steps[0].prompt || '').trim()) { toast('처음 지침(프롬프트)을 입력해 주세요.'); return; }
+    if (!(await aiAsk(parent ? '이어서 고치기' : '대화 시작', [['자료', CW.mode === 'record' ? `'${CW.tagName}' 태그 기록` : '붙여넣은 글'], ['모델', modelName(model)], ['AI 호출', '1번']], 'cw'))) return;
     if (CW.mode === 'record') {
       if (!CW.rid) { toast('기록을 고르세요.'); return; }
       const out = await busyRun(btn, `cw${CW.rid}`, () => aiRun({ title: parent ? '이어서 고치기' : '대화 시작', skipConfirm: true,
@@ -4674,10 +4750,11 @@
         after: (r) => twAfterConfirm(r, CW.tag) });
       return;
     }
+    if (!(await aiAsk('프롬프트 제작', [['재료', `대화 ${cur.chain.steps.length}단계`], ['모델', modelName(model)], ['AI 호출', '1번']]))) return;
     const out = await aiRun({ title: '프롬프트 제작', skipConfirm: true, jobs: [{ label: '대화 종합', run: () => api.prompt_compose(cur.chain, model.value) }] });
     if (!out || !out.done) return;
     await promptSaveSheet(out.results[0].text, cur.chain.steps[0].example || '', '대화', CW.mode === 'record' ? CW.tagName : '',
-      `${CW.tagName || '대화'} 프롬프트`, CW.ctx && TW.open);
+      `${CW.tagName || (CW.ctx && CW.ctx.rec ? CW.ctx.rec.label : '대화')} 프롬프트`, CW.ctx && CW.ctx.rec ? recUseFor(CW.ctx.rec) : (CW.ctx && TW.open));
   }
   // 마법사 결과 저장 창(대화·양식 공용): 내용 고치기, 이름, 쓴 태그 기록, 태그 화면이면 바로 쓰기
   function promptSaveSheet(text, example, made, tagName, defName, canUse, alt) {
@@ -4687,13 +4764,14 @@
       const ex = el('textarea', { rows: 3, placeholder: '(선택) 예시' }); ex.value = example || '';
       const nameIn = el('input', { type: 'text', maxlength: 60, value: defName || '' });
       const use = canUse ? el('input', { type: 'checkbox', checked: true }) : null;
+      const useLabel = canUse && canUse.label ? canUse.label : '이 태그 AI 변환 프롬프트로 바로 쓰기';
       const altBox = alt ? el('details', {}, [el('summary', { text: alt.label }), el('div', { class: 'cmp-text', style: 'max-height:30vh;overflow:auto', text: alt.text }),
         el('button', { type: 'button', class: 'small', text: '이 글로 바꾸기', onclick: () => { ta.value = alt.text; } })]) : null;
       box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `🧩 완성된 프롬프트 (${made})` }), el('span', { class: 'muted', text: '저장 전에 고칠 수 있습니다.' })]),
         el('div', { class: 'sheet-body' }, [ta, altBox, el('div', { class: 'col-label', text: '예시 (선택)' }), ex,
           tagName ? el('p', { class: 'hint', text: `저장하면 '${tagName}' 태그에서 쓴 프롬프트로 표시됩니다.` }) : null]),
         el('div', { class: 'sheet-foot' }, [el('label', { class: 'inline', style: 'margin:0' }, ['이름', nameIn]),
-          use ? el('label', { class: 'inline', style: 'margin:0' }, [use, '이 태그 AI 변환 프롬프트로 바로 쓰기']) : null,
+          use ? el('label', { class: 'inline', style: 'margin:0' }, [use, useLabel]) : null,
           el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: () => { closeSheet(); resolve(null); } }),
           el('button', { type: 'button', class: 'primary', text: '프롬프트 목록에 저장', onclick: async () => {
             const name = nameIn.value.trim();
@@ -4703,14 +4781,15 @@
             if (!r) return;
             closeSheet();
             TW.lib = null; P.id = r.id;
-            if (use && use.checked && TW.work) {
+            if (use && use.checked && canUse.apply) await canUse.apply(r.id, name);
+            else if (use && use.checked && TW.work) {
               TW.work.draft = { prompt: ta.value, example: ex.value, lib_id: r.id, lib_name: name };
               twDraftChanged(); await twFlush();
               const l = await rawCall('prompt_list'); TW.lib = l && l.ok ? l.prompts : null;
               TW.step = 'trial'; await twLoad(); twRender();
             }
             if ($('prList') && document.querySelector('[data-panel-content=prompts]:not([hidden])')) renderPrompts();
-            toast(`'${name}' 프롬프트를 저장했습니다.${use && use.checked ? ' 이 태그 AI 변환의 시작 프롬프트로 넣었습니다.' : ''}`, 5000);
+            toast(`'${name}' 프롬프트를 저장했습니다.${use && use.checked ? (canUse.apply ? ` ${canUse.done || '바로 쓰도록 골라 두었습니다.'}` : ' 이 태그 AI 변환의 시작 프롬프트로 넣었습니다.') : ''}`, 5000);
             resolve(r.id);
           } })]));
       setTimeout(() => nameIn.select(), 50);
@@ -4781,11 +4860,12 @@
           el('button', { type: 'button', class: 'primary ai-btn', text: '✨ AI로 정교하게 만들기', onclick: async () => {
             const name = nameIn.value.trim() || `${ctx && ctx.tagName ? ctx.tagName : spec.subject || '양식'} 프롬프트`;
             const ex = exIn.value;
+            if (!(await aiAsk('프롬프트 만들기(양식)', [['재료', '양식 칸 내용'], ['모델', modelName(wizModel)], ['AI 호출', '1번']]))) return;
             const out = await aiRun({ title: '프롬프트 만들기(양식)', skipConfirm: true, jobs: [{ label: '양식 → 프롬프트', run: () => api.prompt_form_ai(spec, wizModel.value) }] });
             if (!out || !out.done) return;
             const res = out.results[0];
             closeSheet();
-            const id = await promptSaveSheet(res.text, ex, '양식', ctx ? ctx.tagName : '', name, !!(ctx && TW.open), { label: '칸만 이어 붙인 글 보기(AI 다듬기 전)', text: res.assembled });
+            const id = await promptSaveSheet(res.text, ex, '양식', ctx && ctx.tag ? ctx.tagName : '', name, ctx && ctx.rec ? recUseFor(ctx.rec) : !!(ctx && ctx.tag && TW.open), { label: '칸만 이어 붙인 글 보기(AI 다듬기 전)', text: res.assembled });
             if (id && !ctx) { P.id = id; await renderPrompts(); }
           } })]));
       refresh();
@@ -6492,6 +6572,7 @@
       const want = e.target.value;
       if (!(await leaveOk())) { e.target.value = R.slot ? slotKey(R.slot) : ''; return; }
       R.slot = R.slots.find((s) => slotKey(s) === want); R.sno = null; R.selected.clear(); R.filter = ''; loadSlotStudents();
+      if (R.slot) localStorage.setItem(recSlotKey(), slotKey(R.slot));
     });
     $('recPrev').addEventListener('click', () => moveStudent(-1));
     $('recListToggle').addEventListener('click', () => { $('recBody').classList.toggle('list-hidden'); });

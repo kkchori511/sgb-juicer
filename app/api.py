@@ -876,6 +876,23 @@ class Api:
         return {"confirmed": conf}
 
     @safe
+    def tag_examples(self, wid, year=None):
+        return {"examples": self._tw(year).examples(wid)}
+
+    @safe
+    def prompt_pick_set(self, kind, pid):
+        """이 작업 종류(정제·다듬기·종합)의 기본 프롬프트로 고른다(AI 실행 확인 창의 기본값)."""
+        if kind not in prompts.KINDS:
+            raise db.DbError("알 수 없는 작업 종류입니다.")
+        lib, cfg = self._library()
+        if not any(x["id"] == str(pid) for x in lib):
+            raise db.DbError("프롬프트를 찾지 못했습니다.")
+        picks = dict(cfg.get("prompt_pick") or {})
+        picks[kind] = str(pid)
+        config.save({"prompt_pick": picks})
+        return {}
+
+    @safe
     def tag_plan(self, wid, flt=None, year=None):
         tw = self._tw(year)
         return tw.plan(wid, tw.d.role(), flt or {})
