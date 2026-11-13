@@ -1025,3 +1025,13 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 .sk-foot input[type=text] { width: 180px; }
 .sk-ctrl { padding: 0 20px 4px; gap: 10px; }
 .sk-ctrl label.inline { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+/* 인박스: 한 문서 → 여러 학생 */
+.sh-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, 1fr); gap: 14px; align-items: start; margin-top: 8px; }
+.sh-doc, .sh-pick { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.sh-text { width: 100%; min-height: 300px; }
+.sh-list { max-height: 420px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px; }
+.sh-row { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 8px; align-items: center; padding: 3px 6px; border-radius: 6px; }
+.sh-row.on { background: #eef6ff; }
+.sh-row label { gap: 6px; white-space: nowrap; }
+.sh-role { width: 100%; }
+@media (max-width: 1100px) { .sh-grid { grid-template-columns: minmax(0, 1fr); } }

@@ -4834,6 +4834,7 @@
     const r = await call('inbox_view', bid);
     if (!r || req !== batchReq || bid !== IB.bid) return;
     IB.view = r;
+    { const t = await rawCall('tags'); IB.tags = t && t.ok ? t.tags : IB.tags || []; }
     refreshInboxBadge().then(renderInboxList);
     const b = r.batch;
     if (b.meta && b.meta.raw && !IB.raw) { IB.raw = b.meta.raw; IB.opts = Object.assign({ structure: b.structure }, b.meta.opts || {}); }
@@ -4879,6 +4880,9 @@
   function renderImport(body) {
     const b = IB.view.batch;
     if (b.source === 'scan' && b.meta.scan) { renderScan(body); return; }
+    if (IB.shared && IB.shared.bid !== b.id) IB.shared = null;
+    if (!IB.shared && b.structure === 'shared' && b.meta.shared && !IB.raw && IB.sharedOff !== b.id) IB.shared = sharedState(b, b.meta.shared);
+    if (IB.shared) { renderShared(body); return; }
     if (!IB.raw) {
       const ta = el('textarea', { rows: 8, placeholder: '또는 여기를 누르고 Ctrl+V로 붙여넣은 뒤 [읽기]' });
       body.append(
@@ -4892,6 +4896,7 @@
             return sh ? call('inbox_source_xlsx', b.id, r.token, sh[0]) : null;
           }) }),
           el('button', { type: 'button', text: '🖨 스캔 PDF (CLOVA OCR)', onclick: () => startScanPick(b) }),
+          el('button', { type: 'button', title: '학번 없는 모둠·개인 보고서처럼 한 문서를 고른 학생 모두에게 같은 원문으로 넣습니다', text: '📄 한 문서 → 여러 학생', onclick: () => { IB.shared = sharedState(b, b.meta.shared); renderBatch(); } }),
         ]),
         ta,
         el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '읽기', onclick: () => loadSource(() => call('inbox_source_text', b.id, ta.value)) })]),
@@ -5005,6 +5010,99 @@
     if (sample) box.appendChild(el('div', { class: 'muted small-note', text: `읽은 예: ${sample.ext_cls}${sample.ext_name ? ' ' + sample.ext_name : ''}` }));
     if (!Object.values(roles).some((r) => IB_ID_ROLES.includes(r) && r !== 'change')) box.appendChild(el('div', { class: 'warn', text: '학생을 찾을 열(학번·이름 또는 학년·반·번호)을 골라 주세요. 한 학생의 자료라면 [한 학생에게 여러 건]을 고르세요.' }));
     else if (!has('content')) box.appendChild(el('div', { class: 'warn', text: '내용 열을 하나 이상 골라 주세요.' }));
+  }
+  // ① 가져오기: 한 문서 → 여러 학생(학번 없는 모둠·개인 보고서). 같은 원문을 고른 학생마다 한 건씩, 학생별 역할 메모는 원문 아래 한 줄로.
+  function sharedState(b, saved) {
+    const s = saved || {};
+    return { bid: b.id, text: s.text || '', label: s.label || '', date: s.date || '', roles: new Map((s.picks || []).map((p) => [p.student_no, p.role || ''])), q: '', cls: '', tag: '', newTag: '' };
+  }
+  function renderShared(body) {
+    const b = IB.view.batch, st = IB.shared;
+    const members = IB.view.members.filter((m) => m.active);
+    const ta = el('textarea', { rows: 10, class: 'sh-text', placeholder: '보고서 내용을 붙여넣거나 아래 버튼으로 파일에서 읽어 오세요(학번·이름이 없어도 됩니다).', 'aria-label': '문서 내용' });
+    ta.value = st.text;
+    const count = el('span', { class: 'muted' });
+    const showCount = () => { count.textContent = `${ta.value.trim().length}자`; };
+    ta.addEventListener('input', () => { st.text = ta.value; showCount(); });
+    showCount();
+    const put = (t) => { if (!t) return; st.text = t.trim(); ta.value = st.text; showCount(); };
+    const label = el('input', { type: 'text', maxlength: 80, value: st.label, placeholder: '예: 기후 위기 모둠 보고서', oninput: (e) => { st.label = e.target.value; } });
+    const date = el('input', { type: 'date', value: st.date, onchange: (e) => { st.date = e.target.value; } });
+    // 태그: 고르거나 새로 만들기(보낼 때 붙고, 보낸 뒤 [🤖 태그로 AI 변환]으로 이어짐)
+    const tagSel = el('select', { 'aria-label': '태그', onchange: (e) => { st.tag = e.target.value; newTag.hidden = st.tag !== 'new'; } },
+      [el('option', { value: '', text: '태그 없음' }), ...(IB.tags || []).map((t) => el('option', { value: t.id, text: t.name, selected: String(t.id) === String(st.tag) })), el('option', { value: 'new', text: '+ 새 태그', selected: st.tag === 'new' })]);
+    const newTag = el('input', { type: 'text', maxlength: 30, placeholder: '새 태그 이름', value: st.newTag, oninput: (e) => { st.newTag = e.target.value; } });
+    newTag.hidden = st.tag !== 'new';
+    // 학생 고르기
+    const classes = [...new Set(members.map((m) => `${m.grade}-${m.class_no}`))];
+    const clsSel = classes.length > 1 ? el('select', { 'aria-label': '반', onchange: (e) => { st.cls = e.target.value; drawList(); } },
+      [el('option', { value: '', text: '모든 반' }), ...classes.map((c) => el('option', { value: c, selected: st.cls === c, text: `${c.replace('-', '학년 ')}반` }))]) : null;
+    const q = el('input', { type: 'text', placeholder: '이름·학번 찾기', value: st.q, oninput: (e) => { st.q = e.target.value; drawList(); } });
+    const list = el('div', { class: 'sh-list' });
+    const picked = el('b', {});
+    const visible = () => members.filter((m) => (!st.cls || `${m.grade}-${m.class_no}` === st.cls) && (!st.q.trim() || `${m.student_no} ${m.name}`.includes(st.q.trim())));
+    const drawPicked = () => { picked.textContent = `고른 학생 ${st.roles.size}명`; go.disabled = !st.roles.size; };
+    const drawList = () => {
+      list.innerHTML = '';
+      const vs = visible();
+      if (!vs.length) list.appendChild(el('p', { class: 'muted', text: '맞는 학생이 없습니다.' }));
+      vs.forEach((m) => {
+        const on = st.roles.has(m.student_no);
+        const role = el('input', { type: 'text', class: 'sh-role', maxlength: 200, disabled: !on, value: st.roles.get(m.student_no) || '', placeholder: on ? '역할·기여 메모(선택): 예) 자료 조사·발표' : '',
+          'aria-label': `${m.name} 역할 메모`, oninput: (e) => { st.roles.set(m.student_no, e.target.value); } });
+        const cb = el('input', { type: 'checkbox', checked: on, 'aria-label': `${m.name} 고르기`, onchange: (e) => {
+          if (e.target.checked) st.roles.set(m.student_no, st.roles.get(m.student_no) || ''); else st.roles.delete(m.student_no);
+          role.disabled = !e.target.checked; role.placeholder = e.target.checked ? '역할·기여 메모(선택): 예) 자료 조사·발표' : '';
+          row.classList.toggle('on', e.target.checked); drawPicked();
+          if (e.target.checked) role.focus();
+        } });
+        const row = el('div', { class: 'sh-row' + (on ? ' on' : '') }, [el('label', { class: 'inline', style: 'margin:0' }, [cb, el('span', { class: 'muted', text: m.student_no }), el('b', { text: m.name })]), role]);
+        list.appendChild(row);
+      });
+    };
+    const go = el('button', { type: 'button', class: 'primary', text: '확정하고 매칭으로' });
+    go.addEventListener('click', async () => {
+      if (!st.text.trim()) { toast('문서 내용을 넣어 주세요.'); ta.focus(); return; }
+      if (!st.roles.size) { toast('넣을 학생을 골라 주세요.'); return; }
+      let tagId = st.tag && st.tag !== 'new' ? +st.tag : null;
+      if (st.tag === 'new') {
+        const nm = st.newTag.trim();
+        if (!nm) { toast('새 태그 이름을 적어 주세요.'); newTag.focus(); return; }
+        const ex = (IB.tags || []).find((t) => t.name === nm);
+        if (ex) tagId = ex.id; else { const t = await mutate('add_tag', nm); if (!t) return; tagId = t.id; IB.tags = t.tags; }
+      }
+      const order = members.map((m) => m.student_no).filter((n) => st.roles.has(n));
+      const r = await mutate('inbox_shared', b.id, { text: st.text, label: st.label, date: st.date, picks: order.map((n) => ({ student_no: n, role: st.roles.get(n) || '' })) });
+      if (!r) return;
+      if (tagId && !(await mutate('inbox_update', b.id, { tag_ids: [tagId] }))) return;
+      IB.shared = null;
+      toast(`${r.count}명에게 같은 문서를 넣을 준비를 했습니다. 확인한 뒤 보내세요.`);
+      await refreshInboxBadge();
+      renderInboxList();
+      loadBatch();
+    });
+    body.append(
+      el('div', { class: 'tw-row' }, [el('b', { text: '📄 한 문서 → 여러 학생' }), el('span', { class: 'muted', text: '같은 문서를 고른 학생마다 학생관찰기록 한 건씩 넣습니다. 넣은 뒤에는 학생마다 따로 고칠 수 있습니다.' }), el('span', { class: 'spacer' }),
+        el('button', { type: 'button', class: 'link', text: '← 다른 방식으로 가져오기', onclick: () => { IB.shared = null; IB.sharedOff = b.id; renderBatch(); } })]),
+      el('div', { class: 'sh-grid' }, [
+        el('div', { class: 'sh-doc' }, [
+          el('div', { class: 'tw-row' }, [el('div', { class: 'col-label', text: '문서 내용' }), count, el('span', { class: 'spacer' }),
+            el('button', { type: 'button', class: 'small', text: '📋 붙여넣기', onclick: async () => { const c = await api.read_clipboard(); put(c && c.ok ? c.text : ''); } }),
+            el('button', { type: 'button', class: 'small', text: '📄 PDF', title: '글자가 있는 PDF', onclick: async () => { const r2 = await call('standards_read_file', 'pdf'); if (r2) put(r2.text); } }),
+            el('button', { type: 'button', class: 'small', text: '📝 한글(hwpx)', onclick: async () => { const r2 = await call('standards_read_file', 'hwpx'); if (r2) put(r2.text); } })]),
+          ta,
+          el('div', { class: 'tw-row' }, [el('label', { class: 'inline', style: 'margin:0' }, ['활동명', label]), el('label', { class: 'inline', style: 'margin:0' }, ['날짜', date])]),
+          el('div', { class: 'tw-row' }, [el('label', { class: 'inline', style: 'margin:0' }, ['태그', tagSel]), newTag,
+            el('span', { class: 'muted small-note', text: '보낸 뒤 [🤖 태그로 AI 변환]으로 학생마다 다르게 고칩니다.' })])]),
+        el('div', { class: 'sh-pick' }, [
+          el('div', { class: 'tw-row' }, [picked, el('span', { class: 'spacer' }), clsSel, q]),
+          el('div', { class: 'tw-row' }, [
+            el('button', { type: 'button', class: 'small', text: '보이는 학생 모두 고르기', onclick: () => { visible().forEach((m) => { if (!st.roles.has(m.student_no)) st.roles.set(m.student_no, ''); }); drawList(); drawPicked(); } }),
+            el('button', { type: 'button', class: 'small', text: '모두 풀기', onclick: () => { st.roles.clear(); drawList(); drawPicked(); } })]),
+          list,
+          el('p', { class: 'hint', text: '역할 메모는 원문 아래 "[이 학생의 역할] …" 한 줄로 따로 붙어, AI 변환 때 학생마다 다르게 쓰는 근거가 됩니다.' })])]),
+      el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), go]));
+    drawList(); drawPicked();
   }
   async function loadSource(fn) {
     const r = await fn();

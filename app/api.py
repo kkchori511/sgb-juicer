@@ -91,6 +91,8 @@ def _copied(prompt, texts, n=20):
     return False
 
 
+SHARED_RULE = ("\n\n[같은 자료를 쓴 다른 학생과 겹치지 않기]\n- 이 원문은 여러 학생이 함께 낸 같은 자료다. [이 학생의 역할]이 있으면 그 역할과 기여를 중심으로 쓴다.\n"
+               "- 같은 자료를 쓴 다른 학생과 표현·문장 구성이 50% 이상 다르게 작성한다. 없는 사실을 지어내지 않는다.")
 TAG_TEMP = 0.3  # 태그 AI 변환(시험·나머지 변환·스킬화 검증): 같은 프롬프트면 결과가 고르게 나오도록 무작위성을 낮춘다
 
 
@@ -893,8 +895,10 @@ class Api:
             gen = openrouter.generation()
             done_before = len(outs)
             try:
+                shared = tw.shares_source(run, r["id"], first)
                 for i in range(len(outs), len(chain["steps"])):
-                    text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, i), step_input(chain, i, text, first),
+                    text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, i) + (SHARED_RULE if shared and i == 0 else ""),
+                                               step_input(chain, i, text, first),
                                                cfg["privacy_block"], extra=False, temperature=TAG_TEMP)
                     total += cost
                     outs.append(text)
@@ -2074,6 +2078,12 @@ class Api:
     def inbox_import(self, bid, opts):
         self._editable()
         return {"count": self._ib().confirm_import(bid, opts or {})}
+
+    @safe
+    def inbox_shared(self, bid, data):
+        """한 문서 → 여러 학생: 같은 문서를 고른 학생마다 한 건씩(역할 메모 선택)."""
+        self._editable()
+        return {"count": self._ib().shared_import(bid, data or {})}
 
     @safe
     def inbox_view(self, bid):

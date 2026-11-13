@@ -352,6 +352,11 @@ class Inbox:
             self.rec.slot(gid, item)
             regroup = gid != b["group_id"]
             fields.update(group_id=gid, item=item)
+        if regroup and b["structure"] == "shared":  # 한 문서 → 여러 학생: 새 명렬에서 학생을 다시 고르게 ①로
+            with self.d.tx() as c:
+                c.execute("DELETE FROM inbox_rows WHERE batch_id=?", (int(bid),))
+                self._touch(c, bid, stage="import", **fields)
+            return
         with self.d.tx() as c:
             self._touch(c, bid, **fields)
         if regroup and self._rows(bid):
@@ -420,6 +425,52 @@ class Inbox:
                 )
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False), structure=structure, stage="match")
         return len(recs)
+
+    # ---------- ① 가져오기: 한 문서 → 여러 학생(학번 없는 모둠·개인 보고서) ----------
+    ROLE_HEAD = "[이 학생의 역할]"
+
+    def shared_import(self, bid, data):
+        """같은 문서를 고른 학생마다 한 건씩(학생별 역할 메모는 원문 아래 한 줄로 따로). 학생은 고른 그대로 확정."""
+        b = self.batch(bid)
+        if b["stage"] == "sent":
+            raise DbError("이미 보낸 묶음입니다.")
+        text = str((data or {}).get("text") or "").strip()
+        if not text:
+            raise DbError("넣을 문서 내용을 붙여넣어 주세요.")
+        label = str(data.get("label") or "").strip()[:80]
+        date = str(data.get("date") or "").strip()
+        if date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+            raise DbError("날짜는 YYYY-MM-DD 형식이어야 합니다.")
+        members = {m["student_no"]: m for m in self.d.members(b["group_id"])}
+        picks, seen = [], set()
+        for p in data.get("picks") or []:
+            sno = str((p or {}).get("student_no") or "")
+            if not sno or sno in seen:
+                continue
+            m = members.get(sno)
+            if not m or not m["active"]:
+                raise DbError(f"{sno} 학생이 이 명렬에 없거나 비활성입니다.")
+            seen.add(sno)
+            picks.append({"student_no": sno, "role": str(p.get("role") or "").strip()[:200]})
+        if not picks:
+            raise DbError("이 문서를 넣을 학생을 골라 주세요.")
+        meta = b["meta"]
+        meta["shared"] = {"text": text, "label": label, "date": date, "picks": picks}
+        with self.d.tx() as c:
+            c.execute("DELETE FROM inbox_rows WHERE batch_id=?", (int(bid),))
+            for k, p in enumerate(picks):
+                content = text + (f"\n\n{self.ROLE_HEAD} {p['role']}" if p["role"] else "")
+                c.execute(
+                    """INSERT INTO inbox_rows(batch_id, ord, source_ref, student_no, state, note, line, label, date, content)
+                       VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    (int(bid), k, "공동 문서", p["student_no"], "confirmed", "고른 학생(공동 문서)", k, label, date, content))
+            fields = {"meta": json.dumps(meta, ensure_ascii=False), "structure": "shared", "source": "shared", "stage": "match"}
+            if label:
+                fields["title"] = label
+            if date:
+                fields["date"] = date
+            self._touch(c, bid, **fields)
+        return len(picks)
 
     # ---------- ① 가져오기: 스캔 PDF ----------
     def scan_set(self, bid, src_path, filename):
@@ -602,7 +653,7 @@ class Inbox:
 
     def rematch(self, bid, keep_manual=True):
         b = self._editable_batch(bid)
-        if b["structure"] == "single":
+        if b["structure"] in ("single", "shared"):  # 학생을 직접 고른 묶음은 다시 맞추지 않는다
             return
         members = self.d.members(b["group_id"])
         with self.d.tx() as c:

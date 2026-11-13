@@ -117,6 +117,11 @@ def seed():
     src = ok(api.inbox_source_text(bid, "학번\t이름\t내용\n20301\t김철수\t과학의 날 포스터 제작에 참여함.\n20306\t한별\t과학 퀴즈 진행을 도움."), "인박스")
     ok(api.inbox_import(bid, {"structure": "multi", **src["opts"]}), "인박스")
     ok(api.inbox_create("공통수학1 세특(나이스 파일)", math, "subject"), "인박스")
+    # 한 문서 → 여러 학생: 학번 없는 모둠 보고서를 3명에게(역할 메모), ② 매칭 단계에서 보임
+    sb = ok(api.inbox_create("", hr, "autonomy"), "인박스")["id"]
+    ok(api.inbox_shared(sb, {"text": "기후 위기 대응 방안을 조사한 모둠 보고서. 우리 지역의 탄소 배출 통계를 분석하고 학교에서 실천할 수 있는 방안 세 가지를 제안하였다.",
+                             "label": "기후 위기 모둠 보고서", "date": f"{year}-05-10",
+                             "picks": [{"student_no": "20301", "role": "자료 조사"}, {"student_no": "20302", "role": "통계 분석"}, {"student_no": "20303", "role": "발표"}]}), "공동 문서")
     _demo_xlsx(year, names)
     return year
 

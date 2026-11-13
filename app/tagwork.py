@@ -18,6 +18,7 @@ from .db import DbError
 from .records import Records
 
 TRIAL_MAX = 3
+_CORE_CACHE = {}  # (학년도, 실행 번호) → {기록 id: 공동 문서 본문}
 
 CONTINUE_RULE = ("\n\n[이어서 고치기]\n- 주어진 글은 앞 단계에서 만든 결과다. 아래 요청대로만 고치고, 위 지침(문체·쓰지 않는 것·출력 형식)은 그대로 지킨다.\n"
                  "- 요청과 관계없는 문장은 되도록 그대로 둔다. 글에 없는 사실을 지어내지 않는다.\n<요청>\n{req}\n</요청>")
@@ -328,6 +329,31 @@ class TagWork:
             rid = c.execute("INSERT INTO tag_runs(work_id, steps, filter, targets) VALUES(?,?,?,?)",
                             (int(wid), signature(replay_chain(w["confirmed"]["chain"])), json.dumps(flt or {}, ensure_ascii=False), json.dumps(ids))).lastrowid
         return self.run(rid)
+
+    @staticmethod
+    def _core(text):
+        """역할 메모 줄을 뺀 공동 문서 본문."""
+        return str(text or "").split("\n\n[이 학생의 역할]")[0].strip()
+
+    def shares_source(self, run, rid, text):
+        """이번 변환 대상 중 같은 원문(공동 문서)을 쓰는 다른 기록이 있는지."""
+        core = self._core(text)
+        if len(core) < 20:
+            return False
+        key = (self.d.year, int(run["id"]))
+        cores = _CORE_CACHE.get(key)
+        if cores is None:  # 실행마다 한 번만 센다(대상이 많아도 학생마다 전체를 다시 읽지 않게)
+            src = run["chain"].get("src", "original")
+            cores = {}
+            for x in run["targets"]:
+                try:
+                    cores[int(x)] = self._core(self.source_text(self.record_info(x), src))
+                except DbError:
+                    continue
+            if len(_CORE_CACHE) > 20:
+                _CORE_CACHE.clear()
+            _CORE_CACHE[key] = cores
+        return any(c == core for x, c in cores.items() if x != int(rid))
 
     def run(self, run_id):
         rows = self.d.q("SELECT * FROM tag_runs WHERE id=?", (int(run_id),))

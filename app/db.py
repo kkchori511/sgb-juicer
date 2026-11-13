@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS inbox_batches (
     group_id INTEGER,                -- 대상 명렬(담당)
     item TEXT,                       -- 보낼 항목
     source TEXT DEFAULT 'paste',     -- paste / xlsx / scan
-    structure TEXT DEFAULT 'multi',  -- multi(여러 학생) / single(한 학생 여러 회차)
+    structure TEXT DEFAULT 'multi',  -- multi(여러 학생) / single(한 학생 여러 회차) / shared(한 문서 → 여러 학생)
     stage TEXT NOT NULL DEFAULT 'import', -- import / match / refine / review / sent
     meta TEXT DEFAULT '{}',          -- 원본 표, 해석 설정
     date TEXT DEFAULT '',
