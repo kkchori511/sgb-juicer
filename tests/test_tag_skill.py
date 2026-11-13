@@ -85,6 +85,18 @@ def test_skill():
     n = len(CALLS)
     ok(api.tag_run_item(run["id"], rids[1]))
     assert len(CALLS) == n + 1 and CALLS[-1][1] == "원문2 책을 읽고 토론함" and "종합 프롬프트" in CALLS[-1][0]
+    # ② 확정 설정 [✏️ 수정]: 고친 단계로 바로 적용(스킬 점수는 지움), 목록 프롬프트로 바꾸기(쓴 태그 기록)
+    c = ok(api.tag_confirm_set(w["id"], {"src": "original", "steps": [{"prompt": "고친 지침", "example": ""}, {"request": "더 짧게"}]}))["confirmed"]
+    assert c["chain"]["steps"][0]["prompt"] == "고친 지침" and len(c["chain"]["steps"]) == 2 and c["edit"]["by"] == "수정" and "skill" not in c
+    assert c["cand_id"] == c3
+    assert not api.tag_confirm_set(w["id"], {"src": "original", "steps": [{"prompt": " "}]})["ok"]
+    pid = ok(api.prompt_save({"name": "다른 프롬프트", "prompt": "목록 지침", "example": "목록 예시"}))["id"]
+    c = ok(api.tag_confirm_set(w["id"], None, pid))["confirmed"]
+    assert c["chain"] == {"src": "original", "steps": [{"prompt": "목록 지침", "example": "목록 예시", "request": ""}]} and c["edit"]["lib_name"] == "다른 프롬프트"
+    assert [x for x in ok(api.prompt_list())["prompts"] if x["id"] == pid][0]["tags"] == ["독서"]
+    run = ok(api.tag_run_create(w["id"], rids[1:]))["run"]
+    assert run["chain"]["steps"][0]["prompt"] == "목록 지침"
+    assert not api.tag_confirm_set(w["id"], None, "없는id")["ok"]
     # 시험 후보가 아니면 스킬화 불가
     assert not api.tag_skill_compose(999999)["ok"]
 

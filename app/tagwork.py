@@ -269,6 +269,18 @@ class TagWork:
                       (json.dumps({**conf, "at": self.d.q("SELECT datetime('now','localtime') t")[0]["t"]}, ensure_ascii=False), x["work_id"]))
         return out
 
+    def set_confirmed(self, wid, chain, info):
+        """② 나머지 변환에서 확정 설정을 고치거나 목록 프롬프트로 바꾼다(시험 없이 바로 적용). 확정한 후보·반영 기록은 그대로."""
+        w = self.work(wid)
+        if not w["confirmed"]:
+            raise DbError("먼저 ① 프롬프트 적용 시험에서 후보 하나를 [확정]해 주세요.")
+        conf = {k: v for k, v in w["confirmed"].items() if k not in ("skill", "edit")}
+        conf.update(chain=norm_chain(chain), ver_no=None, edit={**(info or {}), "at": self.d.q("SELECT datetime('now','localtime') t")[0]["t"]})
+        with self.d.tx() as c:
+            c.execute("UPDATE tag_works SET confirmed=?, updated_at=datetime('now','localtime') WHERE id=?",
+                      (json.dumps(conf, ensure_ascii=False), int(wid)))
+        return conf
+
     # ---------- 나머지 변환 ----------
     def plan(self, wid, role, flt):
         """지금 화면 조건의 대상 목록. 체크 기본값: 학생관찰기록이고 이 작업에서 반영한 적 없으면 체크."""

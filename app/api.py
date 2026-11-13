@@ -856,6 +856,26 @@ class Api:
         return out
 
     @safe
+    def tag_confirm_set(self, wid, chain, lib_id=None, year=None):
+        """② 확정 설정 [✏️ 수정] 또는 목록 프롬프트로 바꾸기. lib_id면 그 프롬프트(1단계)로, 아니면 고친 단계 그대로."""
+        self._editable(year)
+        tw = self._tw(year)
+        w = tw.work(wid)
+        info = {"by": "수정"}
+        if lib_id:
+            lib, _ = self._library()
+            p = next((x for x in lib if x["id"] == str(lib_id)), None)
+            if not p:
+                raise db.DbError("프롬프트를 찾지 못했습니다.")
+            src = ((w["confirmed"] or {}).get("chain") or {}).get("src", "original")
+            chain = {"src": src, "steps": [{"prompt": p["prompt"], "example": p["example"]}]}
+            info = {"by": "목록", "lib_id": p["id"], "lib_name": p["name"]}
+        conf = tw.set_confirmed(wid, chain, info)
+        if lib_id:
+            self._mark_prompt_tag(info["lib_id"], w["tag_name"])
+        return {"confirmed": conf}
+
+    @safe
     def tag_plan(self, wid, flt=None, year=None):
         tw = self._tw(year)
         return tw.plan(wid, tw.d.role(), flt or {})

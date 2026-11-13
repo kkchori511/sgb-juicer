@@ -1035,3 +1035,7 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 .sh-row label { gap: 6px; white-space: nowrap; }
 .sh-role { width: 100%; }
 @media (max-width: 1100px) { .sh-grid { grid-template-columns: minmax(0, 1fr); } }
+/* 프롬프트 고르는 칸: 기본 프롬프트는 맨 아래 옅은 색 */
+option.opt-builtin, optgroup.opt-builtin { color: #6b7280; background: #f3f4f6; }
+optgroup.opt-builtin option { color: #6b7280; background: #f3f4f6; }
+.tw-swap { max-width: 320px; margin-left: 6px; }

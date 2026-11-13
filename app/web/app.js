@@ -1682,6 +1682,15 @@
   function modelName(sel) { const o = sel && sel.selectedOptions && sel.selectedOptions[0]; return o ? o.textContent : '-'; }
   // kind: 프롬프트를 고르는 작업이면 'synth'(종합·생성) / 'refine'(기록 정제) / 'polish'(다듬기). 없으면 고정 프롬프트 작업.
   // prefer: 이 실행의 처음 고르기 값(예: 스캔 묶음은 '스캔 내용 정리'). 목록에 없으면 작업별 기억값.
+  // 프롬프트 고르는 칸: 직접 만든 것(이 태그에서 쓴 것 먼저)을 위에, 기본 프롬프트는 맨 아래 묶음(옅은 색)으로
+  function promptOpts(list, { tagName, label, selected } = {}) {
+    const lab = label || ((p) => p.name);
+    const used = (p) => (tagName && (p.tags || []).includes(tagName) ? 1 : 0);
+    const mine = (list || []).filter((p) => !p.builtin).map((p, i) => [p, i]).sort((a, b) => used(b[0]) - used(a[0]) || a[1] - b[1]).map((x) => x[0]);
+    const base = (list || []).filter((p) => p.builtin);
+    const opt = (p) => el('option', { value: p.id, class: p.builtin ? 'opt-builtin' : '', text: lab(p), selected: selected === p.id });
+    return [...mine.map(opt), base.length ? el('optgroup', { label: '📦 기본 프롬프트', class: 'opt-builtin' }, base.map(opt)) : null].filter(Boolean);
+  }
   async function aiConfirm(title, rows, warn, kind, prefer) {
     let pick = '';
     let opts = '';
@@ -1689,7 +1698,9 @@
       const r = await loadPromptList();
       if (r) {
         pick = prefer && r.prompts.some((x) => x.id === prefer) ? prefer : r.picks[kind] || '';
-        opts = r.prompts.map((x) => `<option value="${escHtml(x.id)}"${x.id === pick ? ' selected' : ''}>${escHtml(x.name)}</option>`).join('');
+        const o1 = (x) => `<option value="${escHtml(x.id)}"${x.builtin ? ' class="opt-builtin"' : ''}${x.id === pick ? ' selected' : ''}>${escHtml(x.name)}</option>`;
+        const base = r.prompts.filter((x) => x.builtin);
+        opts = r.prompts.filter((x) => !x.builtin).map(o1).join('') + (base.length ? `<optgroup label="📦 기본 프롬프트" class="opt-builtin">${base.map(o1).join('')}</optgroup>` : '');
       }
     }
     const html = `<div class="ai-conf"><b>${escHtml(title)}</b> — AI로 실행할까요?<table>${rows.filter(Boolean).map(([k, v]) => `<tr><th>${escHtml(k)}</th><td>${escHtml(v)}</td></tr>`).join('')}`
@@ -3631,7 +3642,7 @@
   }
 
   // ---------- 태그 AI 변환(태그별 기록 › [이 태그 AI 변환]) — docs/plan/tag-flow.md ----------
-  // ① 시험: 기록 한 건으로 프롬프트를 바꿔 가며 후보 3칸 → ✔ 확정(그 기록에 반영 + 단계가 태그 설정)
+  // ① 프롬프트 적용 시험: 기록 한 건으로 프롬프트를 바꿔 가며 후보 3칸 → ✔ 확정(그 기록에 반영 + 단계가 태그 설정)
   // ② 나머지 변환: 확정 단계를 대상마다 그대로 재현(결과는 후보, 기록은 아직 안 바뀜)
   // ③ 검토·반영: 체크한 것만 기록에 반영, 반영 묶음 되돌리기
   const TW = { open: false, tag: null, year: null, seq: 0, step: 'trial', work: null, trials: [], batches: [], runs: [], rid: null, src: 'original', req: '',
@@ -3646,7 +3657,7 @@
     TW.edits.clear(); TW.editTimers.clear(); TW.editChain.clear(); TW.pick.clear(); TW.seq += 1;
   }
   const twDirty = () => TW.draftDirty || TW.edits.size > 0;
-  const TW_STEPS = [['trial', '① 시험'], ['bulk', '② 나머지 변환'], ['review', '③ 검토·반영']];
+  const TW_STEPS = [['trial', '① 프롬프트 적용 시험'], ['bulk', '② 나머지 변환'], ['review', '③ 검토·반영']];
   function twTrack(p) { TW.saving.add(p); p.finally(() => TW.saving.delete(p)); return p; }
   // 프롬프트 초안·고친 결과를 저장한다. 하나라도 저장하지 못했으면 false(이동·반영·종료를 막음, 글은 화면에 남김)
   async function twFlush() {
@@ -3804,7 +3815,7 @@
     else twReview(body);
   }
 
-  // ① 시험
+  // ① 프롬프트 적용 시험
   function twTrial(body) {
     const recs = TV.data.records;
     const w = TW.work;
@@ -3838,7 +3849,7 @@
       libSel.innerHTML = '';
       const cur = libOf();
       libSel.appendChild(el('option', { value: '', text: cur ? libName() : '프롬프트 목록에서 불러오기…', selected: true }));
-      (TW.lib || []).forEach((p) => libSel.appendChild(el('option', { value: p.id, text: `${p.name}${p.tags && p.tags.length ? ` · ${p.tags.join('·')}에서 사용` : ''}` })));
+      promptOpts(TW.lib, { tagName: (TV.data.tags.find((x) => x.id === TV.tag) || {}).name, label: (p) => `${p.name}${p.tags && p.tags.length ? ` · ${p.tags.join('·')}에서 사용` : ''}` }).forEach((o) => libSel.appendChild(o));
     };
     fillLib();
     const pr = el('textarea', { class: 'tw-prompt', rows: 12, 'aria-label': '프롬프트(지침)' }); pr.value = (w.draft && w.draft.prompt) || '';
@@ -3928,8 +3939,10 @@
     twRender();
   }
   const twConfLabel = (w) => {
-    const sk = w.confirmed.skill;
-    return `${sk ? `🧪 스킬화 프롬프트${sk.scores && sk.scores.length ? `(검증 ${sk.scores.join('·')}점)` : ''}` : `프롬프트 ${w.confirmed.ver_no || ''}번`} · ${twChainText(w.confirmed.chain)}`;
+    const sk = w.confirmed.skill, ed = w.confirmed.edit;
+    const head = ed ? (ed.by === '목록' ? `📚 '${ed.lib_name}' 프롬프트` : '✏️ 고친 설정')
+      : sk ? `🧪 스킬화 프롬프트${sk.scores && sk.scores.length ? `(검증 ${sk.scores.join('·')}점)` : ''}` : `프롬프트 ${w.confirmed.ver_no || ''}번`;
+    return `${head} · ${twChainText(w.confirmed.chain)}`;
   };
   async function twAfterConfirm(r, tagId) {
     const sk = r.applied && r.applied.skipped && r.applied.skipped[0];
@@ -4093,15 +4106,64 @@
   }
 
   // ② 나머지 변환
+  // ② 확정 설정 [✏️ 수정]: 지침·예시·단계별 요청을 고쳐 바로 적용(시험 없이)
+  function twEditConfirmed(w) {
+    const chain = JSON.parse(JSON.stringify(w.confirmed.chain));
+    openSheet((box) => {
+      box.style.width = 'min(980px, 94vw)';
+      const body = el('div', { class: 'sheet-body' });
+      body.appendChild(el('p', { class: 'hint', text: `보낼 글: ${chain.src === 'current' ? '지금 기록 내용' : '처음 원문'} · 고친 설정은 ② 나머지 변환에 바로 쓰입니다(이미 만든 결과는 그대로).` }));
+      chain.steps.forEach((s, i) => {
+        const sec = el('div', { class: 'tw-box' }, [el('div', { class: 'tw-box-title', text: i === 0 ? '1단계 · 지침' : `${i + 1}단계 · 이어서 고칠 요청${s.only_here ? ' (📌 이 기록만 — 나머지 변환에서 뺌)' : ''}` })]);
+        if (i === 0 || s.prompt) {
+          const pr = el('textarea', { rows: i === 0 ? 14 : 6, 'aria-label': `${i + 1}단계 지침` }); pr.value = s.prompt || '';
+          pr.addEventListener('input', () => { s.prompt = pr.value; });
+          sec.appendChild(pr);
+        }
+        if (i === 0) {
+          const ex = el('textarea', { rows: 3, placeholder: '예시(선택)', 'aria-label': '예시' }); ex.value = s.example || '';
+          ex.addEventListener('input', () => { s.example = ex.value; });
+          sec.append(el('div', { class: 'col-label', text: '예시(선택)' }), ex);
+        }
+        const rq = el('input', { type: 'text', value: s.request || '', placeholder: i === 0 ? '추가 요청(선택)' : '이어서 고칠 요청', 'aria-label': `${i + 1}단계 요청` });
+        rq.addEventListener('input', () => { s.request = rq.value; });
+        sec.appendChild(rq);
+        if (i > 0) sec.appendChild(el('button', { type: 'button', class: 'small link danger-text', text: '이 단계 빼기', onclick: () => { chain.steps.splice(i, 1); closeSheet(); twEditConfirmed({ ...w, confirmed: { ...w.confirmed, chain } }); } }));
+        body.appendChild(sec);
+      });
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: '✏️ 확정한 설정 수정' })]), body,
+        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }),
+          el('button', { type: 'button', class: 'primary', text: '이 설정으로 적용', onclick: async () => {
+            const r = await call('tag_confirm_set', w.id, chain, null, TW.year);
+            if (!r) return;
+            closeSheet();
+            TW.work.confirmed = r.confirmed;
+            toast('확정 설정을 고쳐 적용했습니다.');
+            twRender();
+          } })]));
+    });
+  }
   async function twBulk(body) {
     const w = TW.work;
     if (!w.confirmed) {
-      body.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '먼저 ① 시험에서 마음에 드는 후보를 [✔ 확정]하세요. 그 후보를 만든 단계로 나머지 기록을 변환합니다.' }),
-        el('button', { type: 'button', class: 'primary', text: '① 시험으로', onclick: () => { TW.step = 'trial'; twRender(); } })]));
+      body.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '먼저 ① 프롬프트 적용 시험에서 마음에 드는 후보를 [✔ 확정]하세요. 그 후보를 만든 단계로 나머지 기록을 변환합니다.' }),
+        el('button', { type: 'button', class: 'primary', text: '① 프롬프트 적용 시험으로', onclick: () => { TW.step = 'trial'; twRender(); } })]));
       return;
     }
+    if (!TW.lib) { const l = await rawCall('prompt_list'); TW.lib = l && l.ok ? l.prompts : []; }
+    const swap = el('select', { class: 'tw-swap', 'aria-label': '프롬프트 목록에서 바꾸기', title: '1단계에서 목록에 저장한 프롬프트(또는 다른 프롬프트)로 확정 설정을 바꿉니다' },
+      [el('option', { value: '', text: '📚 목록 프롬프트로 바꾸기…' }), ...promptOpts(TW.lib, { tagName: w.tag_name, label: (p) => `${p.name}${p.tags && p.tags.length ? ` · ${p.tags.join('·')}에서 사용` : ''}` })]);
+    swap.addEventListener('change', async () => {
+      const id = swap.value;
+      if (!id) return;
+      const r = await call('tag_confirm_set', w.id, null, id, TW.year);
+      if (!r) { swap.value = ''; return; }
+      w.confirmed = r.confirmed; TW.lib = null;
+      toast('확정 설정을 고른 프롬프트로 바꿨습니다.');
+      twRender();
+    });
     body.appendChild(el('div', { class: 'tw-confirmed' }, [el('b', { text: '확정한 설정: ' }), `${twConfLabel(w)} `,
-      el('button', { type: 'button', class: 'link', text: '자세히', onclick: () => twChainInfo(w.confirmed.chain, '확정한 설정') })]));
+      el('button', { type: 'button', class: 'small', text: '✏️ 수정', title: '확정한 설정의 지침·예시·요청을 마지막으로 고쳐 바로 적용합니다', onclick: () => twEditConfirmed(w) }), swap]));
     if (!TW.plan) {
       body.appendChild(el('p', { class: 'muted', text: '대상을 불러오는 중…' }));
       const seq = TW.seq, flt = { ...TV.flt };
@@ -4525,7 +4587,7 @@
     const input = el('div', { class: 'cw-input' });
     const send = el('button', { type: 'button', class: 'primary ai-btn', text: '보내기' });
     if (!cur) {
-      const lib = el('select', { 'aria-label': '프롬프트 불러오기' }, [el('option', { value: '', text: '시작 프롬프트 불러오기…' }), ...(CW.lib || []).map((p) => el('option', { value: p.id, text: p.name }))]);
+      const lib = el('select', { 'aria-label': '프롬프트 불러오기' }, [el('option', { value: '', text: '시작 프롬프트 불러오기…' }), ...promptOpts(CW.lib, { tagName: CW.tagName })]);
       const pr = el('textarea', { rows: 7, placeholder: '처음 지침(프롬프트)', 'aria-label': '처음 지침' });
       pr.value = CW.firstPrompt != null ? CW.firstPrompt : ((CW.ctx && TW.work && TW.work.draft && TW.work.draft.prompt) || '');
       if (CW.firstPrompt == null && CW.ctx && TW.work && TW.work.draft) CW.firstEx = TW.work.draft.example || '';
@@ -4565,7 +4627,7 @@
       el('div', { class: 'sheet-head' }, [el('h2', { text: '💬 프롬프트 마법사 · 대화' }), modeSel, el('span', { class: 'spacer' }),
         el('button', { type: 'button', class: 'primary', disabled: !cur, title: cur ? '지금 이어 가는 후보까지의 대화를 종합해 완성된 프롬프트를 만듭니다' : '먼저 대화를 시작하세요', text: '🧩 프롬프트 제작', onclick: () => cwCompose(model) })]),
       el('div', { class: 'sheet-body cw-body' }, [el('div', { class: 'cw-main' }, [src, chat, input]), cands]),
-      el('div', { class: 'sheet-foot' }, [el('span', { class: 'muted', text: CW.mode === 'record' ? '이 대화의 결과는 태그 AI 변환 ① 시험의 후보와 같습니다(거기서 [✔ 확정] 가능).' : '붙여넣은 글로 한 대화는 저장하지 않습니다.' }),
+      el('div', { class: 'sheet-foot' }, [el('span', { class: 'muted', text: CW.mode === 'record' ? '이 대화의 결과는 태그 AI 변환 ① 프롬프트 적용 시험의 후보와 같습니다(거기서 [✔ 확정] 가능).' : '붙여넣은 글로 한 대화는 저장하지 않습니다.' }),
         el('span', { class: 'spacer' }), el('button', { type: 'button', text: '닫기', onclick: () => cwClose() })]));
     chat.scrollTop = chat.scrollHeight;
   }
