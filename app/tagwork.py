@@ -252,12 +252,14 @@ class TagWork:
             c.execute("DELETE FROM tag_cands WHERE id=? AND kind='trial'", (int(cid),))
 
     # ---------- 확정 ----------
-    def confirm(self, cid, apply=True):
-        """시험 후보를 확정: 그 후보를 만든 단계가 이 태그 설정이 되고, apply면 그 기록에 반영한다."""
+    def confirm(self, cid, apply=True, chain=None, extra=None):
+        """시험 후보를 확정: 그 후보를 만든 단계가 이 태그 설정이 되고, apply면 그 기록에 반영한다.
+        chain을 주면(스킬화) 그 단계를 설정으로 쓴다(후보는 그대로 기록에 반영)."""
         x = self.cand(cid)
         if x["kind"] != "trial" or x["status"] != "ok":
             raise DbError("시험 후보만 확정할 수 있습니다.")
-        conf = {"cand_id": x["id"], "record_id": x["record_id"], "chain": x["chain"], "ver_no": x["ver_no"]}
+        conf = {"cand_id": x["id"], "record_id": x["record_id"], "chain": norm_chain(chain) if chain else x["chain"],
+                "ver_no": None if chain else x["ver_no"], **(extra or {})}
         out = {"applied": None}
         if apply:
             out["applied"] = self.apply(x["work_id"], [x["id"]])

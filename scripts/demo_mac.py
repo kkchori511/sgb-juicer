@@ -19,10 +19,16 @@ sys.path.insert(0, ROOT)
 from app import openrouter  # noqa: E402
 
 
+_JUDGE = [0]
 def _fake_chat(key, model, system, user, privacy_block=False):
     # 3초 걸리는 척: 여러 건 동시 처리와 [바로 중지]를 볼 수 있게(중지하면 바로 끊김)
     if openrouter._cancel.wait(3):
         raise openrouter.Cancelled()
+    if "[유사도 채점]" in system:  # 스킬화 검증 채점: 첫 시도는 못 넘고 다음부터 통과하는 척
+        _JUDGE[0] += 1
+        return ("{\"내용\": 80, \"문체\": 85, \"차이\": \"마지막 평가 문장이 빠짐\"}" if _JUDGE[0] <= 2 else "{\"내용\": 97, \"문체\": 95, \"차이\": \"\"}"), 0.0001
+    if "[목표] 아래 <원문>" in system + user:
+        return "# 역할\n(시험용 스킬화 프롬프트) 학생 활동 자료를 관찰자 시점으로 3문장 안팎 한 문단에 씁니다.", 0.0003
     return "(시험용 AI 결과) 수업 활동에 적극적으로 참여하며 탐구 과정을 꼼꼼히 기록함. " + user.replace("\n", " ")[:100], 0.0004
 
 

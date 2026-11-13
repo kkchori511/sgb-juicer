@@ -83,6 +83,13 @@ def model_info(model_id: str) -> dict:
 PRIVACY_PROVIDER = {"data_collection": "deny", "zdr": True}
 
 
+_tl = threading.local()  # 이 스레드의 다음 요청에 쓸 temperature(None이면 모델 기본값)
+
+
+def set_temperature(t):
+    _tl.temp = t
+
+
 def build_payload(model: str, system: str, user: str, privacy_block: bool) -> dict:
     payload = {
         "model": normalize_model_id(model),
@@ -94,6 +101,9 @@ def build_payload(model: str, system: str, user: str, privacy_block: bool) -> di
     }
     if privacy_block:
         payload["provider"] = dict(PRIVACY_PROVIDER)
+    t = getattr(_tl, "temp", None)
+    if t is not None:
+        payload["temperature"] = t
     return payload
 
 

@@ -18,7 +18,7 @@ import webview
 from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, existing, export, ocr, openrouter, prompts, roster, scan, stdformat, updater, weights
 from .records import Records, items_of
 from .inbox import Inbox
-from .tagwork import TagWork, norm_chain, signature, step_input, step_system
+from .tagwork import TagWork, effective, norm_chain, signature, step_input, step_system
 from .standards import Outlines, Standards, avoid_rule, new_words, outline_tidy_prompt, check_level, outline_rule, read_hwpx_text, read_pdf_text, similarity, standards_rule
 from .paths import data_dir
 from .textutil import count_bytes
@@ -79,6 +79,19 @@ def ys_ok(api) -> bool:
     """지금 학년도가 있는지(태그 작업 조회 전)."""
     cfg = config.load()
     return bool(cfg["current_year"] and cfg["current_year"] in db.list_years())
+
+
+def _copied(prompt, texts, n=20):
+    """프롬프트에 원문·목표 결과의 n자 이상 구절이 그대로 들어갔는지(공백 무시)."""
+    p = "".join(str(prompt or "").split())
+    for t in texts:
+        t = "".join(str(t or "").split())
+        if any(t[i:i + n] in p for i in range(0, max(0, len(t) - n + 1))):
+            return True
+    return False
+
+
+TAG_TEMP = 0.3  # 태그 AI 변환(시험·나머지 변환·스킬화 검증): 같은 프롬프트면 결과가 고르게 나오도록 무작위성을 낮춘다
 
 
 class Api:
@@ -808,7 +821,7 @@ class Api:
             last = len(chain["steps"]) - 1
             send = step_input(chain, last, src_text, tw.source_text(r, chain["src"]) if last else "")
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, last), send,
-                                       cfg["privacy_block"], extra=False)
+                                       cfg["privacy_block"], extra=False, temperature=TAG_TEMP)
             nid, dropped = tw.add_trial(w["id"], r, chain, int(parent_id) if parent_id else None, input_src, src_text, text, model, cost, {},
                                         base=base, alive=self._alive(gen))
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
@@ -882,7 +895,7 @@ class Api:
             try:
                 for i in range(len(outs), len(chain["steps"])):
                     text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, i), step_input(chain, i, text, first),
-                                               cfg["privacy_block"], extra=False)
+                                               cfg["privacy_block"], extra=False, temperature=TAG_TEMP)
                     total += cost
                     outs.append(text)
             except openrouter.Cancelled:
@@ -1203,7 +1216,7 @@ class Api:
         x = getattr(self, "_ai_extra", "")
         return {**(meta or {}), "extra": x} if x else meta
 
-    def _call_ai(self, key, model, system, user, privacy, extra=True):
+    def _call_ai(self, key, model, system, user, privacy, extra=True, temperature=None):
         x = getattr(self, "_ai_extra", "") if extra else ""
         if x:
             system = (system + "\n\n[이번 추가 요구 사항 — 교사가 이번 실행에만 준 요청]\n<요청>\n" + x + "\n</요청>\n"
@@ -1211,7 +1224,11 @@ class Api:
         if openrouter.cancelled():
             raise openrouter.Cancelled()
         gen = openrouter.generation()
-        text, cost = openrouter.chat(key, model, system, user, privacy)
+        openrouter.set_temperature(temperature)
+        try:
+            text, cost = openrouter.chat(key, model, system, user, privacy)
+        finally:
+            openrouter.set_temperature(None)
         with self._ai_lock:
             self._run_cost += cost
         if openrouter.cancelled() or openrouter.generation() != gen:  # [바로 중지] 뒤에 도착한 답은 저장하지 않는다(새 실행이 시작됐어도)
@@ -1613,6 +1630,14 @@ class Api:
     def prompt_compose(self, chain, model_index=None):
         """대화 마법사 [프롬프트 제작]: 처음 지침과 이어서 한 요구들을 하나의 완성된 프롬프트로 합친다."""
         chain = norm_chain(chain)
+        parts = self._chain_material(chain)
+        parts += ["", "위 과정을 모두 반영해, 처음부터 이 결과가 바로 나오도록 하는 완성된 프롬프트 한 편을 쓰세요."]
+        text, cost, model = self._compose("\n".join(parts), model_index)
+        return self._ai_out({"text": text, "cost": cost, "model": model})
+
+    @staticmethod
+    def _chain_material(chain):
+        """단계(처음 지침 + 이어서 한 요청)를 프롬프트 종합 재료 글로. 그 기록에만 맞는 요청(only_here)은 뺀다."""
         parts = ["[재료: 대화로 다듬은 과정]", "1) 처음 지침:", chain["steps"][0]["prompt"]]
         if chain["steps"][0]["example"]:
             parts += ["처음 지침의 예시:", chain["steps"][0]["example"]]
@@ -1625,9 +1650,118 @@ class Api:
                 parts += [f"{i}) 지침을 이렇게 바꿈:", s["prompt"]]
             if s["request"]:
                 parts += [f"{i}) 결과를 보고 한 요구{'(원문을 함께 보며)' if s.get('with_src') else ''}: {s['request']}"]
-        parts += ["", "위 과정을 모두 반영해, 처음부터 이 결과가 바로 나오도록 하는 완성된 프롬프트 한 편을 쓰세요."]
+        return parts
+
+    # ---------- 스킬화: 이어 고친 단계를 한 프롬프트로 종합하고, 같은 원문으로 다시 돌려 결과가 비슷한지 검증 ----------
+    SKILL_RULE = (
+        "[목표] 아래 <원문>에 완성 프롬프트를 '한 번' 적용했을 때 <목표 결과>와 같은 결과(다루는 내용의 범위, 문체와 종결 방식, 문장 구성, 문단 구성, 길이)가 나오게 하는 완성 프롬프트를 쓰세요.\n"
+        "- 교사가 처음 지침에 이어 요청을 덧붙이며 결과를 다듬었습니다. 이 과정을 모두 한 프롬프트에 녹여, 단계를 거치지 않아도 같은 결과가 나오게 합니다.\n"
+        "- '더 짧게'처럼 앞 결과에 기대는 요청은 <목표 결과>를 기준으로 절대 기준(약 몇 자, 몇 문장, 문단 수)으로 바꿉니다.\n"
+        "- 이 프롬프트는 같은 태그의 다른 학생 기록에도 씁니다. 원문·목표 결과에 나온 이 학생만의 사실(활동 이름, 책 제목, 수치 등)을 규칙이나 예시로 넣지 말고 일반 규칙으로 씁니다.\n"
+        "- <목표 결과>나 <원문>의 문장·구절을 프롬프트에 옮겨 적지 않습니다(틀린/옳은 예시도 이 학생의 활동이 아닌 다른 일반 활동으로 새로 만듭니다).")
+    JUDGE_RULE = (
+        "[유사도 채점] 당신은 생활기록부 문장 두 편이 얼마나 비슷한지 채점합니다. <목표>와 <결과>를 비교해 아래 JSON 한 줄만 출력합니다(설명·코드 블록 없이).\n"
+        '{"내용": 0~100, "문체": 0~100, "차이": "점수를 깎은 이유를 짧게(여러 개면 ; 로 구분, 없으면 빈 글)"}\n'
+        "- 내용: 목표에 있는 사실·활동·평가가 결과에도 있는지, 목표에 없는 내용이 더해졌는지. 빠지거나 더해진 것이 없으면 100.\n"
+        "- 문체: 시점, 종결 방식(~함, ~임 등), 문장 길이와 구성, 문단 구성, 어조가 같은 사람이 쓴 것 같은지.\n"
+        "- 단어나 표현이 달라도 뜻과 문체가 같으면 깎지 않습니다. 길이는 따로 재므로 채점하지 않습니다.")
+
+    def _skill_ctx(self, cid, year):
+        tw = self._tw(year)
+        x = tw.cand(cid)
+        if x["kind"] != "trial" or x["status"] != "ok":
+            raise db.DbError("시험 후보만 스킬화할 수 있습니다.")
+        r = tw.record_info(x["record_id"])
+        chain = x["chain"]
+        if chain["src"] == "current" and (x["record_ver"] or 0) != (r.get("content_ver") or 0):
+            raise db.DbError("이 후보를 만든 뒤 기록 내용이 바뀌어 같은 원문으로 검증할 수 없습니다. 처음 원문으로 다시 시험해 주세요.")
+        src = tw.source_text(r, chain["src"])
+        if not src.strip():
+            raise db.DbError("원문이 비어 있습니다.")
+        final = x["edited"] if x["edited"] is not None else x["text"]
+        picks = [s["request"] for s in chain["steps"] if s.get("only_here")]
+        example = effective(chain, len(chain["steps"]) - 1)[1]
+        return tw, x, chain, src, final, picks, example
+
+    @safe
+    def tag_skill_compose(self, cid, prev=None, model_index=None, year=None):
+        """스킬화 한 번: 단계 + 원문 + 목표 결과로 완성 프롬프트를 쓴다. prev(지난 시도 {prompt, out, diff})가 있으면 그 차이를 고친다."""
+        _, x, chain, src, final, picks, example = self._skill_ctx(cid, year)
+        parts = [self.SKILL_RULE, ""] + self._chain_material(chain)
+        if example:
+            parts += ["(예시는 프롬프트와 따로 함께 쓰이므로 프롬프트 안에 옮겨 적지 않습니다.)"]
+        if picks:
+            parts += ["(이 학생에게만 원문 일부를 넣으라고 한 요청이 있었습니다. 그 내용은 규칙으로 만들지 않습니다: " + " / ".join(picks) + ")"]
+        parts += ["", f"<원문>\n{src}\n</원문>", "", f"<목표 결과>(약 {len(final)}자)\n{final}\n</목표 결과>"]
+        if prev and str((prev or {}).get("prompt") or "").strip():
+            parts += ["", "[지난 시도] 아래 프롬프트로 원문을 변환했더니 목표 결과와 달랐습니다. 차이가 없어지도록 프롬프트를 고쳐 처음부터 다시 쓰세요.",
+                      f"<지난 프롬프트>\n{str(prev['prompt'])[:20000]}\n</지난 프롬프트>",
+                      f"<지난 결과>\n{str(prev.get('out') or '')[:20000]}\n</지난 결과>", f"<차이>\n{str(prev.get('diff') or '')[:2000]}\n</차이>"]
         text, cost, model = self._compose("\n".join(parts), model_index)
-        return self._ai_out({"text": text, "cost": cost, "model": model})
+        return self._ai_out({"prompt": text, "example": example, "cost": cost, "model": model, "copied": _copied(text, [src, final])})
+
+    @staticmethod
+    def _judge_parse(text):
+        import re as _re
+        m = _re.search(r"\{.*\}", text or "", _re.S)
+        try:
+            d = json.loads(m.group(0)) if m else None
+        except ValueError:
+            d = None
+        if not isinstance(d, dict):
+            raise openrouter.LlmError("AI 채점 결과를 읽지 못했습니다. 다시 시도해 주세요.")
+
+        def num(*keys):
+            for k in keys:
+                if k in d:
+                    try:
+                        return max(0, min(100, float(d[k])))
+                    except (TypeError, ValueError):
+                        pass
+            raise openrouter.LlmError("AI 채점 결과를 읽지 못했습니다. 다시 시도해 주세요.")
+        return num("내용", "content"), num("문체", "style"), str(d.get("차이") or d.get("diff") or "").strip()[:1000]
+
+    @safe
+    def tag_skill_check(self, cid, prompt, example="", model_index=None, year=None):
+        """검증 한 번: 스킬화한 프롬프트로 같은 원문을 한 번에 변환하고, 확정할 결과와 AI로 비교 채점한다(내용 50·문체 30·길이 20)."""
+        _, x, chain, src, final, picks, _ex = self._skill_ctx(cid, year)
+        prompt = str(prompt or "").strip()
+        if not prompt:
+            raise db.DbError("프롬프트가 비어 있습니다.")
+        cfg, model = self._model(model_index)
+        key = cfg["openrouter_key"].strip()
+        one = norm_chain({"src": chain["src"], "steps": [{"prompt": prompt, "example": str(example or "")}]})
+        out, c1 = self._call_ai(key, model, step_system(one, 0), src, cfg["privacy_block"], extra=False, temperature=TAG_TEMP)
+        judge = self.JUDGE_RULE + (("\n- 다음 요청으로 이 학생에게만 넣은 내용은 결과에 없어도 깎지 않습니다: " + " / ".join(picks)) if picks else "")
+        jt, c2 = self._call_ai(key, model, judge, f"<목표>\n{final}\n</목표>\n\n<결과>\n{out}\n</결과>", cfg["privacy_block"], extra=False, temperature=0)
+        content, style, diff = self._judge_parse(jt)
+        a, b = len(final.strip()), len(out.strip())
+        length = round(100 * min(a, b) / max(a, b, 1))
+        score = round(content * 0.5 + style * 0.3 + length * 0.2)
+        return self._ai_out({"text": out, "score": score, "content": round(content), "style": round(style), "length": length,
+                             "diff": diff, "cost": c1 + c2, "model": model})
+
+    @safe
+    def tag_confirm_skill(self, cid, prompt, example="", skill=None, save_name="", year=None):
+        """스킬화한 프롬프트로 확정: 후보는 그 기록에 반영하고, 이 태그 설정은 그 프롬프트 1단계가 된다. save_name이면 프롬프트 목록에도 저장."""
+        self._editable(year)
+        tw = self._tw(year)
+        x = tw.cand(cid)
+        prompt = str(prompt or "").strip()
+        if not prompt:
+            raise db.DbError("프롬프트가 비어 있습니다.")
+        w = tw.work(x["work_id"])
+        pid = None
+        if str(save_name or "").strip():
+            s = self.prompt_save({"name": str(save_name).strip(), "prompt": prompt, "example": str(example or ""), "made": "스킬화", "tags": [w["tag_name"]]})
+            if not s.get("ok"):
+                raise db.DbError(s.get("error") or "프롬프트 목록에 저장하지 못했습니다.")
+            pid = s["id"]
+        sk = skill if isinstance(skill, dict) else {}
+        info = {"scores": [int(v) for v in (sk.get("scores") or []) if isinstance(v, (int, float))][:4], "tries": int(sk.get("tries") or 0),
+                "lib_id": pid, "from_chain": x["chain"]}
+        out = tw.confirm(cid, True, chain={"src": x["chain"]["src"], "steps": [{"prompt": prompt, "example": str(example or "")}]}, extra={"skill": info})
+        return {**out, "lib_id": pid}
 
     @safe
     def prompt_form_ai(self, spec, model_index=None):
@@ -1650,7 +1784,8 @@ class Api:
         cfg, model = self._model(model_index)
         last = len(chain["steps"]) - 1
         out, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, last),
-                                  step_input(chain, last, src[:20000], str(orig or "")[:20000]), cfg["privacy_block"], extra=False)
+                                  step_input(chain, last, src[:20000], str(orig or "")[:20000]), cfg["privacy_block"], extra=False,
+                                  temperature=TAG_TEMP)
         return self._ai_out({"text": out, "cost": cost, "model": model})
 
     @safe

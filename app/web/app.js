@@ -3810,7 +3810,7 @@
     const w = TW.work;
     if (!recs.length) { body.appendChild(el('p', { class: 'muted', text: '지금 조건에 맞는 기록이 없습니다. 필터를 바꿔 보세요.' })); return; }
     body.appendChild(el('p', { class: 'hint', text: '기록 한 건으로 프롬프트를 고쳐 가며 변환해 보세요. 후보는 3칸까지 쌓이고(잠근 것은 남음), 마음에 드는 후보를 [✔ 확정]하면 그 기록에 반영되고 그 후보를 만든 단계로 ② 나머지 기록을 변환합니다.' }));
-    if (w.confirmed) body.appendChild(el('div', { class: 'tw-confirmed' }, [el('b', { text: '확정한 설정: ' }), `프롬프트 ${w.confirmed.ver_no || ''}번 · ${twChainText(w.confirmed.chain)} `,
+    if (w.confirmed) body.appendChild(el('div', { class: 'tw-confirmed' }, [el('b', { text: '확정한 설정: ' }), `${twConfLabel(w)} `,
       el('button', { type: 'button', class: 'link', text: '자세히', onclick: () => twChainInfo(w.confirmed.chain, '확정한 설정') }),
       el('button', { type: 'button', class: 'small primary', text: '② 나머지 변환으로 →', onclick: () => { TW.step = 'bulk'; TW.plan = null; twRender(); } })]));
     // 시험할 기록
@@ -3927,7 +3927,30 @@
     await twLoad();
     twRender();
   }
-  async function twConfirm(t, rec) {
+  const twConfLabel = (w) => {
+    const sk = w.confirmed.skill;
+    return `${sk ? `🧪 스킬화 프롬프트${sk.scores && sk.scores.length ? `(검증 ${sk.scores.join('·')}점)` : ''}` : `프롬프트 ${w.confirmed.ver_no || ''}번`} · ${twChainText(w.confirmed.chain)}`;
+  };
+  async function twAfterConfirm(r, tagId) {
+    const sk = r.applied && r.applied.skipped && r.applied.skipped[0];
+    if (sk) await alertBox(`설정은 확정했지만 기록은 바꾸지 않았습니다: ${sk.why}`);
+    if (TW.open && (!tagId || TV.tag === tagId)) {
+      await renderTagView(true);
+      await twLoad();
+      TW.step = 'bulk'; TW.plan = null;
+      twRender();
+    }
+    if (!sk) toast('확정했습니다. 이 설정으로 나머지 기록을 변환할 수 있습니다.');
+  }
+  async function twConfirm(t, rec, plain) {
+    if (!plain && twReplaySteps(t.chain).length > 1) { // 이어 고친 단계가 있으면 스킬화(한 프롬프트로 종합 + 검증)
+      if (!(await twFlushOrWarn())) return;
+      openSkillSheet({ cid: t.id, year: TW.year, tagId: TV.tag, tagName: (TV.data.tags.find((x) => x.id === TV.tag) || {}).name || '',
+        label: twRecLabel(rec), target: t.edited !== null && t.edited !== undefined ? t.edited : t.text, chainText: twChainText(t.chain),
+        plainLabel: '단계 재현으로 확정', plainTitle: '스킬화하지 않고 지금처럼 단계를 차례로 다시 실행합니다(나머지 기록마다 AI를 단계 수만큼 부름)',
+        plain: () => twConfirm(t, rec, true), after: (r) => twAfterConfirm(r, TV.tag) });
+      return;
+    }
     const steps = twReplaySteps(t.chain).length, only = t.chain.steps.length - steps;
     const html = `<b>이 후보를 확정합니다.</b><br>· 이 후보로 '${escHtml(twRecLabel(rec))}' 기록 내용을 바꿉니다(처음 원문은 남고, ③의 반영 기록에서 되돌릴 수 있음).<br>`
       + `· 이 후보를 만든 단계(${t.chain.steps.length}단계: ${escHtml(twChainText(t.chain))})로 ② 나머지 기록을 변환합니다.${steps > 1 ? ' 나머지 기록도 같은 단계를 차례로 거치므로 AI를 기록마다 ' + steps + '번 부릅니다.' : ''}<br>`
@@ -3950,13 +3973,123 @@
       const s = await rawCall('prompt_save', { name: name || '태그 변환', prompt: t.chain.steps[0].prompt, example: t.chain.steps[0].example || '' });
       if (s && s.ok) { TW.lib = null; toast(`프롬프트 목록에 '${name}'으로 저장했습니다.`); } else toast((s && s.error) || '프롬프트 목록에 저장하지 못했습니다.', 5000);
     }
-    const sk = r.applied && r.applied.skipped && r.applied.skipped[0];
-    if (sk) await alertBox(`설정은 확정했지만 기록은 바꾸지 않았습니다: ${sk.why}`);
-    await renderTagView(true);
-    await twLoad();
-    TW.step = 'bulk'; TW.plan = null;
-    twRender();
-    if (!sk) toast('확정했습니다. 이 단계로 나머지 기록을 변환할 수 있습니다.');
+    await twAfterConfirm(r);
+  }
+  // ---------- 스킬화: 이어 고친 단계를 한 프롬프트로 종합 → 같은 원문으로 2번 다시 돌려 확정할 결과와 비교(둘 다 90점 이상이면 통과) ----------
+  const SKILL_PASS = 90, SKILL_TRIES = 3;
+  function openSkillSheet(o) {
+    const SK = { tries: [], sel: -1, running: false };
+    openSheet((box) => {
+      box.style.width = 'min(1200px, 96vw)';
+      const model = el('select', { 'aria-label': '모델' }); fillModelSelect(model);
+      const body = el('div', { class: 'sheet-body sk-body' });
+      const nameIn = el('input', { type: 'text', maxlength: 60, value: `${o.tagName || '태그'} 스킬` });
+      const saveCb = el('input', { type: 'checkbox', checked: true });
+      const startBtn = el('button', { type: 'button', class: 'primary ai-btn' });
+      const okBtn = el('button', { type: 'button', class: 'primary' });
+      const saveOnly = el('button', { type: 'button', text: '목록에 저장만', title: '확정하지 않고 프롬프트 목록에만 저장합니다' });
+      const plainBtn = o.plain ? el('button', { type: 'button', text: o.plainLabel, title: o.plainTitle || '' }) : null;
+      const cur = () => SK.tries[SK.sel];
+      const prevOf = (a) => {
+        const w = a.checks.slice().sort((x, y) => x.score - y.score)[0];
+        return w ? { prompt: a.prompt, out: w.text, diff: w.diff || `유사도 ${w.score}점(내용 ${w.content}·문체 ${w.style}·길이 ${w.length})` } : null;
+      };
+      const pickBest = () => {
+        let b = -1;
+        SK.tries.forEach((a, i) => { if (b < 0 || (a.pass && !SK.tries[b].pass) || (a.pass === SK.tries[b].pass && (a.min || 0) > (SK.tries[b].min || 0))) b = i; });
+        SK.sel = b;
+      };
+      const verify = async (a) => {
+        const out = await aiRun({ title: `스킬화 ${a.no}번째 — 같은 원문으로 2번 변환해 비교`, skipConfirm: true, concurrency: 2,
+          jobs: [1, 2].map((k) => ({ label: `검증 ${k}`, run: () => api.tag_skill_check(o.cid, a.prompt, a.example, model.value, o.year) })) });
+        if (!out) return false;
+        a.checks = out.results.map((r) => ({ text: r.text, score: r.score, content: r.content, style: r.style, length: r.length, diff: r.diff }));
+        a.min = a.checks.length ? Math.min(...a.checks.map((c) => c.score)) : 0;
+        a.pass = a.checks.length === 2 && a.min >= SKILL_PASS;
+        return out.done === 2;
+      };
+      const run = async () => {
+        if (SK.running) return;
+        SK.running = true; draw();
+        try {
+          let prev = SK.tries.length ? prevOf(SK.tries[SK.tries.length - 1]) : null;
+          for (let i = 0; i < SKILL_TRIES; i += 1) {
+            const c = await aiRun({ title: `스킬화 ${SK.tries.length + 1}번째 — 프롬프트 만들기`, skipConfirm: true,
+              jobs: [{ label: o.label, run: () => api.tag_skill_compose(o.cid, prev, model.value, o.year) }] });
+            if (!c || !c.done) break;
+            const a = { no: SK.tries.length + 1, prompt: c.results[0].prompt, example: c.results[0].example || '', checks: [], pass: false, copied: !!c.results[0].copied };
+            SK.tries.push(a); SK.sel = SK.tries.length - 1; draw();
+            const full = await verify(a);
+            if (!full || a.pass) break;
+            prev = prevOf(a);
+          }
+        } finally { SK.running = false; pickBest(); draw(); }
+      };
+      const reverify = async (text) => {
+        const base = cur();
+        const a = { no: SK.tries.length + 1, prompt: text, example: base ? base.example : '', checks: [], pass: false, edited: true };
+        SK.running = true; SK.tries.push(a); SK.sel = SK.tries.length - 1; draw();
+        try { await verify(a); } finally { SK.running = false; draw(); }
+      };
+      const draw = () => {
+        body.innerHTML = '';
+        body.appendChild(el('p', { class: 'hint', text: `이어 고친 단계(${o.chainText || ''})를 AI가 한 프롬프트로 종합하고, 그 프롬프트로 같은 원문을 2번 변환해 아래 '확정할 결과'와 비교합니다. 두 번 모두 ${SKILL_PASS}점 이상이면 통과입니다(내용 50·문체 30·길이 20). 못 넘으면 차이를 알려 고치기를 ${SKILL_TRIES}번까지 합니다. 한 번 시도에 AI를 5번 부릅니다(프롬프트 1 + 변환 2 + 채점 2). 확정하면 ② 나머지 변환은 기록마다 이 프롬프트로 한 번만 변환합니다.` }));
+        const a = cur();
+        if (SK.tries.length) {
+          body.appendChild(el('div', { class: 'sk-tries' }, SK.tries.map((t, i) => el('button', { type: 'button', class: 'small' + (i === SK.sel ? ' primary' : ''),
+            text: `${t.edited ? '고친 프롬프트' : `시도 ${t.no}`} · ${t.checks.length ? `${t.checks.map((c) => c.score).join('·')}점 ${t.pass ? '✔' : '✖'}` : '검증 안 됨'}`, onclick: () => { SK.sel = i; draw(); } }))));
+        }
+        const cols = el('div', { class: 'sk-cols' });
+        cols.appendChild(el('div', { class: 'sk-col' }, [el('div', { class: 'col-label', text: `확정할 결과(목표) · ${(o.target || '').length}자` }), el('div', { class: 'cmp-text sk-text', text: o.target || '' })]));
+        if (a) a.checks.forEach((c, k) => cols.appendChild(el('div', { class: 'sk-col' }, [
+          el('div', { class: 'col-label' }, [el('b', { class: c.score >= SKILL_PASS ? 'sk-ok' : 'sk-no', text: `검증 ${k + 1} · ${c.score}점` }), ` (내용 ${c.content}·문체 ${c.style}·길이 ${c.length}) · ${c.text.length}자`]),
+          c.diff ? el('div', { class: 'muted small-note', text: `차이: ${c.diff}` }) : null,
+          el('div', { class: 'cmp-text sk-text', text: c.text })])));
+        body.appendChild(cols);
+        if (a) {
+          const ta = el('textarea', { class: 'sk-prompt', rows: 10, 'aria-label': '스킬화한 프롬프트' }); ta.value = a.prompt;
+          const again = el('button', { type: 'button', class: 'small ai-btn', text: '고친 프롬프트로 다시 검증', disabled: true, onclick: () => reverify(ta.value.trim()) });
+          ta.addEventListener('input', () => { again.disabled = SK.running || !ta.value.trim() || ta.value.trim() === a.prompt.trim(); okBtn.disabled = !again.disabled; });
+          body.appendChild(el('div', { class: 'tw-row' }, [el('b', { text: '스킬화한 프롬프트' }), el('span', { class: 'muted', text: a.pass ? ` ✔ 통과(${a.min}점 이상)` : a.checks.length ? ` ✖ 90점 미만(가장 낮은 점수 ${a.min}점)` : ' 검증 전' }), el('span', { class: 'spacer' }), again]));
+          if (a.copied && ta.value === a.prompt) body.appendChild(el('div', { class: 'warn', text: '⚠ 이 프롬프트에 이 학생의 원문·결과 문장이 그대로 들어 있습니다. 다른 학생 결과에 이 학생의 표현이 섞일 수 있으니, 그 부분(주로 예시)을 일반적인 문장으로 고친 뒤 [고친 프롬프트로 다시 검증]하세요.' }));
+          body.appendChild(ta);
+        } else if (!SK.running) body.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '[▶ 스킬화 시작]을 누르세요.' })]));
+        startBtn.textContent = SK.tries.length ? `▶ ${SKILL_TRIES}번 더 시도` : '▶ 스킬화 시작';
+        startBtn.disabled = SK.running || (a && a.pass);
+        okBtn.textContent = a && !a.pass ? '그래도 이 프롬프트로 확정' : '이 프롬프트로 확정';
+        okBtn.disabled = SK.running || !a || !a.checks.length;
+        saveOnly.disabled = SK.running || !a;
+        if (plainBtn) plainBtn.disabled = SK.running;
+      };
+      startBtn.addEventListener('click', run);
+      okBtn.addEventListener('click', async () => {
+        const a = cur();
+        if (!a) return;
+        if (!a.pass && !(await confirmBox(`이 프롬프트의 검증 점수는 ${a.min}점으로 ${SKILL_PASS}점에 못 미칩니다. 나머지 기록의 결과가 이 기록과 다르게 나올 수 있습니다. 그래도 확정할까요?`, '그래도 확정'))) return;
+        const name = saveCb.checked ? nameIn.value.trim() : '';
+        if (saveCb.checked && !name) { toast('저장할 이름을 적어 주세요.'); nameIn.focus(); return; }
+        const r = await call('tag_confirm_skill', o.cid, a.prompt, a.example, { scores: a.checks.map((c) => c.score), tries: SK.tries.length }, name, o.year);
+        if (!r) return;
+        closeSheet(); TW.lib = null;
+        if (name) toast(`프롬프트 목록에 '${name}'으로 저장했습니다.`);
+        await o.after(r);
+      });
+      saveOnly.addEventListener('click', async () => {
+        const a = cur();
+        const name = nameIn.value.trim();
+        if (!a) return;
+        if (!name) { toast('저장할 이름을 적어 주세요.'); nameIn.focus(); return; }
+        const r = await mutate('prompt_save', { name, prompt: a.prompt, example: a.example, made: '스킬화', tags: o.tagName ? [o.tagName] : [] });
+        if (r) { TW.lib = null; toast(`프롬프트 목록에 '${name}'으로 저장했습니다(확정은 하지 않음).`); }
+      });
+      if (plainBtn) plainBtn.addEventListener('click', () => { if (SK.running) return; closeSheet(); o.plain(); });
+      addTo(box, el('div', { class: 'sheet-head' }, [el('h2', { text: '🧪 스킬화 — 이어 고친 단계를 하나의 프롬프트로' }), el('span', { class: 'muted', text: o.label })]),
+        el('div', { class: 'tw-row sk-ctrl' }, [el('label', { class: 'inline', style: 'margin:0' }, ['모델', model]), startBtn]),
+        body,
+        el('div', { class: 'sheet-foot sk-foot' }, [el('label', { class: 'inline', style: 'margin:0' }, [saveCb, '목록에 저장']), nameIn, saveOnly, el('span', { class: 'spacer' }),
+          el('button', { type: 'button', text: '닫기', onclick: () => { if (!SK.running) closeSheet(); } }), plainBtn, okBtn]));
+      draw();
+    });
   }
 
   // ② 나머지 변환
@@ -3967,7 +4100,7 @@
         el('button', { type: 'button', class: 'primary', text: '① 시험으로', onclick: () => { TW.step = 'trial'; twRender(); } })]));
       return;
     }
-    body.appendChild(el('div', { class: 'tw-confirmed' }, [el('b', { text: '확정한 설정: ' }), `프롬프트 ${w.confirmed.ver_no || ''}번 · ${twChainText(w.confirmed.chain)} `,
+    body.appendChild(el('div', { class: 'tw-confirmed' }, [el('b', { text: '확정한 설정: ' }), `${twConfLabel(w)} `,
       el('button', { type: 'button', class: 'link', text: '자세히', onclick: () => twChainInfo(w.confirmed.chain, '확정한 설정') })]));
     if (!TW.plan) {
       body.appendChild(el('p', { class: 'muted', text: '대상을 불러오는 중…' }));
@@ -4254,7 +4387,7 @@
     const item = (x) => {
       const uses = usedBy(x.id);
       return el('button', { type: 'button', class: 'pr-item' + (x.id === P.id ? ' active' : ''), onclick: async () => { await flushPending(); P.id = x.id; P.openGroup = !!x.builtin; renderPrompts(); } },
-        [el('b', { text: x.name }), x.builtin ? el('span', { class: 'tag', text: '기본' }) : null, x.made ? el('span', { class: 'tag', text: `마법사·${x.made}` }) : null,
+        [el('b', { text: x.name }), x.builtin ? el('span', { class: 'tag', text: '기본' }) : null, x.made ? el('span', { class: 'tag', text: x.made === '스킬화' ? '🧪 스킬화' : `마법사·${x.made}` }) : null,
           x.tags && x.tags.length ? el('div', { class: 'muted small-note', text: `🏷 ${x.tags.join('·')}에서 사용` }) : null,
           uses.length ? el('div', { class: 'muted small-note', text: `지금 선택: ${uses.join(', ')}` }) : null]);
     };
@@ -4470,6 +4603,15 @@
   async function cwCompose(model) {
     const cur = CW.cur;
     if (!cur) return;
+    if (CW.mode === 'record' && twReplaySteps(cur.chain).length > 1 && !CW.plainCompose) { // 태그 기록 대화: 스킬화 + 같은 원문 검증
+      const rec = CW.recs.find((x) => x.id === CW.rid);
+      openSkillSheet({ cid: cur.id, year: CW.year, tagId: CW.tag, tagName: CW.tagName, label: rec ? twRecLabel(rec) : CW.tagName,
+        target: cur.edited !== null && cur.edited !== undefined ? cur.edited : cur.text, chainText: twChainText(cur.chain),
+        plainLabel: '검증 없이 프롬프트만 만들기', plainTitle: '예전처럼 대화 과정만 종합해 프롬프트를 만듭니다(같은 원문 검증 없음)',
+        plain: async () => { CW.plainCompose = true; try { await cwCompose(model); } finally { CW.plainCompose = false; } },
+        after: (r) => twAfterConfirm(r, CW.tag) });
+      return;
+    }
     const out = await aiRun({ title: '프롬프트 제작', skipConfirm: true, jobs: [{ label: '대화 종합', run: () => api.prompt_compose(cur.chain, model.value) }] });
     if (!out || !out.done) return;
     await promptSaveSheet(out.results[0].text, cur.chain.steps[0].example || '', '대화', CW.mode === 'record' ? CW.tagName : '',
@@ -4554,7 +4696,7 @@
       const outSel = el('div', { class: 'segmented' });
       const drawOut = () => {
         outSel.innerHTML = '';
-        [['opinion', '본문 + 빈 줄 + 교사 의견'], ['single', '본문 한 문단만']].forEach(([v, t]) => outSel.appendChild(el('button', { type: 'button', class: 'seg' + (spec.output === v ? ' active' : ''), text: t, onclick: () => { spec.output = v; drawOut(); refresh(); } })));
+        [['opinion', '본문 + 교사 의견(이어서 한 문단)'], ['single', '본문 한 문단만']].forEach(([v, t]) => outSel.appendChild(el('button', { type: 'button', class: 'seg' + (spec.output === v ? ' active' : ''), text: t, onclick: () => { spec.output = v; drawOut(); refresh(); } })));
       };
       drawOut();
       const left = el('div', { class: 'wiz-form' }, [

@@ -148,6 +148,14 @@ def test_rules():
     assert ch and up[0]["prompt"] == DEFAULT_TEXT
     keep, _ = prompts.build_library([{"id": "default", "name": "기본 프롬프트", "prompt": "내가 고친 기본", "example": ""}], {})
     assert keep[0]["prompt"] == "내가 고친 기본"
+    # v0.18.3: 본문과 교사 의견 사이 빈 줄 없이 한 문단, 최종 재검토에 줄바꿈 금지. 고치지 않고 쓰던 v0.18.2까지의 기본은 새 기본으로
+    assert "빈 줄 1줄" not in DEFAULT_TEXT and "한 줄을 비우고" not in DEFAULT_TEXT and "모든 문장은 이어서 나열합니다." in DEFAULT_TEXT
+    old = (DEFAULT_TEXT.replace("이 문장들은 4단계 글 바로 뒤에 줄을 바꾸지 않고 이어서 씁니다.", "이 문장들은 4단계 문단 뒤에 한 줄을 비우고 씁니다.")
+           .replace("앞뒤에 어떤 문구도 없이 다음 형태로만 출력합니다.\n    - 4단계 생활기록부 글 뒤에 5단계 교사 의견을 바로 이어 쓴 한 문단(줄바꿈·빈 줄 없음)",
+                    "앞뒤에 어떤 문구도 없이 다음 순서로만 출력합니다.\n    - 4단계 생활기록부 한 문단(줄바꿈 없음)\n    - 빈 줄 1줄\n    - 5단계 교사 의견 한 문단(줄바꿈 없음)")
+           .replace(" 문장에서 줄바꿈은 허용하지 않으므로 모든 문장은 이어서 나열합니다.", ""))
+    up, ch = prompts.build_library([{"id": "default", "name": "기본 프롬프트", "prompt": old, "example": ""}], {})
+    assert ch and up[0]["prompt"] == DEFAULT_TEXT, "v0.18.2 기본 지문이 맞지 않음"
     t = prompt_wizard.build({"subject": "수학", "item": "과목별 세부능력 및 특기사항", "output": "single", "compare": False,
                              "banned_words": "", "pairs": [], "extra": [{"text": "숫자는 쓰지 않음", "on": True}, {"text": "꺼진 줄", "on": False}]})
     assert "고등학교 수학 교사" in t and "생활기록부(과목별 세부능력 및 특기사항)" in t and "교사 의견 덧붙이기" not in t

@@ -8,7 +8,7 @@ spec(모두 선택 사항, 빠지면 기본값):
 - banned_personal, no_preface: 참/거짓
 - banned_words: 쓰지 않을 단어(쉼표로 구분)
 - pairs: [{wrong, right}] 틀린/옳은 예시, pair_note: 예시 뒤 설명 줄
-- output: 'opinion'(본문 + 빈 줄 + 교사 의견) / 'single'(본문 한 문단만), opinion_n: 교사 의견 문장 수
+- output: 'opinion'(본문 뒤에 교사 의견을 이어 한 문단) / 'single'(본문 한 문단만), opinion_n: 교사 의견 문장 수
 - recheck, compare: 마지막 점검 단계 넣기
 """
 import copy
@@ -147,8 +147,8 @@ def build(spec=None) -> str:
     final = "앞뒤에 어떤 문구도 없이 다음 순서로만 출력합니다." + f"\n    - {body_no}단계 생활기록부 한 문단(줄바꿈 없음)"
     if s["output"] == "opinion":
         n = (s["opinion_n"] or "2~3").strip()
-        steps.append(("교사 의견 덧붙이기", f"{body_no}단계의 글을 바탕으로 교사의 주관적인 의견이 들어간 평가 {n}문장을 작성합니다. 이 문장들은 {body_no}단계 문단 뒤에 한 줄을 비우고 씁니다."))
-        final += f"\n    - 빈 줄 1줄\n    - {len(steps)}단계 교사 의견 한 문단(줄바꿈 없음)"
+        steps.append(("교사 의견 덧붙이기", f"{body_no}단계의 글을 바탕으로 교사의 주관적인 의견이 들어간 평가 {n}문장을 작성합니다. 이 문장들은 {body_no}단계 글 바로 뒤에 줄을 바꾸지 않고 이어서 씁니다."))
+        final = "앞뒤에 어떤 문구도 없이 다음 형태로만 출력합니다." + f"\n    - {body_no}단계 생활기록부 글 뒤에 {len(steps)}단계 교사 의견을 바로 이어 쓴 한 문단(줄바꿈·빈 줄 없음)"
     wq = ", ".join(repr_q(w) for w in words)
     comma = any(COMMA_LINE in l for l in style)
     if words and comma:
@@ -159,7 +159,7 @@ def build(spec=None) -> str:
         final += "\n    쉼표(,)는 꼭 필요한 경우가 아니면 쓰지 않습니다."
     steps.append(("최종 출력 형태", final))
     if s["recheck"]:
-        steps.append(("최종 재검토", "출력물을 처음부터 끝까지 다시 읽고, 주어와 서술어가 어울리지 않거나 어색한 문장, 작성 지침을 지키지 않은 문장을 고칩니다."))
+        steps.append(("최종 재검토", "출력물을 처음부터 끝까지 다시 읽고, 주어와 서술어가 어울리지 않거나 어색한 문장, 작성 지침을 지키지 않은 문장을 고칩니다. 문장에서 줄바꿈은 허용하지 않으므로 모든 문장은 이어서 나열합니다."))
     if s["compare"]:
         steps.append(("예시와 비교", "예시가 있으면 최종 글과 예시의 문장 구조, 문장 길이, 분위기, 어조를 비교해 같은 사람이 쓴 것 같은지 100점 만점으로 스스로 평가하고, 100점이 될 때까지 고칩니다. 점수와 평가 과정은 출력하지 않습니다."))
     out.append("# 업무 절차")

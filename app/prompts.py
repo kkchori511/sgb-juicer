@@ -7,6 +7,7 @@ AI 실행 확인 창에서 이번에 쓸 프롬프트를 고른다(작업 종류
 결과 형식·분량·예시·성취기준 규칙은 코드에 고정하고, 지침과 예시만 사용자가 고친다.
 AI에는 학번·이름을 넣지 않는다(부르는 쪽에서 내용만 넘긴다).
 """
+import hashlib
 import uuid
 
 from .prompt_default import DEFAULT_TEXT, LEGACY_TEXT, POLISH_TEXT, REFINE_TEXT, SCAN_TEXT, VOICE_TEXT
@@ -155,6 +156,10 @@ LEGACY_BUILTIN = {
         "- 중복 표현을 줄이고 문장 사이 흐름을 매끄럽게 한다.\n" + _COMMON),
     "default": LEGACY_TEXT,
 }
+# 고치지 않고 쓰던 예전 기본 글의 SHA-256(글 전체를 두지 않고 지문만) — 새 기본으로 바꿔 준다
+LEGACY_HASH = {
+    "default": {"59e066f633ef8bb082fc48ba910b1adf0c07a19d8d9ea3ef60889f13b20f6ad2"},  # v0.17.7~0.18.2(본문 + 빈 줄 + 교사 의견)
+}
 KIND_DEFAULT = {"synth": "default", "refine": "refine", "polish": "polish"}
 # 여러 학생에게 같은 자료로 쓰는 일이 많아 종합·생성에는 늘 붙인다(프롬프트를 바꿔도 유지)
 SYNTH_RULE = "\n\n[다른 학생과 겹치지 않기]\n- 같은 성취기준·활동 개요를 쓰는 다른 학생들과 표현·문장 구성이 반드시 50% 이상 다르게 작성한다."
@@ -193,7 +198,8 @@ def build_library(saved_lib, old_prompts):
              # 프롬프트 마법사로 만든 방식(대화/양식)과 이 프롬프트를 쓴 태그 이름
              "made": str(x.get("made") or "")[:10],
              "tags": [str(t)[:40] for t in (x.get("tags") or []) if str(t).strip()][:30] if isinstance(x.get("tags"), list) else []}
-        if e["id"] in LEGACY_BUILTIN and e["prompt"].strip() == LEGACY_BUILTIN[e["id"]].strip():  # 고치지 않고 쓰던 예전 기본 → 새 기본
+        if ((e["id"] in LEGACY_BUILTIN and e["prompt"].strip() == LEGACY_BUILTIN[e["id"]].strip())
+                or hashlib.sha256(e["prompt"].strip().encode("utf-8")).hexdigest() in LEGACY_HASH.get(e["id"], ())):  # 고치지 않고 쓰던 예전 기본 → 새 기본
             e["prompt"] = BUILTIN[e["id"]]["prompt"]
             changed = True
         if e["builtin"]:

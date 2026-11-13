@@ -917,7 +917,7 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 .tw-confirmed { background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 8px 12px; font-size: 13.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .tw-grid { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(0, 1.15fr); gap: 12px; align-items: start; }
 .tw-left { display: flex; flex-direction: column; gap: 6px; }
-.tw-src { max-height: 160px; overflow: auto; font-size: 13.5px; }
+.tw-src { max-height: 400px; overflow: auto; font-size: 13.5px; }
 .tw-prhead { display: flex; align-items: center; gap: 6px; }
 .tw-prhead select { width: auto; max-width: 220px; font-size: 13px; }
 .tw-prompt { font-size: 13px; line-height: 1.5; min-height: 180px; }
@@ -1009,3 +1009,19 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 .cw-cand.locked { background: #fffbeb; }
 .cw-cand-text { font-size: 12.5px; white-space: pre-wrap; color: var(--text); }
 @media (max-width: 980px) { .cw-body { grid-template-columns: minmax(0, 1fr); } .wiz-picks { grid-template-columns: 1fr; } }
+
+/* 앱 창(pywebview)은 글자 선택을 막아 두므로, 글 내용 칸만 끌어 고를 수 있게 푼다(원문에서 고른 부분 넣기·복사) */
+.cmp-text, .tw-cand-text, .cw-msg .cw-text, .cw-cand-text, .rcard-body { -webkit-user-select: text; user-select: text; cursor: text; }
+/* 스킬화 창 */
+.sk-tries { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.sk-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.sk-col { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.sk-text { max-height: 34vh; }
+.sk-ok { color: #047857; }
+.sk-no { color: #b45309; }
+.sk-prompt { width: 100%; min-height: 180px; font-size: 13px; }
+.sk-foot { flex-wrap: wrap; row-gap: 8px; }
+.sk-foot label.inline { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.sk-foot input[type=text] { width: 180px; }
+.sk-ctrl { padding: 0 20px 4px; gap: 10px; }
+.sk-ctrl label.inline { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
