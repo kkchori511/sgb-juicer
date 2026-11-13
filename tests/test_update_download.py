@@ -87,7 +87,26 @@ def test_bad_hash_and_all_fail():
         pass
 
 
+def test_event_has_warning():
+    """시작할 때 자동 확인한 업데이트 알림에도 '업데이트 전 꼭 읽기' 글이 실려야 입력 칸이 뜬다."""
+    from app.api import Api
+    api = Api()
+    seen = []
+    api._emit = seen.append
+    real = updater.check
+    updater.check = lambda: {"ok": True, "available": True, "version": "9.9.9", "notes": "n", "can_apply": True,
+                             "warning": "메뉴가 옮겨집니다.", "confirm_word": updater.CONFIRM_WORD, "sha256": SHA}
+    try:
+        api._check_update()
+    finally:
+        updater.check = real
+    assert seen and seen[0]["warning"] == "메뉴가 옮겨집니다." and seen[0]["confirm_word"] == updater.CONFIRM_WORD, seen
+    r = api.update_apply(None)
+    assert not r["ok"] and r.get("code") == "need_confirm", r
+
+
 if __name__ == "__main__":
+    test_event_has_warning()
     test_mirror_when_blocked()
     test_resume()
     test_bad_hash_and_all_fail()

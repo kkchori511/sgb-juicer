@@ -192,7 +192,8 @@ class Api:
         info = updater.check()
         if info.get("ok") and info.get("available"):
             self._update_info = info
-            self._emit({"type": "update_available", **{k: info[k] for k in ("version", "notes", "can_apply")}})
+            # 화면이 [지금 업데이트]에서 '업데이트 전 꼭 읽기' 안내와 입력 칸을 띄우려면 warning도 함께 보내야 한다
+            self._emit({"type": "update_available", **{k: info.get(k) for k in ("version", "notes", "can_apply", "warning", "confirm_word")}})
 
     def guide_html(self):
         from .paths import web_dir
@@ -1789,7 +1790,7 @@ class Api:
         if not info:
             raise updater.UpdateError("새 버전 정보가 없습니다. 다시 확인해 주세요.")
         if info.get("warning") and (confirm or "").strip() != updater.CONFIRM_WORD:
-            raise updater.UpdateError(f"이 업데이트는 안내를 읽고 '{updater.CONFIRM_WORD}'를 입력해야 진행합니다.")
+            raise updater.UpdateError(f"이 업데이트는 안내를 읽고 '{updater.CONFIRM_WORD}'를 입력해야 진행합니다.", "need_confirm")
         if not updater.can_apply():
             raise updater.UpdateError("Windows exe에서만 자동 업데이트할 수 있습니다.")
         if not info.get("sha256"):

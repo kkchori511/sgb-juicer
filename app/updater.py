@@ -96,7 +96,9 @@ def warnings_between(latest_tag: str, latest_body: str, local: str = VERSION, ma
 
 
 class UpdateError(Exception):
-    pass
+    def __init__(self, msg, code=None):
+        super().__init__(msg)
+        self.code = code
 
 
 def parse_version(v: str):

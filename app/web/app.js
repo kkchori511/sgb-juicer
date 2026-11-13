@@ -5306,8 +5306,15 @@
         if (!typed) return;
       } else if (!(await confirmBox(`v${updateInfo.version}로 업데이트합니다.\n자료를 먼저 백업한 뒤 새 버전을 내려받고 앱을 다시 시작합니다.`, '업데이트'))) return;
       $('updateNowBtn').disabled = true;
-      const r = await call('update_apply', typed);
-      if (!r) $('updateNowBtn').disabled = false;
+      let r = await api.update_apply(typed);
+      if (r && !r.ok && r.code === 'need_confirm') {
+        // 안내 글을 못 받은 채로 눌렀으면: 다시 확인해 안내와 입력 칸을 띄운다
+        const c = await api.update_check();
+        if (c && c.ok && c.available) { updateInfo = c; typed = c.warning ? await updateWarnSheet(c) : null; }
+        r = typed ? await api.update_apply(typed) : null;
+      }
+      if (r && !r.ok) alertBox(r.error || '업데이트하지 못했습니다.');
+      if (!r || !r.ok) $('updateNowBtn').disabled = false;
     });
     $('recSlot').addEventListener('change', async (e) => {
       const want = e.target.value;
