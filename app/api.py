@@ -117,6 +117,63 @@ class Api:
     def attach(self, window):
         self._window = window
 
+    # ---------- 실행 인트로 ----------
+    INTRO_MIN = 2.1  # 짜는 동작 한 번은 보여 준다(너무 빨리 사라져 깜빡이지 않게)
+
+    def attach_splash(self, splash, maximize=False):
+        """인트로 창을 기억한다. 화면이 끝내 신호를 못 보내도 본 창은 뜨게 20초 뒤 대비책."""
+        import time
+
+        self._splash, self._splash_t0, self._splash_max, self._shown = splash, None, bool(maximize), splash is None
+        self._splash_lock = threading.Lock()
+        self._splash_seen = threading.Event()  # 인트로가 실제로 화면에 그려진 때부터 최소 시간을 센다
+
+        def _loaded():
+            if self._splash_t0 is None:
+                self._splash_t0 = time.time()
+            self._splash_seen.set()
+        if splash is not None:
+            try:
+                splash.events.loaded += _loaded
+            except Exception:
+                _loaded()
+            t = threading.Timer(20, self._show_main)
+            t.daemon = True
+            t.start()
+
+    def _show_main(self):
+        import time
+
+        lock = getattr(self, "_splash_lock", None)
+        if lock is None:
+            return
+        with lock:
+            if self._shown:
+                return
+            self._shown = True
+        self._splash_seen.wait(4)  # 인트로가 아직 안 그려졌으면 잠깐 기다린다(끝내 안 그려져도 본 창은 뜸)
+        wait = self.INTRO_MIN - (time.time() - (self._splash_t0 or time.time()))
+        if wait > 0:
+            time.sleep(wait)
+        try:
+            if self._window:
+                self._window.show()
+                if self._splash_max:
+                    self._window.maximize()
+        finally:
+            try:
+                if self._splash is not None:
+                    self._splash.destroy()
+            except Exception:
+                pass
+            self._splash = None
+
+    @safe
+    def app_ready(self):
+        """화면 준비 끝(또는 알림 창을 띄우기 직전): 인트로를 닫고 본 창을 보인다. 여러 번 불러도 한 번만."""
+        self._show_main()
+        return {}
+
     def _emit(self, payload: dict):
         if self._window:
             self._window.evaluate_js(f"window.onAppEvent({json.dumps(payload, ensure_ascii=False)})")

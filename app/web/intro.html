@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; script-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>생기부 착즙기</title>
+<style>
+
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;}body{min-height:100vh;display:grid;place-items:center;background:#eaf0f5;color:#263b4b;font-family:"Segoe UI","Malgun Gothic",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.splash{position:relative;width:min(420px,100vw);height:420px;overflow:hidden;border:1px solid #dce5eb;border-radius:28px;background:#fff;box-shadow:0 16px 48px #31495c12;text-align:center;padding:24px 30px}
+.art{display:block;width:100%;height:250px;overflow:visible}h1{margin:9px 0 8px;font-size:26px;letter-spacing:-1.1px;font-weight:700;line-height:1.4}.loading{margin:0;color:#617583;font-size:13px;line-height:22px}.version{display:block;color:#85939d;font-size:11px;letter-spacing:.8px;margin-top:14px;font-variant-numeric:tabular-nums}.dots{display:inline-flex;gap:3px;margin-left:4px;vertical-align:middle}.dots i{display:block;width:3px;height:3px;background:currentColor;border-radius:50%;animation:dot 2.1s infinite}.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+.orange{transform-box:fill-box;transform-origin:50% 35%;animation:squeeze var(--cycle) ease-in-out infinite}.thumb{transform-box:fill-box;transform-origin:85% 20%;animation:thumb var(--cycle) ease-in-out infinite}.finger{animation:finger var(--cycle) ease-in-out infinite}.f2{animation-delay:.035s}.f3{animation-delay:.07s}.f4{animation-delay:.1s}.bead{transform-box:fill-box;transform-origin:50% 0;animation:bead var(--cycle) ease-in-out infinite}.drop{opacity:0;animation:fall var(--cycle) cubic-bezier(.35,0,.75,.55) infinite}.d2{animation-delay:var(--delay2)}.d3{animation-delay:var(--delay3)}
+@keyframes squeeze{0%,12%,87%,100%{transform:scale(1)}30%,66%{transform:scale(.89,1.045)}}@keyframes thumb{0%,12%,87%,100%{transform:rotate(0)}30%,66%{transform:translate(-3px,5px) rotate(-5deg)}}@keyframes finger{0%,12%,87%,100%{transform:translateX(0)}30%,66%{transform:translateX(6px)}}@keyframes bead{0%,12%,87%,100%{transform:scale(.65)}30%,66%{transform:scale(1.15)}}@keyframes fall{0%,26%{opacity:0;transform:translateY(-4px) scale(.55)}29%{opacity:1}48%{opacity:1;transform:translateY(45px) scale(.85)}54%,100%{opacity:0;transform:translateY(55px) scale(.85)}}@keyframes dot{0%,65%,100%{opacity:.3}30%{opacity:1}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.drop{opacity:0}.drop.d1{opacity:1;transform:translateY(20px) scale(.8)}.dots i{opacity:.65}.pool{transform:scaleY(.65)!important}.ripple{opacity:0!important}}
+@media(max-width:359px){.splash{padding-left:18px;padding-right:18px}h1{font-size:24px}}
+
+.splash{--cycle:2.1s;--delay2:.27s;--delay3:.54s}
+.splash{background:#f6f9fc}.art{height:250px}h1{color:#2c455a}
+
+/* 앱 인트로 창: 창을 꽉 채움 */
+body{background:#f6f9fc;overflow:hidden}.splash{width:100vw;height:100vh;border:0;border-radius:0;box-shadow:none}
+</style>
+</head>
+<body>
+<!-- 실행 인트로(시안 A · docs/design/intro). 버전은 main.py가 채운다. 앱 준비가 끝나면 닫힌다. -->
+<main class="splash" aria-labelledby="app-name" aria-busy="true">
+<svg class="art" viewBox="0 0 300 270" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+<rect x="39" y="10" width="222" height="242" rx="36" fill="#fff" stroke="#cbdce7" stroke-width="1.5"/><g stroke="#b4d6ed" stroke-width="1.5"><path d="M42 47H258"/><path d="M42 80H258"/><path d="M42 113H258"/><path d="M42 146H258"/><path d="M42 179H258"/><path d="M42 212H258"/></g><path d="M107 82 C96 63 115 48 140 48 C168 50 190 52 217 31 L247 53 L224 109 C213 129 206 149 193 158 L175 120 L117 100Z" fill="#edc19b" stroke="#bd8c69" stroke-width="2.6" stroke-linejoin="round"/><g class="orange"><circle cx="148" cy="135" r="57" fill="#f39b36" stroke="#dc842c" stroke-width="3"/><circle cx="148" cy="135" r="50" fill="#fff6df"/><g fill="#f6a444" stroke="#fff6df" stroke-width="3" stroke-linejoin="round"><path d="M148 135 L192.83 138.92 A45 45 0 0 1 182.47 163.93 Z"/><path d="M148 135 L176.93 169.47 A45 45 0 0 1 151.92 179.83 Z"/><path d="M148 135 L144.08 179.83 A45 45 0 0 1 119.07 169.47 Z"/><path d="M148 135 L113.53 163.93 A45 45 0 0 1 103.17 138.92 Z"/><path d="M148 135 L103.17 131.08 A45 45 0 0 1 113.53 106.07 Z"/><path d="M148 135 L119.07 100.53 A45 45 0 0 1 144.08 90.17 Z"/><path d="M148 135 L151.92 90.17 A45 45 0 0 1 176.93 100.53 Z"/><path d="M148 135 L182.47 106.07 A45 45 0 0 1 192.83 131.08 Z"/></g></g>
+<g fill="#f3cfac" stroke="#bd8c69" stroke-width="2.6" stroke-linejoin="round">
+<path class="finger f1" d="M105 85 C88 72 76 81 79 94 C81 106 100 114 108 105 C113 99 111 91 105 85Z"/>
+<path class="finger f2" d="M98 110 C81 99 70 109 76 122 C80 133 100 137 105 126 C108 120 104 114 98 110Z"/>
+<path class="finger f3" d="M96 136 C80 126 72 136 79 148 C85 158 103 161 107 150 C108 145 102 140 96 136Z"/>
+<path class="finger f4" d="M106 160 C92 152 85 160 93 171 C100 181 115 182 119 173 C120 167 112 163 106 160Z"/>
+<path class="thumb" d="M226 53 C206 60 192 68 177 76 C163 83 150 90 143 100 C136 112 147 122 160 117 L184 105 C195 102 201 110 205 114"/>
+</g><path d="M145 192 C139 200 142 207 148 207 C155 207 158 200 150 192Z" class="bead" fill="#edb942" stroke="#d79a32" stroke-width="1.5"/><g transform="translate(148 199)"><g class="drop d1"><path d="M0 0 C-3 6-7 11-7 15 A7 7 0 0 0 7 15 C7 11 3 6 0 0Z" fill="#edb942" stroke="#d69a2e" stroke-width="1.5"/><path d="M-2 9 Q-5 13-4 15" fill="none" stroke="#fff4cf" stroke-width="2.5" stroke-linecap="round"/></g><g class="drop d2"><path d="M0 0 C-3 6-7 11-7 15 A7 7 0 0 0 7 15 C7 11 3 6 0 0Z" fill="#edb942" stroke="#d69a2e" stroke-width="1.5"/><path d="M-2 9 Q-5 13-4 15" fill="none" stroke="#fff4cf" stroke-width="2.5" stroke-linecap="round"/></g><g class="drop d3"><path d="M0 0 C-3 6-7 11-7 15 A7 7 0 0 0 7 15 C7 11 3 6 0 0Z" fill="#edb942" stroke="#d69a2e" stroke-width="1.5"/><path d="M-2 9 Q-5 13-4 15" fill="none" stroke="#fff4cf" stroke-width="2.5" stroke-linecap="round"/></g></g>
+</svg>
+<h1 id="app-name">생기부 착즙기</h1>
+<p class="loading" role="status"><span>불러오는 중<span class="sr-only">…</span></span><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></p>
+<small class="version">v0.0.0</small>
+</main>
+<style>.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}</style>
+</body>
+</html>

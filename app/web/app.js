@@ -2139,8 +2139,8 @@
       el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'checkbox', checked: sel.length && sel.length === v.records.length, onchange: (e) => { R.selected = new Set(e.target.checked ? v.records.map((r) => r.id) : []); renderRecords(); } }), '전체 선택']),
       (() => { const yet = v.records.filter((r) => !r.candidates.length && !r.original); return el('button', { type: 'button', class: 'small', disabled: !yet.length, title: '정제·다듬기 후보가 없고 AI 결과를 반영한 적도 없는 기록만 고릅니다', text: `정제 안 한 기록만 선택 (${yet.length})`, onclick: () => { R.selected = new Set(yet.map((r) => r.id)); renderRecords(); } }); })(),
       el('span', { class: 'muted', text: `선택 ${sel.length}건` }),
-      el('button', { type: 'button', class: 'primary ai-btn', disabled: locked || !sel.length || pairFull(), title: pairFull() ? PAIR_FULL_TIP : '', text: `선택 기록 종합하기 (${sel.length})`, onclick: openSynth }),
-      recWizBtn('synth', () => v.records.filter((r) => R.selected.has(r.id)).map((r) => r.content).join('\n\n') || (v.records[0] ? v.records[0].content : ''), locked),
+      aiPair(el('button', { type: 'button', class: 'primary ai-btn', disabled: locked || !sel.length || pairFull(), title: pairFull() ? PAIR_FULL_TIP : '', text: `선택 기록 종합하기 (${sel.length})`, onclick: openSynth }),
+        recWizBtn('synth', () => v.records.filter((r) => R.selected.has(r.id)).map((r) => r.content).join('\n\n') || (v.records[0] ? v.records[0].content : ''), locked)),
       (() => { const recs = v.records.filter((r) => R.selected.has(r.id) && r.kind !== 'existing'); return el('button', { type: 'button', class: 'ai-btn', disabled: locked || !recs.length, title: '고른 학생관찰기록을 한꺼번에 정제합니다(기존 완성문은 빼고, 다듬기는 카드에서 한 건씩)', text: `선택 기록 정제 (${recs.length})`, onclick: (e) => aiRecords(recs, e.currentTarget) }); })(),
       el('button', { type: 'button', disabled: locked || !sel.length, text: '태그 일괄 지정', onclick: bulkTag }),
       el('button', { type: 'button', disabled: locked || !sel.length, text: '다른 항목으로 이동', onclick: () => openMove(v.records.filter((r) => R.selected.has(r.id))) }),
@@ -2180,21 +2180,22 @@
       r.weight !== null && r.weight !== undefined ? el('span', { class: 'badge', text: `비중 ${r.weight}%` }) : null,
       r.original ? el('span', { class: 'badge src', title: '원문은 [수정]에서 볼 수 있습니다', text: 'AI 반영됨' }) : null,
       el('span', { class: 'badge src', text: sourceLabel(r.source) }),
+      el('span', { class: 'rcard-acts' }, [
+        el('button', { type: 'button', class: 'small', disabled: locked, text: '수정', onclick: () => recordForm(r, r.kind) }),
+        el('button', { type: 'button', class: 'small', disabled: locked, title: '이 기록(또는 문단)을 다른 항목으로', text: '이동', onclick: () => openMove([r]) }),
+        el('button', { type: 'button', class: 'small link danger-text', disabled: locked, text: '삭제', onclick: async () => {
+          if (!(await confirmBox(`이 기록을 지웁니다.${r.candidates.length ? ` 정제 후보 ${r.candidates.length}개도 함께 지워집니다.` : ''}`, '삭제'))) return;
+          if (await mutate('delete_record', r.id)) loadStudent(true);
+        } })]),
     ]));
     card.appendChild(el('div', { class: 'rcard-body', text: r.content }));
     const blocked = r.kind === 'existing' && pairFull();
     const aiBtn = el('button', { type: 'button', class: 'ai-btn', disabled: locked || blocked, title: blocked ? PAIR_FULL_TIP : '', text: r.kind === 'existing' ? '다듬기(AI)' : '정제(AI)' });
     aiBtn.addEventListener('click', () => aiRecord(r, aiBtn));
     card.appendChild(el('div', { class: 'rcard-foot' }, [
-      bytesEl(r.bytes, r.kind === 'existing' ? R.target : 0), el('span', { class: 'spacer' }),
-      aiBtn, recWizBtn(r.kind === 'existing' ? 'polish' : 'refine', r.content, locked),
+      aiPair(aiBtn, recWizBtn(r.kind === 'existing' ? 'polish' : 'refine', r.content, locked)),
       el('button', { type: 'button', disabled: locked, title: 'AI를 거치지 않고 이 기록 내용을 그대로 최종안으로 넣습니다', text: '그대로 최종안으로', onclick: () => adoptRecordFinal(r) }),
-      el('button', { type: 'button', disabled: locked, text: '수정', onclick: () => recordForm(r, r.kind) }),
-      el('button', { type: 'button', disabled: locked, title: '이 기록(또는 문단)을 다른 항목으로', text: '이동', onclick: () => openMove([r]) }),
-      el('button', { type: 'button', class: 'link danger-text', disabled: locked, text: '삭제', onclick: async () => {
-        if (!(await confirmBox(`이 기록을 지웁니다.${r.candidates.length ? ` 정제 후보 ${r.candidates.length}개도 함께 지워집니다.` : ''}`, '삭제'))) return;
-        if (await mutate('delete_record', r.id)) loadStudent(true);
-      } }),
+      el('span', { class: 'spacer' }), bytesEl(r.bytes, r.kind === 'existing' ? R.target : 0),
     ]));
     if (r.candidates.length) {
       const c = el('div', { class: 'cands' }, [el('div', { class: 'hint', style: 'margin:0', text: `${r.kind === 'existing' ? '다듬기' : '정제'} 후보 ${r.candidates.length}/3 (잠금 포함 최근 3개 보관)` })]);
@@ -2212,8 +2213,10 @@
   function recWizCtx(kind, text) {
     return { rec: { gid: R.slot.group_id, item: R.slot.item, sno: R.sno, kind, text: text || '', label: `${R.view.student.name} · ${R.slot.label}`, year: ys.year } };
   }
+  // AI 버튼과 그 마법사 버튼을 한 덩어리로(보라 꽉 찬 버튼 + 보라 테두리 버튼)
+  const aiPair = (aiBtn, wiz) => el('span', { class: 'ai-pair' }, [aiBtn, wiz]);
   function recWizBtn(kind, text, locked) {
-    return el('button', { type: 'button', class: 'small wiz-btn', disabled: locked, title: `대화하며 다듬거나 양식을 채워 ${KIND_NAMES[kind]} 프롬프트를 만듭니다`, text: '🪄 마법사',
+    return el('button', { type: 'button', class: 'wiz-btn', disabled: locked, title: `대화하며 다듬거나 양식을 채워 ${KIND_NAMES[kind]} 프롬프트를 만듭니다`, text: '🪄 마법사',
       onclick: async () => { if (await flushFinal()) openWizardMenu(recWizCtx(kind, typeof text === 'function' ? text() : text)); } });
   }
   function recUseFor(rc) {
@@ -2544,7 +2547,7 @@
       }
     };
     upd();
-    fb.append(ta, el('div', { class: 'final-actions' }, [bc, saveState, el('span', { class: 'spacer' }), saveBtn, polishBtn, polishWiz, closeBtn]));
+    fb.append(ta, el('div', { class: 'final-actions' }, [bc, saveState, el('span', { class: 'spacer' }), saveBtn, aiPair(polishBtn, polishWiz), closeBtn]));
     if (closed) fb.appendChild(el('div', { class: 'hint', text: `● ${f.closed_at || ''} 마감 — 기록·AI·최종안 편집이 잠겼습니다. 조회·복사·내보내기는 됩니다.` }));
     finSec.appendChild(fb);
 
@@ -3921,7 +3924,7 @@
     pr.addEventListener('input', onEdit); ex.addEventListener('input', onEdit);
     const tagNm = (TV.data.tags.find((x) => x.id === TV.tag) || {}).name || '';
     prCard.append(el('div', { class: 'tw-row' }, [el('div', { class: 'tw-box-title', text: '✍️ 프롬프트(지침)' }), el('span', { class: 'spacer' }),
-      el('button', { type: 'button', class: 'small wiz-btn', title: '대화하며 다듬거나 양식을 채워 프롬프트를 만듭니다', text: '🪄 프롬프트 마법사', onclick: async () => { if (await twFlushOrWarn()) openWizardMenu({ tag: TV.tag, tagName: tagNm, rid: rec.id }); } })]),
+      el('button', { type: 'button', class: 'wiz-btn', title: '대화하며 다듬거나 양식을 채워 프롬프트를 만듭니다', text: '🪄 프롬프트 마법사', onclick: async () => { if (await twFlushOrWarn()) openWizardMenu({ tag: TV.tag, tagName: tagNm, rid: rec.id }); } })]),
       el('label', { class: 'tw-libline' }, [el('span', { class: 'muted', text: '불러온 프롬프트' }), libSel]), fromLine, pr,
       el('details', { open: !!ex.value }, [el('summary', { text: '예시(선택)' }), ex]));
     const model = el('select', { 'aria-label': '모델' }); fillModelSelect(model);
@@ -3929,7 +3932,7 @@
       ...[['original', '처음 원문'], ['current', '지금 기록 내용']].map(([v, label]) => el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'radio', name: 'twSrc', checked: TW.src === v, onchange: () => { TW.src = v; } }), label]))]);
     const req = el('input', { type: 'text', placeholder: '이번 추가 요청(선택): 예) 탐구 과정을 더 살려서', value: TW.req, oninput: (e) => { TW.req = e.target.value; } });
     const full = trials.length >= 3 && trials.every((t) => t.locked);
-    const go = el('button', { type: 'button', class: 'primary ai-btn', disabled: !tvEditable(rec) || full, title: full ? '후보 3칸이 모두 잠겨 있습니다' : '', text: '✨ 이 프롬프트로 변환' });
+    const go = el('button', { type: 'button', class: 'primary ai-btn', disabled: !tvEditable(rec) || full, title: full ? '후보 3칸이 모두 잠겨 있습니다' : '', text: '이 프롬프트로 변환' });
     go.addEventListener('click', () => twRunTrial(rec, { src: TW.src, steps: [{ prompt: pr.value, example: ex.value, request: TW.req.trim() }] }, null, model, go));
     prCard.append(srcBox, req, el('div', { class: 'tw-row' }, [el('label', { class: 'inline', style: 'margin:0' }, ['모델', model]), el('span', { class: 'spacer' }), go]));
     if (!tvEditable(rec)) prCard.appendChild(el('p', { class: 'warn-text', text: '마감·비활성·보관 학년도 기록은 변환할 수 없습니다.' }));
@@ -3961,7 +3964,7 @@
       const eff = [...t.chain.steps].reverse().find((x) => x.prompt) || t.chain.steps[0];
       const fp = el('textarea', { rows: 8, 'aria-label': '이 단계의 전체 프롬프트' }); fp.value = eff.prompt;
       const det = el('details', {}, [el('summary', { text: '전체 프롬프트 고치기(선택)' }), el('p', { class: 'hint', text: '그대로 두면 지금까지의 지침을 그대로 지키며 요청만 반영합니다. 고치면 이 단계부터 고친 지침을 씁니다.' }), fp]);
-      const run = el('button', { type: 'button', class: 'primary ai-btn small', text: '✨ 이어서 고치기' });
+      const run = el('button', { type: 'button', class: 'primary ai-btn small', text: '이어서 고치기' });
       const tools = contSrcTools(rq, () => [...document.querySelectorAll('#tvMain .tw-src')]);
       run.addEventListener('click', () => {
         const changed = fp.value.trim() && fp.value.trim() !== eff.prompt.trim();
@@ -4857,7 +4860,7 @@
           el('div', { class: 'col-label', text: '예시 (선택)' }), exIn, el('p', { class: 'hint', text: r0.note })])]),
         el('div', { class: 'sheet-foot' }, [el('label', { class: 'inline', style: 'margin:0' }, ['이름', nameIn]), el('label', { class: 'inline', style: 'margin:0' }, ['모델', wizModel]), el('span', { class: 'spacer' }),
           el('button', { type: 'button', text: '취소', onclick: closeSheet }),
-          el('button', { type: 'button', class: 'primary ai-btn', text: '✨ AI로 정교하게 만들기', onclick: async () => {
+          el('button', { type: 'button', class: 'primary ai-btn', text: 'AI로 정교하게 만들기', onclick: async () => {
             const name = nameIn.value.trim() || `${ctx && ctx.tagName ? ctx.tagName : spec.subject || '양식'} 프롬프트`;
             const ex = exIn.value;
             if (!(await aiAsk('프롬프트 만들기(양식)', [['재료', '양식 칸 내용'], ['모델', modelName(wizModel)], ['AI 호출', '1번']]))) return;
@@ -6698,7 +6701,12 @@
     bindConfigInputs();
   }
 
+  // 실행 인트로를 닫고 본 창을 보인다(알림 창을 띄우기 전과 시작이 끝났을 때. 여러 번 불러도 한 번만)
+  const appReady = () => { try { if (api && api.app_ready) api.app_ready(); } catch (e) { /* 인트로가 없으면 그만 */ } };
   async function init() {
+    try { await initInner(); } finally { appReady(); }
+  }
+  async function initInner() {
     api = window.pywebview.api;
     info = await api.app_info();
     $('verText').textContent = 'v' + info.version.replace(/\.0$/, '');
@@ -6708,6 +6716,7 @@
     const prob = c.problem || {};
     // 설정 파일이 있는데 읽지 못함: 처음 사용처럼 시작 설정을 띄우지 않고 알린 뒤 다시 시도
     if (prob.error) {
+      appReady();
       await modal(`<b>설정 파일을 읽지 못했습니다.</b><br>${escHtml(prob.error)}<br><br>백신 프로그램이 파일을 잠깐 잡고 있거나, 업데이트 직후일 수 있습니다. 자료는 그대로 있습니다. 잠시 뒤 [다시 시도]를 눌러 주세요.<br><span class="muted">자료 폴더: ${escHtml(dataDir)}</span>`, false, true, '다시 시도');
       location.reload();
       return;
@@ -6722,6 +6731,7 @@
     api.run_cost().then((r) => { if (r && r.ok) { runCost = r.run_cost; $('runCost').textContent = fmtCredit(runCost); } });
     const r = await api.year_state();
     if (!r || !r.ok) { // 학년도 자료를 열다 오류: 시작 설정으로 넘어가지 않는다
+      appReady();
       await modal(`<b>학년도 자료를 읽지 못했습니다.</b><br>${escHtml((r && r.error) || '알 수 없는 오류')}<br><br>자료는 지우지 않았습니다. 잠시 뒤 [다시 시도]를 눌러 주세요. 계속되면 이 화면을 찍어 알려 주세요.<br><span class="muted">자료 폴더: ${escHtml(dataDir)}</span>`, false, true, '다시 시도');
       location.reload();
       return;

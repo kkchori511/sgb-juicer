@@ -4,6 +4,17 @@ from . import APP_NAME, VERSION, config
 from .api import Api
 
 
+def _intro_html():
+    """실행 인트로(작은 창): 손이 오렌지를 짜 과즙이 떨어지는 반복 애니메이션. 파일이 없으면 인트로 없이 시작."""
+    try:
+        from .paths import web_dir
+
+        html = (web_dir() / "intro.html").read_text(encoding="utf-8")
+    except Exception:
+        return None
+    return html.replace("v0.0.0", f"v{VERSION} 베타")
+
+
 def selftest(out_path):
     """빌드 확인용(CI): 묶인 라이브러리가 exe 안에서 동작하는지 본다. 창은 띄우지 않는다."""
     import io
@@ -91,13 +102,23 @@ def main():
         kwargs = {"x": geo["x"], "y": geo["y"], "width": geo["width"], "height": geo["height"]}
     else:
         kwargs = {"width": 1366, "height": 860, "maximized": True}  # 첫 실행은 최대화
+    intro = _intro_html()
     window = webview.create_window(
         f"{APP_NAME} v{VERSION} (베타)",
         url="app/web/index.html",  # pywebview가 앱 루트(_MEIPASS) 기준 내장 서버로 제공
         js_api=api,
         min_size=(1024, 640),
-        **kwargs,
+        hidden=bool(intro),  # 인트로를 보이는 동안 숨겨 두고, 화면 준비가 끝나면(app_ready) 보인다
+        **{k: v for k, v in kwargs.items() if not (intro and k == "maximized")},
     )
+    splash = None
+    if intro:
+        try:
+            splash = webview.create_window(APP_NAME, html=intro, width=420, height=420, frameless=True, resizable=False,
+                                           on_top=True, easy_drag=True, background_color="#f6f9fc")
+        except Exception:
+            splash = None
+    api.attach_splash(splash, bool(kwargs.get("maximized")))
     api.attach(window)
     window.events.closing += api.on_closing
     webview.start()

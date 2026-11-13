@@ -871,7 +871,14 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 .ai-conf select#aiPrompt { max-width: 260px; }
 
 /* 프롬프트 생성 마법사 */
-.wiz-btn { background: linear-gradient(135deg, #fef3c7, #fde68a); border-color: #f59e0b; font-weight: 800; }
+.wiz-btn { background: #fff; border-color: #a78bfa; color: #6d28d9; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.wiz-btn:hover:not(:disabled) { background: #f5f3ff; border-color: #7c3aed; }
+.wiz-btn:disabled { background: #fafafa; border-color: #e5e7eb; color: #9ca3af; }
+/* AI 버튼 + 마법사 버튼을 한 덩어리로 */
+.ai-pair { display: inline-flex; align-items: stretch; flex: none; }
+.ai-pair > button { margin: 0; }
+.ai-pair > button:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.ai-pair > .wiz-btn { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
 .wiz-body { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; }
 .wiz-form { display: flex; flex-direction: column; gap: 8px; max-height: 70vh; overflow: auto; padding-right: 4px; }
 .wiz-sec { border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; background: var(--input); }
@@ -1039,3 +1046,4 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 option.opt-builtin, optgroup.opt-builtin { color: #6b7280; background: #f3f4f6; }
 optgroup.opt-builtin option { color: #6b7280; background: #f3f4f6; }
 .tw-swap { max-width: 320px; margin-left: 6px; }
+.rcard-acts { margin-left: auto; display: inline-flex; gap: 4px; white-space: nowrap; align-items: center; }
