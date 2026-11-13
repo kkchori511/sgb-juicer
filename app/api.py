@@ -18,7 +18,7 @@ import webview
 from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, existing, export, ocr, openrouter, prompts, roster, scan, stdformat, updater, weights
 from .records import Records, items_of
 from .inbox import Inbox
-from .tagwork import TagWork, norm_chain, signature, step_system
+from .tagwork import TagWork, norm_chain, signature, step_input, step_system
 from .standards import Outlines, Standards, avoid_rule, new_words, outline_tidy_prompt, check_level, outline_rule, read_hwpx_text, read_pdf_text, similarity, standards_rule
 from .paths import data_dir
 from .textutil import count_bytes
@@ -805,7 +805,9 @@ class Api:
         self._guard(key)
         try:
             gen = openrouter.generation()
-            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, len(chain["steps"]) - 1), src_text,
+            last = len(chain["steps"]) - 1
+            send = step_input(chain, last, src_text, tw.source_text(r, chain["src"]) if last else "")
+            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, last), send,
                                        cfg["privacy_block"], extra=False)
             nid, dropped = tw.add_trial(w["id"], r, chain, int(parent_id) if parent_id else None, input_src, src_text, text, model, cost, {},
                                         base=base, alive=self._alive(gen))
@@ -879,7 +881,8 @@ class Api:
             done_before = len(outs)
             try:
                 for i in range(len(outs), len(chain["steps"])):
-                    text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, i), text, cfg["privacy_block"], extra=False)
+                    text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, i), step_input(chain, i, text, first),
+                                               cfg["privacy_block"], extra=False)
                     total += cost
                     outs.append(text)
             except openrouter.Cancelled:
@@ -1616,10 +1619,12 @@ class Api:
         if chain["steps"][0]["request"]:
             parts += [f"처음 추가 요청: {chain['steps'][0]['request']}"]
         for i, s in enumerate(chain["steps"][1:], 2):
+            if s.get("only_here"):  # 원문에서 고른 부분을 넣은 것처럼 그 학생에게만 맞는 요구는 규칙으로 만들지 않는다
+                continue
             if s["prompt"]:
                 parts += [f"{i}) 지침을 이렇게 바꿈:", s["prompt"]]
             if s["request"]:
-                parts += [f"{i}) 결과를 보고 한 요구: {s['request']}"]
+                parts += [f"{i}) 결과를 보고 한 요구{'(원문을 함께 보며)' if s.get('with_src') else ''}: {s['request']}"]
         parts += ["", "위 과정을 모두 반영해, 처음부터 이 결과가 바로 나오도록 하는 완성된 프롬프트 한 편을 쓰세요."]
         text, cost, model = self._compose("\n".join(parts), model_index)
         return self._ai_out({"text": text, "cost": cost, "model": model})
@@ -1635,15 +1640,17 @@ class Api:
         return self._ai_out({"assembled": assembled, "text": text, "cost": cost, "model": model})
 
     @safe
-    def prompt_chat_free(self, chain, text, model_index=None):
-        """대화 마법사(붙여넣은 글): 저장하지 않고 마지막 단계만 실행한다(첫 단계면 붙여넣은 글, 이어 가기면 앞 결과)."""
+    def prompt_chat_free(self, chain, text, model_index=None, orig=None):
+        """대화 마법사(붙여넣은 글): 저장하지 않고 마지막 단계만 실행한다(첫 단계면 붙여넣은 글, 이어 가기면 앞 결과).
+        orig: 처음 붙여넣은 글(원문을 함께 보내는 단계에 쓴다)."""
         chain = norm_chain(chain)
         src = str(text or "").strip()
         if not src:
             raise db.DbError("보낼 글이 비어 있습니다.")
         cfg, model = self._model(model_index)
-        out, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, len(chain["steps"]) - 1), src[:20000],
-                                  cfg["privacy_block"], extra=False)
+        last = len(chain["steps"]) - 1
+        out, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, last),
+                                  step_input(chain, last, src[:20000], str(orig or "")[:20000]), cfg["privacy_block"], extra=False)
         return self._ai_out({"text": out, "cost": cost, "model": model})
 
     @safe

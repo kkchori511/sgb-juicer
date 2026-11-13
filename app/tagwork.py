@@ -3,7 +3,9 @@
 흐름: 시험(기록 한 건으로 프롬프트를 바꿔 가며 후보 3칸) → 확정(그 후보로 기록을 바꾸고, 후보를 만든 단계를 이 태그 설정으로)
 → 나머지 변환(확정 단계를 대상마다 그대로 재현, 결과는 기록을 바꾸지 않는 후보) → 검토 표에서 체크한 것만 반영 → 반영 묶음 되돌리기.
 
-- 단계(chain): {"src": "original"|"current", "steps": [{"prompt", "example", "request"}]}
+- 단계(chain): {"src": "original"|"current", "steps": [{"prompt", "example", "request"[, "with_src", "only_here"]}]}
+  with_src: 이어 고칠 때 원문(첫 단계에 보낸 글)도 함께 보내 빠진 내용을 다시 가져올 수 있게 한다.
+  only_here: 원문에서 고른 부분처럼 그 기록에만 맞는 요청 — 나머지 변환(재현)에서는 뺀다.
   첫 단계는 src 글(처음 원문=records.original 또는 지금 내용)에 prompt를 적용, 다음 단계는 앞 결과에 request(짧은 요청)를 적용한다.
 - 기록 내용 버전(records.content_ver)으로 '만든 뒤 원문이 바뀌었는지'를 확인한다. AI를 기다리는 동안 DB를 잡고 있지 않는다.
 - 기록·태그가 지워져도 이력은 남긴다(외래 키 없음).
@@ -19,6 +21,10 @@ TRIAL_MAX = 3
 
 CONTINUE_RULE = ("\n\n[이어서 고치기]\n- 주어진 글은 앞 단계에서 만든 결과다. 아래 요청대로만 고치고, 위 지침(문체·쓰지 않는 것·출력 형식)은 그대로 지킨다.\n"
                  "- 요청과 관계없는 문장은 되도록 그대로 둔다. 글에 없는 사실을 지어내지 않는다.\n<요청>\n{req}\n</요청>")
+SRC_RULE = ("\n\n[원문 함께 보기]\n- 받은 글은 <지금 결과>와 <원문>으로 나뉘어 있다. 고칠 대상은 <지금 결과>다.\n"
+            "- 요청이 원문의 내용을 넣으라고 하면 <원문>에서 그 내용을 찾아, 지금 결과의 문체·종결 방식에 맞게 바꿔 알맞은 자리에 자연스럽게 넣는다.\n"
+            "- 원문에 없는 사실은 지어내지 않고, 요청과 관계없는 원문 내용은 새로 넣지 않는다.\n"
+            "- 출력은 고친 결과 글 전체만 쓴다(<지금 결과> 같은 표시나 설명 없이).")
 FIRST_REQ_RULE = ("\n\n[이번 추가 요구 사항]\n<요청>\n{req}\n</요청>\n- 위 요청을 반영하되, 앞의 규칙(쓰지 않는 것, 없는 사실 지어내지 않기, 출력 형식)이 항상 우선한다.")
 
 
@@ -43,6 +49,10 @@ def norm_chain(chain):
             raise DbError("프롬프트(지침)를 입력해 주세요.")
         if i > 0 and not (step["request"] or step["prompt"]):
             raise DbError("이어서 고칠 요청을 입력해 주세요.")
+        if i > 0 and (s.get("with_src") or s.get("only_here")):  # 켠 것만 넣는다(예전 단계와 서명이 같게)
+            step["with_src"] = True
+            if s.get("only_here"):
+                step["only_here"] = True
         steps.append(step)
     if not steps:
         raise DbError("프롬프트(지침)를 입력해 주세요.")
@@ -67,7 +77,20 @@ def step_system(chain, i):
     system = prompts.build_system(base, example, 0)
     if i == 0:
         return system + (FIRST_REQ_RULE.format(req=s["request"]) if s["request"] else "")
-    return system + (CONTINUE_RULE.format(req=s["request"]) if s["request"] else "")
+    return system + (CONTINUE_RULE.format(req=s["request"]) if s["request"] else "") + (SRC_RULE if s.get("with_src") else "")
+
+
+def step_input(chain, i, text, src):
+    """i번째 단계에 보낼 글. 원문을 함께 보내는 이어 고치기 단계면 앞 결과와 원문을 나눠 묶는다."""
+    s = chain["steps"][i]
+    if i > 0 and s.get("with_src") and (src or "").strip():
+        return f"<지금 결과>\n{text}\n</지금 결과>\n\n<원문>\n{src}\n</원문>"
+    return text
+
+
+def replay_chain(chain):
+    """나머지 변환에 쓸 단계: 그 기록에만 맞는 단계(only_here)는 뺀다."""
+    return {**chain, "steps": [s for i, s in enumerate(chain.get("steps") or []) if i == 0 or not s.get("only_here")]}
 
 
 def signature(chain):
@@ -301,7 +324,7 @@ class TagWork:
             raise DbError("서로 다른 항목(담당)의 기록이 섞여 있습니다. 위 항목 필터로 하나만 골라 나눠 실행해 주세요.")
         with self.d.tx() as c:
             rid = c.execute("INSERT INTO tag_runs(work_id, steps, filter, targets) VALUES(?,?,?,?)",
-                            (int(wid), signature(w["confirmed"]["chain"]), json.dumps(flt or {}, ensure_ascii=False), json.dumps(ids))).lastrowid
+                            (int(wid), signature(replay_chain(w["confirmed"]["chain"])), json.dumps(flt or {}, ensure_ascii=False), json.dumps(ids))).lastrowid
         return self.run(rid)
 
     def run(self, run_id):
