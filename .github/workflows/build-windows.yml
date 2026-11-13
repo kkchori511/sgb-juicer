@@ -51,6 +51,7 @@ jobs:
           python tests/test_tagwork.py
           python tests/test_tagwork_edges.py
           python tests/test_tag_fields.py
+          python tests/test_prompt_wizard_ai.py
           python tests/test_inbox_columns.py
 
       - name: Version info

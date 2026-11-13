@@ -827,9 +827,16 @@ class Api:
 
     @safe
     def tag_confirm(self, cid, apply=True, year=None):
-        """시험 후보 확정(그 기록에 반영 + 이 태그 설정으로)."""
+        """시험 후보 확정(그 기록에 반영 + 이 태그 설정으로). 목록에서 불러와 시작한 프롬프트면 그 프롬프트에 태그를 기록한다."""
         self._editable(year)
-        return self._tw(year).confirm(cid, bool(apply))
+        tw = self._tw(year)
+        out = tw.confirm(cid, bool(apply))
+        try:
+            w = tw.work(tw.cand(cid)["work_id"])
+            self._mark_prompt_tag((w["draft"] or {}).get("lib_id"), w["tag_name"])
+        except (db.DbError, config.ConfigError):
+            pass
+        return out
 
     @safe
     def tag_plan(self, wid, flt=None, year=None):
@@ -1557,9 +1564,87 @@ class Api:
             cur["example"] = str(e.get("example") or "")
         else:
             pid = "p" + uuid.uuid4().hex[:10]
-            lib.append({"id": pid, "name": name, "prompt": str(e.get("prompt") or ""), "example": str(e.get("example") or ""), "builtin": False})
+            lib.append({"id": pid, "name": name, "prompt": str(e.get("prompt") or ""), "example": str(e.get("example") or ""), "builtin": False,
+                        "made": str(e.get("made") or "")[:10], "tags": [str(t)[:40] for t in (e.get("tags") or []) if str(t).strip()][:30]})
         config.save({"prompt_lib": lib})
         return {"id": pid}
+
+    def _mark_prompt_tag(self, pid, tag_name):
+        """프롬프트를 쓴 태그 이름을 더한다(목록·불러오기 칸에 'OO에서 사용'으로 보임)."""
+        if not pid or not tag_name:
+            return
+        lib, _ = self._library()
+        cur = next((x for x in lib if x["id"] == str(pid)), None)
+        if not cur or tag_name in (cur.get("tags") or []):
+            return
+        cur["tags"] = (cur.get("tags") or []) + [str(tag_name)[:40]]
+        config.save({"prompt_lib": lib})
+
+    @safe
+    def prompt_mark_tag(self, pid, tag_name):
+        self._mark_prompt_tag(pid, tag_name)
+        return {}
+
+    # ---------- 프롬프트 마법사(대화·양식): AI가 완성된 프롬프트를 쓴다 ----------
+    COMPOSE_RULE = (
+        "당신은 대한민국 고등학교 교사가 생활기록부 문장을 만들 때 AI에 줄 '프롬프트'를 정교하게 쓰는 전문가입니다.\n"
+        "아래 [참고: 기본 프롬프트]의 구조와 말투(# 역할 → # 입력 자료 → # 생활기록부 작성 지침(## 소제목과 - 목록) → 틀린/옳은 예시 → # 업무 절차(번호 단계) → 최종 출력 형태)를 따라, "
+        "주어진 재료를 모두 반영한 완성된 프롬프트 한 편을 씁니다.\n"
+        "- 재료에 있는 요구는 빠짐없이 구체적인 규칙으로 바꿔 넣습니다. 서로 부딪히면 나중에 나온 요구를 따릅니다.\n"
+        "- 재료에 없는 새 규칙은 기본 프롬프트에 있는 일반 원칙(관찰자 시점, 명사형 종결, 개인정보 쓰지 않기, 없는 사실 지어내지 않기, 머리말 없이 본문만) 외에는 더하지 않습니다.\n"
+        "- 학생 이름·학번 같은 개인정보나 특정 학생의 사실을 프롬프트에 넣지 않습니다(예시 문장은 일반적인 표현으로 바꿉니다).\n"
+        "- 출력은 완성된 프롬프트 본문만 씁니다. 설명·머리말·코드 블록 표시(```)를 붙이지 않습니다."
+    )
+
+    def _compose(self, material, model_index):
+        from . import prompt_default
+        cfg, model = self._model(model_index)
+        system = self.COMPOSE_RULE + "\n\n[참고: 기본 프롬프트]\n<기본>\n" + prompt_default.DEFAULT_TEXT + "\n</기본>"
+        text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, material, cfg["privacy_block"], extra=False)
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.strip("`").split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        return text, cost, model
+
+    @safe
+    def prompt_compose(self, chain, model_index=None):
+        """대화 마법사 [프롬프트 제작]: 처음 지침과 이어서 한 요구들을 하나의 완성된 프롬프트로 합친다."""
+        chain = norm_chain(chain)
+        parts = ["[재료: 대화로 다듬은 과정]", "1) 처음 지침:", chain["steps"][0]["prompt"]]
+        if chain["steps"][0]["example"]:
+            parts += ["처음 지침의 예시:", chain["steps"][0]["example"]]
+        if chain["steps"][0]["request"]:
+            parts += [f"처음 추가 요청: {chain['steps'][0]['request']}"]
+        for i, s in enumerate(chain["steps"][1:], 2):
+            if s["prompt"]:
+                parts += [f"{i}) 지침을 이렇게 바꿈:", s["prompt"]]
+            if s["request"]:
+                parts += [f"{i}) 결과를 보고 한 요구: {s['request']}"]
+        parts += ["", "위 과정을 모두 반영해, 처음부터 이 결과가 바로 나오도록 하는 완성된 프롬프트 한 편을 쓰세요."]
+        text, cost, model = self._compose("\n".join(parts), model_index)
+        return self._ai_out({"text": text, "cost": cost, "model": model})
+
+    @safe
+    def prompt_form_ai(self, spec, model_index=None):
+        """양식 마법사: 칸 내용으로 조립한 글을 기본 프롬프트를 참고해 AI가 정교하게 다시 쓴다."""
+        from . import prompt_wizard
+        assembled = prompt_wizard.build(spec or {})
+        material = "[재료: 교사가 양식 칸을 채워 조립한 프롬프트]\n<조립본>\n" + assembled + "\n</조립본>\n\n" \
+                   "조립본의 모든 규칙·예시·출력 형태를 그대로 살리면서, 문장을 다듬고 빠진 연결을 채워 정교한 프롬프트로 다시 쓰세요."
+        text, cost, model = self._compose(material, model_index)
+        return self._ai_out({"assembled": assembled, "text": text, "cost": cost, "model": model})
+
+    @safe
+    def prompt_chat_free(self, chain, text, model_index=None):
+        """대화 마법사(붙여넣은 글): 저장하지 않고 마지막 단계만 실행한다(첫 단계면 붙여넣은 글, 이어 가기면 앞 결과)."""
+        chain = norm_chain(chain)
+        src = str(text or "").strip()
+        if not src:
+            raise db.DbError("보낼 글이 비어 있습니다.")
+        cfg, model = self._model(model_index)
+        out, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, len(chain["steps"]) - 1), src[:20000],
+                                  cfg["privacy_block"], extra=False)
+        return self._ai_out({"text": out, "cost": cost, "model": model})
 
     @safe
     def prompt_delete(self, pid):

@@ -189,7 +189,10 @@ def build_library(saved_lib, old_prompts):
             continue
         seen.add(x["id"])
         e = {"id": str(x["id"]), "name": str(x.get("name") or "이름 없음")[:60], "prompt": str(x.get("prompt") or ""),
-             "example": str(x.get("example") or ""), "builtin": x["id"] in BUILTIN}
+             "example": str(x.get("example") or ""), "builtin": x["id"] in BUILTIN,
+             # 프롬프트 마법사로 만든 방식(대화/양식)과 이 프롬프트를 쓴 태그 이름
+             "made": str(x.get("made") or "")[:10],
+             "tags": [str(t)[:40] for t in (x.get("tags") or []) if str(t).strip()][:30] if isinstance(x.get("tags"), list) else []}
         if e["id"] in LEGACY_BUILTIN and e["prompt"].strip() == LEGACY_BUILTIN[e["id"]].strip():  # 고치지 않고 쓰던 예전 기본 → 새 기본
             e["prompt"] = BUILTIN[e["id"]]["prompt"]
             changed = True
