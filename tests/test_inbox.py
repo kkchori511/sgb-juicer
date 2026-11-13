@@ -59,16 +59,16 @@ def test_flow():
     assert len(ok(api.inbox_preview(bid, opts))["rows"]) == 4
     assert ok(api.inbox_import(bid, opts))["count"] == 4
     v = ok(api.inbox_view(bid))
-    assert v["counts"] == {"confirmed": 2, "suggested": 1, "none": 1, "excluded": 0}, v["counts"]
+    assert v["counts"] == {"confirmed": 2, "suggested": 1, "none": 1, "excluded": 0, "sent": 0}, v["counts"]
     assert v["rows"][0]["content"] == "첫 줄\n둘째 줄"
     assert not api.inbox_stage(bid, "refine")["ok"]  # 확인 필요 남음(화면 확인 없이)
     # 확인을 받고 넘어가면 확인 필요 행은 '제외(매칭 미확인)' → 매칭으로 돌아와 제외 취소하면 되살아남
     ok(api.inbox_stage(bid, "refine", True))
     vv = ok(api.inbox_view(bid))
-    assert vv["counts"] == {"confirmed": 2, "suggested": 0, "none": 0, "excluded": 2} and {r["exclude_reason"] for r in vv["rows"] if r["state"] == "excluded"} == {"매칭 미확인"}
+    assert vv["counts"] == {"confirmed": 2, "suggested": 0, "none": 0, "excluded": 2, "sent": 0} and {r["exclude_reason"] for r in vv["rows"] if r["state"] == "excluded"} == {"매칭 미확인"}
     ok(api.inbox_stage(bid, "match"))
     ok(api.inbox_exclude([r["id"] for r in vv["rows"] if r["state"] == "excluded"], "", False))
-    assert ok(api.inbox_view(bid))["counts"] == {"confirmed": 2, "suggested": 1, "none": 1, "excluded": 0}
+    assert ok(api.inbox_view(bid))["counts"] == {"confirmed": 2, "suggested": 1, "none": 1, "excluded": 0, "sent": 0}
     assert not api.inbox_send(bid)["ok"]
     ok(api.inbox_confirm_suggested(bid))
     none_row = [r for r in ok(api.inbox_view(bid))["rows"] if r["state"] == "none"][0]

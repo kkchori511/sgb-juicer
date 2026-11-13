@@ -305,13 +305,42 @@ class Inbox:
     # ---------- 묶음 ----------
     def batches(self):
         rows = self.d.q(
-            """SELECT b.*, (SELECT COUNT(*) FROM inbox_rows r WHERE r.batch_id=b.id) AS n,
+            """SELECT b.*, (SELECT COUNT(*) FROM inbox_rows r WHERE r.batch_id=b.id AND r.state<>'sent') AS n,
+                      (SELECT COUNT(*) FROM inbox_rows r WHERE r.batch_id=b.id AND r.state='sent') AS n_sent,
                       (SELECT COUNT(*) FROM inbox_rows r WHERE r.batch_id=b.id AND r.state IN ('none','suggested')) AS pending
-               FROM inbox_batches b ORDER BY (b.stage='sent'), b.updated_at DESC, b.id DESC"""
+               FROM inbox_batches b ORDER BY b.updated_at DESC, b.id DESC"""
         )
         for b in rows:
-            b.pop("meta", None)
+            meta = json.loads(b.pop("meta", None) or "{}")
+            b["rounds"] = len(meta.get("rounds") or ([1] if b["stage"] == "sent" else []))
         return rows
+
+    # ---------- 보낸 회차(보낸 뒤에도 같은 묶음에 자료를 더 넣어 안 보낸 행만 보낸다) ----------
+    @staticmethod
+    def _src(bid, n):
+        """회차별 기록 출처: 1회는 예전과 같은 'inbox:묶음', 2회부터 'inbox:묶음:회차'."""
+        return f"inbox:{int(bid)}" if int(n) == 1 else f"inbox:{int(bid)}:{int(n)}"
+
+    def _migrate(self, bid):
+        """예전에 '보내기 완료'된 묶음: 보낸 행을 'sent'로 바꾸고 1회 보낸 기록을 만든다(한 번만)."""
+        b = self.batch(bid)
+        if b["stage"] != "sent" or b["meta"].get("rounds") is not None:
+            return b
+        rows = [r for r in self._rows(bid) if r["state"] == "confirmed"]
+        meta = b["meta"]
+        meta["rounds"] = [{"n": 1, "at": b["sent_at"] or "", "summary": b["sent_summary"] or "", "rows": {str(r["id"]): None for r in rows}}]
+        with self.d.tx() as c:
+            for r in rows:
+                c.execute("UPDATE inbox_rows SET state='sent' WHERE id=?", (r["id"],))
+            self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
+        return self.batch(bid)
+
+    def _rows_editable(self, row_id):
+        r = self._row(row_id)
+        b = self._editable_batch(r["batch_id"])
+        if r["state"] == "sent":
+            raise DbError("이미 보낸 행은 고칠 수 없습니다. 보낸 기록은 항목별 기록에서 고치세요.")
+        return r, b
 
     def batch(self, bid):
         rows = self.d.q("SELECT * FROM inbox_batches WHERE id=?", (int(bid),))
@@ -336,8 +365,6 @@ class Inbox:
 
     def update(self, bid, data):
         b = self.batch(bid)
-        if b["stage"] == "sent":
-            raise DbError("이미 보낸 묶음은 고칠 수 없습니다.")
         fields = {}
         if "title" in data:
             fields["title"] = (data["title"] or "").strip() or b["title"]
@@ -349,6 +376,8 @@ class Inbox:
         if "group_id" in data or "item" in data:
             gid = int(data.get("group_id", b["group_id"]))
             item = data.get("item", b["item"])
+            if (gid, item) != (b["group_id"], b["item"]) and any(r["state"] == "sent" for r in self._rows(bid)):
+                raise DbError("이미 보낸 행이 있는 묶음은 대상 명렬·항목을 바꿀 수 없습니다. 새 묶음을 만들어 주세요.")
             self.rec.slot(gid, item)
             regroup = gid != b["group_id"]
             fields.update(group_id=gid, item=item)
@@ -372,8 +401,6 @@ class Inbox:
     # ---------- ① 가져오기 ----------
     def set_source(self, bid, raw, source, filename=""):
         b = self.batch(bid)
-        if b["stage"] == "sent":
-            raise DbError("이미 보낸 묶음입니다.")
         meta = b["meta"]
         meta.update(raw=raw, filename=filename)
         meta["opts"] = {"structure": b["structure"], **detect(raw)}
@@ -396,8 +423,6 @@ class Inbox:
 
     def confirm_import(self, bid, opts):
         b = self.batch(bid)
-        if b["stage"] == "sent":
-            raise DbError("이미 보낸 묶음입니다.")
         raw = b["meta"].get("raw") or []
         recs = interpret(raw, opts, self.d.year)
         if not recs:
@@ -411,8 +436,8 @@ class Inbox:
         meta["opts"] = opts
         members = self.d.members(b["group_id"])
         with self.d.tx() as c:
-            c.execute("DELETE FROM inbox_rows WHERE batch_id=?", (int(bid),))
-            for k, r in enumerate(recs):
+            base = self._clear_unsent(c, bid)
+            for k, r in enumerate(recs, base):
                 if structure == "single":
                     sno, state, note = str(opts["student_no"]), "confirmed", "고른 학생"
                 else:
@@ -429,11 +454,14 @@ class Inbox:
     # ---------- ① 가져오기: 한 문서 → 여러 학생(학번 없는 모둠·개인 보고서) ----------
     ROLE_HEAD = "[이 학생의 역할]"
 
+    def _clear_unsent(self, c, bid):
+        """새로 가져오기: 아직 보내지 않은 행만 지우고, 새 행은 보낸 행 뒤 순서부터."""
+        c.execute("DELETE FROM inbox_rows WHERE batch_id=? AND state<>'sent'", (int(bid),))
+        return (c.execute("SELECT COALESCE(MAX(ord), -1) FROM inbox_rows WHERE batch_id=?", (int(bid),)).fetchone()[0] or 0) + 1
+
     def shared_import(self, bid, data):
         """같은 문서를 고른 학생마다 한 건씩(학생별 역할 메모는 원문 아래 한 줄로 따로). 학생은 고른 그대로 확정."""
         b = self.batch(bid)
-        if b["stage"] == "sent":
-            raise DbError("이미 보낸 묶음입니다.")
         text = str((data or {}).get("text") or "").strip()
         if not text:
             raise DbError("넣을 문서 내용을 붙여넣어 주세요.")
@@ -457,8 +485,8 @@ class Inbox:
         meta = b["meta"]
         meta["shared"] = {"text": text, "label": label, "date": date, "picks": picks}
         with self.d.tx() as c:
-            c.execute("DELETE FROM inbox_rows WHERE batch_id=?", (int(bid),))
-            for k, p in enumerate(picks):
+            base = self._clear_unsent(c, bid)
+            for k, p in enumerate(picks, base):
                 content = text + (f"\n\n{self.ROLE_HEAD} {p['role']}" if p["role"] else "")
                 c.execute(
                     """INSERT INTO inbox_rows(batch_id, ord, source_ref, student_no, state, note, line, label, date, content)
@@ -538,10 +566,8 @@ class Inbox:
         sc["starts"], sc["skipped"] = starts, skipped
         meta["scan"] = sc
         with self.d.tx() as c:
-            if self.batch(bid)["stage"] == "sent":
-                raise DbError("이미 보낸 묶음입니다.")
-            c.execute("DELETE FROM inbox_rows WHERE batch_id=?", (int(bid),))
-            for k, g in enumerate(groups):
+            base = self._clear_unsent(c, bid)
+            for k, g in enumerate(groups, base):
                 pg = g["pages"]
                 ref = f"{pg[0] + 1}쪽" if len(pg) == 1 else f"{pg[0] + 1}~{pg[-1] + 1}쪽"
                 sno, state, note = match_one(g["ext_no"], g["ext_name"], members)
@@ -565,8 +591,12 @@ class Inbox:
         return self.d.q("SELECT * FROM inbox_rows WHERE batch_id=? ORDER BY ord", (int(bid),))
 
     def view(self, bid):
-        b = self.batch(bid)
+        b = self._migrate(bid)
         rows = self._rows(bid)
+        rnd = {}
+        for x in b["meta"].get("rounds") or []:
+            for rid in (x.get("rows") or {}):
+                rnd[int(rid)] = x["n"]
         members = self.d.members(b["group_id"]) if b["group_id"] else []
         names = {m["student_no"]: m for m in members}
         cands = {}
@@ -579,7 +609,7 @@ class Inbox:
         # 같은 학생이 원본의 서로 다른 줄에서 나오면 중복 의심
         lines = {}
         for r in rows:
-            if r["student_no"] and r["state"] in ("confirmed", "suggested") and b["structure"] == "multi":
+            if r["student_no"] and r["state"] in ("confirmed", "suggested") and b["structure"] == "multi":  # 보낸 행은 빼고
                 lines.setdefault(r["student_no"], set()).add(r["line"])
         for r in rows:
             m = names.get(r["student_no"]) if r["student_no"] else None
@@ -589,12 +619,12 @@ class Inbox:
             r["cands"] = cands.get(r["id"], [])
             r["text"] = r["used_text"] if r["used_text"] is not None else r["content"]
             r["bytes"] = count_bytes(r["text"])
-        counts = {s: sum(1 for r in rows if r["state"] == s) for s in ("confirmed", "suggested", "none", "excluded")}
+            r["round"] = rnd.get(r["id"])
+        counts = {s: sum(1 for r in rows if r["state"] == s) for s in ("confirmed", "suggested", "none", "excluded", "sent")}
         return {"batch": b, "rows": rows, "members": [m for m in members if m["active"]], "counts": counts}
 
     def set_student(self, row_id, sno):
-        r = self._row(row_id)
-        b = self._editable_batch(r["batch_id"])
+        r, b = self._rows_editable(row_id)
         if sno:
             m = next((x for x in self.d.members(b["group_id"]) if x["student_no"] == str(sno)), None)
             if not m:
@@ -628,6 +658,8 @@ class Inbox:
         with self.d.tx() as c:
             for rid in ids:
                 r = self._row(rid)
+                if r["state"] == "sent":
+                    raise DbError("이미 보낸 행은 제외할 수 없습니다.")
                 if on:
                     c.execute("UPDATE inbox_rows SET state='excluded', exclude_reason=? WHERE id=?", (reason, rid))
                 else:
@@ -635,8 +667,7 @@ class Inbox:
             self._touch(c, first["batch_id"])
 
     def edit_row(self, row_id, data):
-        r = self._row(row_id)
-        self._editable_batch(r["batch_id"])
+        r, _ = self._rows_editable(row_id)
         fields = {}
         for k in ("content", "label", "date"):
             if k in data:
@@ -658,7 +689,7 @@ class Inbox:
         members = self.d.members(b["group_id"])
         with self.d.tx() as c:
             for r in self._rows(bid):
-                if keep_manual and r["state"] in ("confirmed", "excluded"):
+                if r["state"] == "sent" or (keep_manual and r["state"] in ("confirmed", "excluded")):
                     continue
                 sno, state, note = match_ext(r["ext_no"], r["ext_name"], _ext(r), members)
                 c.execute("UPDATE inbox_rows SET student_no=?, state=?, note=?, exclude_reason='' WHERE id=?", (sno, state, note, r["id"]))
@@ -667,7 +698,7 @@ class Inbox:
     def to_stage(self, bid, stage, exclude_pending=False):
         """exclude_pending: 확인이 필요한 행(추천·찾지 못함)을 '제외(매칭 미확인)'로 바꾸고 넘어간다(화면에서 확인을 받은 뒤)."""
         b = self._editable_batch(bid)
-        if stage not in STAGES or stage == "sent":
+        if stage not in STAGES or stage == "sent":  # 'sent'는 보내기로만
             raise DbError("단계가 올바르지 않습니다.")
         pend = []
         if stage in ("refine", "review"):
@@ -677,23 +708,35 @@ class Inbox:
                 raise DbError(f"확인이 필요한 행 {len(pend)}개가 남아 있습니다. 학생을 확정하거나 제외해 주세요.")
             if not any(r["state"] == "confirmed" for r in rows):
                 raise DbError("보낼 행이 없습니다. 확정된 학생이 하나도 없습니다.")
+        fields = {"stage": stage}
+        if stage == "import" and (b["meta"].get("rounds") or []):
+            # 보낸 뒤 [+ 자료 더 넣기]: 지난번 원본(표·공동 문서·스캔)을 비워 같은 자료가 두 번 들어가지 않게 한다
+            meta = b["meta"]
+            for k in ("raw", "shared", "scan"):
+                meta.pop(k, None)
+            fields.update(meta=json.dumps(meta, ensure_ascii=False), source="paste", structure="multi" if b["structure"] == "shared" else b["structure"])
         with self.d.tx() as c:
             for r in pend:
                 c.execute("UPDATE inbox_rows SET state='excluded', exclude_reason='매칭 미확인' WHERE id=?", (r["id"],))
-            self._touch(c, bid, stage=stage)
+            self._touch(c, bid, **fields)
         return b
 
     # ---------- ⑤ 보낸 뒤: 묶음 단위 태그·삭제 ----------
-    def sent_info(self, bid):
-        """이 묶음으로 넣은 기록(source='inbox:묶음번호'). 지금도 같은 항목에 있는 것만 묶음 단위로 다룬다.
+    def sent_info(self, bid, rnd=None):
+        """이 묶음으로 넣은 기록(회차별 출처). rnd를 주면 그 회차만. 지금도 같은 항목에 있는 것만 묶음 단위로 다룬다.
         다른 항목으로 옮긴 기록, 마감된 학생의 기록은 지우지 않는다."""
-        b = self.batch(bid)
-        if b["stage"] != "sent":
+        b = self._migrate(bid)
+        rounds = b["meta"].get("rounds") or []
+        if not rounds:
             raise DbError("아직 보내지 않은 묶음입니다.")
+        ns = [x["n"] for x in rounds if rnd is None or x["n"] == int(rnd)]
+        if not ns:
+            raise DbError("그 회차를 찾지 못했습니다.")
+        srcs = [self._src(bid, n) for n in ns]
         recs = self.d.q(
-            """SELECT r.id, r.group_id, r.item, r.student_no, r.created_at, r.updated_at,
+            f"""SELECT r.id, r.group_id, r.item, r.student_no, r.created_at, r.updated_at, r.source,
                       (SELECT COUNT(*) FROM results x WHERE x.record_id=r.id) AS cands
-               FROM records r WHERE r.source=? ORDER BY r.student_no, r.id""", (f"inbox:{int(bid)}",))
+               FROM records r WHERE r.source IN ({",".join("?" * len(srcs))}) ORDER BY r.student_no, r.id""", tuple(srcs))
         here = [r for r in recs if r["group_id"] == b["group_id"] and r["item"] == b["item"]]
         rec = Records(self.d)
         closed_sno = {r["student_no"] for r in here if rec.is_closed(b["group_id"], b["item"], r["student_no"])}
@@ -707,13 +750,14 @@ class Inbox:
                 "students": len({r["student_no"] for r in here}), "closed": sum(1 for r in here if r["student_no"] in closed_sno),
                 "closed_students": len(closed_sno), "moved": len(recs) - len(here),
                 "edited": sum(1 for r in free if (r["updated_at"] or "") > (r["created_at"] or "")),
-                "with_cands": sum(1 for r in free if r["cands"]), "tag_counts": tag_counts}
+                "with_cands": sum(1 for r in free if r["cands"]), "tag_counts": tag_counts,
+                "rounds": [{k: x[k] for k in ("n", "at", "summary")} for x in rounds]}
 
-    def delete_sent(self, bid):
-        """이 묶음으로 넣은 기록을 모든 학생에서 지운다(마감·옮긴 기록 빼고).
-        남은 기록이 없으면 묶음을 '④ 보내기 검토'로 되돌려 다시 보낼 수 있게 한다."""
-        b = self.batch(bid)
-        info = self.sent_info(bid)
+    def delete_sent(self, bid, rnd=None):
+        """이 묶음(rnd면 그 회차)으로 넣은 기록을 모든 학생에서 지운다(마감·옮긴 기록 빼고).
+        회차의 기록이 다 지워지면 그 회차 행을 '안 보냄'으로 되돌려 ④ 보내기 검토에서 다시 보낼 수 있게 한다."""
+        b = self._migrate(bid)
+        info = self.sent_info(bid, rnd)
         ids = info["deletable"]
         if not ids:
             raise DbError("지울 수 있는 기록이 없습니다(마감된 학생이거나 다른 항목으로 옮긴 기록만 남음).")
@@ -725,12 +769,36 @@ class Inbox:
             c.execute(f"DELETE FROM records WHERE id IN ({marks})", tuple(ids))
             for sno in snos:
                 c.execute("UPDATE finals SET stale=1 WHERE group_id=? AND item=? AND student_no=? AND text<>''", (b["group_id"], b["item"], sno))
+            meta = b["meta"]
+            keep = []
+            for x in meta.get("rounds") or []:
+                if rnd is not None and x["n"] != int(rnd):
+                    keep.append(x)
+                    continue
+                left = c.execute("SELECT COUNT(*) FROM records WHERE source=?", (self._src(bid, x["n"]),)).fetchone()[0]
+                if left:  # 마감·옮긴 기록이 남은 회차는 그대로 둔다
+                    x["summary"] = f"{x.get('summary') or ''} · {len(ids)}건 삭제(남은 {left}건)"
+                    keep.append(x)
+                    continue
+                for rid in (x.get("rows") or {}):
+                    c.execute("UPDATE inbox_rows SET state='confirmed' WHERE id=? AND state='sent'", (int(rid),))
+            meta["rounds"] = keep
+            fields = {"meta": json.dumps(meta, ensure_ascii=False)}
             if reopened:
-                self._touch(c, bid, stage="review", sent_at=None, sent_summary="")
-            else:
-                left = info["closed"] + info["moved"]
-                self._touch(c, bid, sent_summary=f"{b['sent_summary']} · {len(ids)}건 삭제(남은 {left}건)")
+                fields.update(stage="review")
+                if not keep:
+                    fields.update(sent_at=None, sent_summary="")
+            self._touch(c, bid, **fields)
         return {"deleted": len(ids), "students": len(snos), "reopened": reopened, "closed": info["closed"], "moved": info["moved"]}
+
+    def _prev_round_tags(self, bid):
+        """앞 회차로 보낸 기록 모두에 붙어 있는 태그(보낸 뒤 묶음 단위로 붙인 태그도 다음 회차에 그대로)."""
+        try:
+            info = self.sent_info(bid)
+        except DbError:
+            return set()
+        n = len(info["record_ids"])
+        return {int(t) for t, k in info["tag_counts"].items() if n and k == n}
 
     # ---------- ③ 정제 후보 ----------
     def _row(self, row_id):
@@ -740,27 +808,21 @@ class Inbox:
         return rows[0]
 
     def _editable_batch(self, bid):
-        b = self.batch(bid)
-        if b["stage"] == "sent":
-            raise DbError("이미 보낸 묶음은 고칠 수 없습니다. 보낸 기록은 항목별 기록에서 고치세요.")
-        return b
+        return self._migrate(bid)
 
     def reorder(self, bid, row_ids):
         """인박스 행 순서를 화면에서 끈 순서로."""
         ids = [int(x) for x in row_ids or []]
         with self.d.tx() as c:
-            b = self.batch(bid)
-            if b["stage"] == "sent":
-                raise DbError("이미 보낸 묶음은 고칠 수 없습니다.")
-            have = {r[0] for r in c.execute("SELECT id FROM inbox_rows WHERE batch_id=?", (int(bid),))}
+            have = {r[0] for r in c.execute("SELECT id FROM inbox_rows WHERE batch_id=? AND state<>'sent'", (int(bid),))}
             if set(ids) != have or len(ids) != len(have):
                 raise DbError("행 목록이 바뀌었습니다. 화면을 다시 열어 주세요.")
+            base = c.execute("SELECT COALESCE(MAX(ord), 0) FROM inbox_rows WHERE batch_id=? AND state='sent'", (int(bid),)).fetchone()[0] or 0
             for i, rid in enumerate(ids):
-                c.execute("UPDATE inbox_rows SET ord=? WHERE id=?", (i + 1, rid))
+                c.execute("UPDATE inbox_rows SET ord=? WHERE id=?", (base + i + 1, rid))
 
     def add_cand(self, row_id, text, meta, cost):
-        r = self._row(row_id)
-        self._editable_batch(r["batch_id"])
+        r, _ = self._rows_editable(row_id)
         with self.d.tx() as c:
             ids = [x[0] for x in c.execute("SELECT id FROM inbox_cands WHERE row_id=? ORDER BY id", (r["id"],))]
             for old in ids[: max(0, len(ids) - MAX_CANDS + 1)]:
@@ -769,8 +831,7 @@ class Inbox:
                              (r["id"], text, json.dumps(meta or {}, ensure_ascii=False), float(cost or 0))).lastrowid
 
     def use_cand(self, row_id, cand_id):
-        r = self._row(row_id)
-        self._editable_batch(r["batch_id"])
+        r, _ = self._rows_editable(row_id)
         with self.d.tx() as c:
             if cand_id:
                 cd = c.execute("SELECT text FROM inbox_cands WHERE id=? AND row_id=?", (int(cand_id), r["id"])).fetchone()
@@ -795,10 +856,10 @@ class Inbox:
     def send(self, bid, closed_action="block"):
         """closed_action: block(마감 학생 있으면 막음) / reopen(마감 해제하고 보냄) / exclude(마감 학생 행 제외)
         모든 검사를 쓰기 트랜잭션 안에서 다시 해 두 번 눌러도 한 번만 들어간다."""
+        self._migrate(bid)
+        prev_tags = self._prev_round_tags(bid)
         with self.d.tx() as c:
             b = self.batch(bid)
-            if b["stage"] == "sent":
-                raise DbError(f"이미 보낸 묶음입니다({b['sent_at']}). 같은 자료를 다시 보내면 기록이 중복됩니다.")
             all_rows = self._rows(bid)
             pend = [r for r in all_rows if r["state"] in ("none", "suggested")]
             if pend:
@@ -824,7 +885,12 @@ class Inbox:
                 for n in closed:
                     c.execute("UPDATE finals SET closed=0, closed_at=NULL WHERE group_id=? AND item=? AND student_no=?", (b["group_id"], b["item"], n))
             if not rows:
-                raise DbError("보낼 행이 없습니다.")
+                raise DbError("새로 보낼 행이 없습니다(이미 보낸 행은 다시 보내지 않습니다).")
+            rounds = b["meta"].get("rounds") or []
+            n_round = max([x["n"] for x in rounds] or [0]) + 1
+            src = self._src(bid, n_round)
+            tag_ids = sorted(set(tag_ids) | {t for t in prev_tags if t in valid_tags})
+            mapping = {}
             seqs = {}
             for r in rows:
                 sno = r["student_no"]
@@ -841,13 +907,21 @@ class Inbox:
                     title = lab
                 rid = c.execute(
                     "INSERT INTO records(group_id,item,student_no,kind,seq,date,title,content,source) VALUES(?,?,?,'record',?,?,?,?,?)",
-                    (b["group_id"], b["item"], sno, seqs[sno], r["date"] or b["date"], title, text, f"inbox:{b['id']}"),
+                    (b["group_id"], b["item"], sno, seqs[sno], r["date"] or b["date"], title, text, src),
                 ).lastrowid
+                mapping[str(r["id"])] = rid
+                c.execute("UPDATE inbox_rows SET state='sent' WHERE id=?", (r["id"],))
                 for tid in tag_ids:
                     c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (rid, int(tid)))
                 c.execute("UPDATE finals SET stale=1 WHERE group_id=? AND item=? AND student_no=? AND text<>''", (b["group_id"], b["item"], sno))
             n_students = len({r["student_no"] for r in rows})
             summary = f"{n_students}명 · {len(rows)}건"
-            self._touch(c, bid, stage="sent", sent_at=dt.datetime.now().strftime("%Y-%m-%d %H:%M"), sent_summary=summary)
+            now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+            meta = b["meta"]
+            meta["rounds"] = rounds + [{"n": n_round, "at": now, "summary": summary, "rows": mapping}]
+            sent_all = [r for r in all_rows if r["state"] == "sent"] + rows
+            total = f"{len({r['student_no'] for r in sent_all})}명 · {len(sent_all)}건" + (f" · {len(meta['rounds'])}회" if len(meta["rounds"]) > 1 else "")
+            self._touch(c, bid, stage="sent", sent_at=now, sent_summary=total, meta=json.dumps(meta, ensure_ascii=False),
+                        tag_ids=json.dumps(tag_ids))
         return {"students": n_students, "records": len(rows), "reopened": closed if closed_action == "reopen" else [],
                 "excluded_closed": closed if closed_action == "exclude" else []}

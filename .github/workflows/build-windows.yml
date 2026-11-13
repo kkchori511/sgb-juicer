@@ -55,6 +55,7 @@ jobs:
           python tests/test_tag_src.py
           python tests/test_tag_skill.py
           python tests/test_inbox_shared.py
+          python tests/test_inbox_rounds.py
           python tests/test_inbox_columns.py
 
       - name: Version info

@@ -4888,7 +4888,7 @@
   // v0.3: 자료 인박스 — ① 가져오기 → ② 학생 매칭 → ③ AI 정제(선택) → ④ 보내기 검토
   // =====================================================================
   const IB = { list: [], bid: null, view: null, raw: null, opts: null, preview: [], onlyPending: false, sel: new Set(), stop: false };
-  const STAGE_NAME = { import: '① 가져오기', match: '② 매칭 대기', refine: '③ 정제', review: '④ 보내기 대기', sent: '보내기 완료' };
+  const STAGE_NAME = { import: '① 가져오기', match: '② 매칭 대기', refine: '③ 정제', review: '④ 보내기 대기', sent: '✔ 보냄' };
   const ST_CHIP = { confirmed: '✔ 확정', suggested: '추천', none: '! 확인 필요', excluded: '제외' };
   let returnTo = null; // 명렬 등록하러 갔다가 돌아올 곳
 
@@ -4916,22 +4916,15 @@
     const box = $('ibList');
     box.innerHTML = '';
     box.appendChild(el('button', { type: 'button', class: 'primary edit-only', style: 'width:100%;margin-bottom:10px', text: '+ 새 자료 묶음', onclick: newBatch }));
-    const open = IB.list.filter((b) => b.stage !== 'sent');
-    const sent = IB.list.filter((b) => b.stage === 'sent');
-    const item = (b) => el('button', { type: 'button', class: 'ib-item' + (b.id === IB.bid ? ' active' : '') + (b.stage === 'sent' ? ' is-done' : ''), onclick: () => { IB.bid = b.id; IB.raw = null; IB.sel.clear(); renderInboxList(); loadBatch(); } }, [
+    const item = (b) => el('button', { type: 'button', class: 'ib-item' + (b.id === IB.bid ? ' active' : ''), onclick: () => { IB.bid = b.id; IB.raw = null; IB.sel.clear(); renderInboxList(); loadBatch(); } }, [
       el('span', { class: 't', text: b.title }),
       el('span', { class: 's', text: slotLabel(b.group_id, b.item) }),
-      el('span', { class: 's' }, [el('span', { class: 'stage-chip' + (b.stage === 'sent' ? ' sent' : ''), text: STAGE_NAME[b.stage] }),
-        b.stage === 'sent' ? ` ${b.sent_summary}` : (b.n ? ` ${b.n}건${b.pending ? ` · 확인 필요 ${b.pending}` : ''}` : '')]),
-      b.stage === 'sent' && b.sent_at ? el('span', { class: 's when', text: `보낸 때 ${b.sent_at}` }) : null,
+      el('span', { class: 's' }, [el('span', { class: 'stage-chip' + (b.stage === 'sent' ? ' sent' : ''), text: b.stage === 'sent' && b.rounds > 1 ? `✔ 보냄 ${b.rounds}회` : STAGE_NAME[b.stage] }),
+        b.stage === 'sent' ? ` ${b.sent_summary}` : `${b.n ? ` 새 자료 ${b.n}건${b.pending ? ` · 확인 필요 ${b.pending}` : ''}` : ''}${b.n_sent ? ` · 보낸 ${b.n_sent}건` : ''}`]),
+      b.sent_at ? el('span', { class: 's when', text: `마지막으로 보낸 때 ${b.sent_at}` }) : null,
     ]);
-    if (!open.length) box.appendChild(el('p', { class: 'hint', text: '진행 중인 묶음이 없습니다. 학습지·엑셀 자료를 [+ 새 자료 묶음]으로 가져오세요.' }));
-    open.forEach((b) => box.appendChild(item(b)));
-    if (sent.length) {
-      const d = el('details', { style: 'margin-top:10px' }, [el('summary', { text: `보내기 완료 이력 ${sent.length}` })]);
-      sent.forEach((b) => d.appendChild(item(b)));
-      box.appendChild(d);
-    }
+    if (!IB.list.length) box.appendChild(el('p', { class: 'hint', text: '묶음이 없습니다. 학습지·엑셀 자료를 [+ 새 자료 묶음]으로 가져오세요.' }));
+    IB.list.forEach((b) => box.appendChild(item(b)));
   }
   function renderInboxEmpty() {
     const m = $('ibMain');
@@ -4978,6 +4971,8 @@
     const bid = IB.bid;
     const r = await call('inbox_view', bid);
     if (!r || req !== batchReq || bid !== IB.bid) return;
+    r.sentRows = r.rows.filter((x) => x.state === 'sent');
+    r.rows = r.rows.filter((x) => x.state !== 'sent');
     IB.view = r;
     { const t = await rawCall('tags'); IB.tags = t && t.ok ? t.tags : IB.tags || []; }
     refreshInboxBadge().then(renderInboxList);
@@ -4997,21 +4992,24 @@
     m.innerHTML = '';
     const b = IB.view.batch;
     const sent = b.stage === 'sent';
-    const title = el('input', { type: 'text', value: b.title, disabled: sent });
+    const hasSent = IB.view.sentRows.length > 0;
+    const title = el('input', { type: 'text', value: b.title });
     title.addEventListener('change', async () => { if (await mutate('inbox_update', b.id, { title: title.value })) { refreshInboxBadge().then(renderInboxList); } });
     const slot = slotSelect(`${b.group_id}:${b.item}`);
-    slot.disabled = sent;
+    slot.disabled = hasSent;
+    if (hasSent) slot.title = '이미 보낸 행이 있어 대상 명렬·항목을 바꿀 수 없습니다';
     slot.addEventListener('change', async () => {
       const [gid, item] = slot.value.split(':');
       if (+gid !== b.group_id && IB.view.rows.length && !(await confirmBox('대상 명렬을 바꾸면 학생 매칭을 처음부터 다시 합니다. 계속할까요?', '바꾸기'))) { slot.value = `${b.group_id}:${b.item}`; return; }
       if (await mutate('inbox_update', b.id, { group_id: +gid, item })) { await refreshInboxBadge(); renderInboxList(); loadBatch(); }
     });
     m.appendChild(el('div', { class: 'ib-head' }, [title, el('span', { class: 'muted', text: '→' }), slot, el('span', { class: 'spacer' }),
-      sent ? el('span', { class: 'stage-chip sent', text: `보내기 완료 ${b.sent_at} · ${b.sent_summary}` }) : el('button', { type: 'button', class: 'link danger-text', text: '묶음 삭제', onclick: async () => {
+      hasSent ? el('span', { class: 'stage-chip sent', text: `보낸 기록 ${b.sent_summary} · 마지막 ${b.sent_at}` }) : el('button', { type: 'button', class: 'link danger-text', text: '묶음 삭제', onclick: async () => {
         if (!(await typedConfirm(`'${b.title}' 묶음을 지웁니다. 아직 보내지 않은 자료는 사라집니다.`, '삭제'))) return;
         if (await mutate('inbox_delete', b.id)) { IB.bid = null; renderInbox(); }
       } })]));
     m.appendChild(stepsBar(b.stage));
+    if (hasSent && !sent) m.appendChild(sentFold(false));
     const body = el('div', {});
     m.appendChild(body);
     if (b.stage === 'import') renderImport(body);
@@ -5027,6 +5025,7 @@
     if (b.source === 'scan' && b.meta.scan) { renderScan(body); return; }
     if (IB.shared && IB.shared.bid !== b.id) IB.shared = null;
     if (!IB.shared && b.structure === 'shared' && b.meta.shared && !IB.raw && IB.sharedOff !== b.id) IB.shared = sharedState(b, b.meta.shared);
+    if (IB.view.sentRows.length) body.appendChild(el('div', { class: 'note', text: `이미 보낸 ${IB.view.sentRows.length}건은 그대로 두고, 새로 가져온 자료만 덧붙여 보냅니다. 태그는 앞 회차와 같게 붙습니다.` }));
     if (IB.shared) { renderShared(body); return; }
     if (!IB.raw) {
       const ta = el('textarea', { rows: 8, placeholder: '또는 여기를 누르고 Ctrl+V로 붙여넣은 뒤 [읽기]' });
@@ -5529,19 +5528,31 @@
     goTagWork(tid, slot, 'trial', scope);
   }
   // 보낸 묶음: 이 묶음으로 넣은 기록을 모든 학생에서 지우기(되돌릴 수 없음 → '확인했어요' 입력)
-  async function sentDelete(b) {
-    const info = await call('inbox_sent_info', b.id);
+  // 이미 보낸 행: 접어 두고 고칠 수 없게(회차·학생·보낸 내용만)
+  function sentFold(open) {
+    const v = IB.view;
+    const rounds = (v.batch.meta.rounds || []);
+    const t = el('table', { class: 'tbl match-tbl ib-sent-tbl' });
+    t.appendChild(el('tr', {}, ['회차', '원본 위치', '학생', '보낸 내용'].map((h) => el('th', { text: h }))));
+    v.sentRows.forEach((r) => t.appendChild(el('tr', {}, [el('td', { text: r.round ? `${r.round}회` : '-' }), el('td', { text: r.source_ref }),
+      el('td', { text: `${r.student_no || '-'} ${r.matched_name || r.ext_name || ''}` }), el('td', {}, [el('div', { class: 'snip', text: r.text })])])));
+    return el('details', { class: 'ib-sent-fold', open: !!open }, [
+      el('summary', {}, [el('b', { text: `✔ 이미 보낸 행 ${v.sentRows.length}건` }),
+        el('span', { class: 'muted', text: ` — ${rounds.map((x) => `${x.n}회 ${String(x.at || '').slice(5, 16)} · ${x.summary}`).join(' / ')} (고칠 수 없음, 다시 보내지 않음)` })]), t]);
+  }
+  async function sentDelete(b, rnd) {
+    const info = await call('inbox_sent_info', b.id, rnd || null);
     if (!info) return;
     const n = info.deletable.length;
     if (!n) { alertBox('지울 수 있는 기록이 없습니다(마감된 학생이거나 다른 항목으로 옮긴 기록만 남음).'); return; }
-    const lines = [`이 묶음으로 넣은 기록 ${n}건을 모든 학생에서 지웁니다.`];
+    const lines = [`${rnd ? `${rnd}회로` : '이 묶음으로'} 넣은 기록 ${n}건을 모든 학생에서 지웁니다.`];
     if (info.edited) lines.push(`· 보낸 뒤 고친 기록 ${info.edited}건도 함께 지워집니다.`);
     if (info.with_cands) lines.push(`· 정제 후보가 있는 기록 ${info.with_cands}건의 후보도 함께 지워집니다.`);
     if (info.closed) lines.push(`· 마감된 학생 ${info.closed_students}명의 기록 ${info.closed}건은 지우지 않습니다.`);
     if (info.moved) lines.push(`· 다른 항목으로 옮긴 ${info.moved}건은 지우지 않습니다.`);
-    lines.push(info.closed || info.moved ? '남는 기록이 있어 이 묶음은 다시 보낼 수 없습니다.' : '지운 뒤 이 묶음은 ④ 보내기 검토로 돌아가 태그 등을 고쳐 다시 보낼 수 있습니다.');
-    if (!(await typedConfirm(lines.join('\n'), '모두 삭제'))) return;
-    const r = await mutate('inbox_delete_sent', b.id, TYPED_WORD);
+    lines.push(info.closed || info.moved ? '남는 기록이 있는 회차는 보낸 것으로 그대로 둡니다.' : '지운 행은 다시 \'안 보냄\'이 되어 ④ 보내기 검토에서 고쳐 다시 보낼 수 있습니다.');
+    if (!(await typedConfirm(lines.join('\n'), rnd ? `${rnd}회 삭제` : '모두 삭제'))) return;
+    const r = await mutate('inbox_delete_sent', b.id, TYPED_WORD, rnd || null);
     if (!r) return;
     $('actionToast').hidden = true; // 지운 기록의 태그 되돌리기는 더 쓸 수 없음
     toast(`${r.students}명 ${r.deleted}건을 지웠습니다.${r.reopened ? ' 보내기 검토로 돌아왔습니다.' : ''}`, 5000);
@@ -5552,10 +5563,17 @@
   function renderSent(body) {
     const v = IB.view;
     const b = v.batch;
-    body.append(el('div', { class: 'wsection', style: 'margin-top:0' }, [el('h3', { text: `✔ ${b.sent_at}에 ${b.sent_summary} 보냄` }),
-      el('p', { class: 'hint', text: '보낸 묶음은 다시 보낼 수 없습니다(기록 중복 방지). 하나씩 고칠 때는 항목별 기록에서, 이 묶음 전체는 아래 버튼으로 합니다.' }),
+    const rounds = b.meta.rounds || [];
+    const moreBtn = el('button', { type: 'button', class: 'primary', text: '+ 자료 더 넣기', title: '같은 묶음(같은 항목·태그)에 새 자료를 가져와 아직 안 보낸 것만 보냅니다', onclick: async () => {
+      if (await mutate('inbox_stage', b.id, 'import')) { IB.raw = null; IB.shared = null; await refreshInboxBadge(); renderInboxList(); loadBatch(); }
+    } });
+    body.append(el('div', { class: 'wsection', style: 'margin-top:0' }, [el('h3', { text: `✔ 보낸 기록 ${b.sent_summary}` }),
+      el('p', { class: 'hint', text: '나중에 같은 활동의 자료가 더 생기면 [+ 자료 더 넣기]로 이 묶음에 가져와 보내세요. 이미 보낸 행은 접어 두고 다시 보내지 않습니다(기록 중복 방지). 태그는 앞 회차와 같게 붙습니다. 하나씩 고칠 때는 항목별 기록에서 합니다.' }),
+      el('div', { class: 'ib-rounds' }, rounds.map((x) => el('div', { class: 'ib-round' }, [el('b', { text: `${x.n}회` }), el('span', { class: 'muted', text: String(x.at || '') }), el('span', { text: x.summary }),
+        el('span', { class: 'spacer' }), el('button', { type: 'button', class: 'small link danger-text', text: '이 회차 기록 지우기', onclick: () => sentDelete(b, x.n) })]))),
       el('div', { class: 'toolbar' }, [
-        el('button', { type: 'button', class: 'primary', text: '항목별 기록에서 보기', onclick: () => openRecords(b.group_id, b.item, (v.rows.find((r) => r.state === 'confirmed') || {}).student_no) }),
+        moreBtn,
+        el('button', { type: 'button', text: '항목별 기록에서 보기', onclick: () => openRecords(b.group_id, b.item, (v.sentRows[0] || {}).student_no) }),
         el('button', { type: 'button', text: '🏷 이 묶음 기록에 태그 지정', onclick: () => sentTags(b) }),
         el('button', { type: 'button', class: 'ai-btn', text: '🤖 태그로 AI 변환', title: '이 묶음 기록에 붙은 태그로 태그별 기록의 AI 변환을 엽니다', onclick: () => sentTagWork(b) }),
         el('span', { class: 'spacer' }),
@@ -5566,11 +5584,8 @@
           if (await mutate('inbox_delete', b.id)) { IB.bid = null; await refreshInboxBadge(); renderInboxList(); renderInboxEmpty(); toast('이력에서 지웠습니다. 보낸 기록은 그대로입니다.'); }
         } }),
       ])]));
-    const t = el('table', { class: 'tbl match-tbl' });
-    t.appendChild(el('tr', {}, ['원본 위치', '학생', '상태', '보낸 내용'].map((h) => el('th', { text: h }))));
-    v.rows.forEach((r) => t.appendChild(el('tr', { class: r.state === 'excluded' ? 'row-excluded' : '' }, [el('td', { text: r.source_ref }), el('td', { text: `${r.student_no || '-'} ${r.matched_name || r.ext_name}` }),
-      el('td', { text: r.state === 'excluded' ? `제외(${r.exclude_reason})` : '보냄' }), el('td', {}, [el('div', { class: 'snip', text: r.text })])])));
-    body.appendChild(t);
+    body.appendChild(sentFold(true));
+    if (v.rows.length) body.appendChild(el('p', { class: 'muted small-note', text: `보내지 않은 행 ${v.rows.length}건(제외 등)은 [+ 자료 더 넣기] 뒤 다시 가져오면 정리됩니다.` }));
   }
 
   // =====================================================================

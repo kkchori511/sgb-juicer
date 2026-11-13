@@ -2254,16 +2254,16 @@ class Api:
         return self._ib().review(bid)
 
     @safe
-    def inbox_sent_info(self, bid):
-        return self._ib().sent_info(bid)
+    def inbox_sent_info(self, bid, rnd=None):
+        return self._ib().sent_info(bid, rnd)
 
     @safe
-    def inbox_delete_sent(self, bid, confirm=None):
-        """되돌릴 수 없는 삭제: 화면에서 '확인했어요'를 입력해야 한다(서버에서도 확인)."""
+    def inbox_delete_sent(self, bid, confirm=None, rnd=None):
+        """되돌릴 수 없는 삭제: 화면에서 '확인했어요'를 입력해야 한다(서버에서도 확인). rnd면 그 회차만."""
         self._editable()
         if (confirm or "").strip() != updater.CONFIRM_WORD:
             raise db.DbError(f"'{updater.CONFIRM_WORD}'를 입력해야 지웁니다.")
-        return self._ib().delete_sent(bid)
+        return self._ib().delete_sent(bid, rnd)
 
     @safe
     def inbox_send(self, bid, closed_action="block"):

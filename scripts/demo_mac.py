@@ -122,6 +122,9 @@ def seed():
     ok(api.inbox_shared(sb, {"text": "기후 위기 대응 방안을 조사한 모둠 보고서. 우리 지역의 탄소 배출 통계를 분석하고 학교에서 실천할 수 있는 방안 세 가지를 제안하였다.",
                              "label": "기후 위기 모둠 보고서", "date": f"{year}-05-10",
                              "picks": [{"student_no": "20301", "role": "자료 조사"}, {"student_no": "20302", "role": "통계 분석"}, {"student_no": "20303", "role": "발표"}]}), "공동 문서")
+    # 보낸 묶음도 그대로 남아 [+ 자료 더 넣기]로 이어 보낼 수 있음(1회 보냄 상태)
+    ok(api.inbox_stage(sb, "review"), "공동 문서")
+    ok(api.inbox_send(sb), "공동 문서")
     _demo_xlsx(year, names)
     return year
 
