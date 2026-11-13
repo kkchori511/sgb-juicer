@@ -6,7 +6,8 @@ v3: 자료 인박스(묶음·행·정제 후보). 다루는 함수는 inbox.py.
 v4: 인박스 행에 원본 페이지 번호(pages) — 스캔 PDF 원본 보기용.
 v5: 과목별 성취기준(standards).
 v6: 기록 순서(records.pos). v7: 선택과목 수업(memberships.section). v8: 1·2학기 합산 과목(groups.pair_id·pair_total).
-v9: 기록 태그 버전(records.tags_ver). v10: 자율·진로·동아리 활동 개요(outlines).
+v9: 기록 태그 버전(records.tags_ver). v10: 자율·진로·동아리 활동 개요(outlines). v11: 인박스 행 열 역할(inbox_rows.ext).
+v12: 태그 AI 변환(tag_works·tag_cands·tag_runs·tag_applies), 기록 내용 버전(records.content_ver, 트리거로 증가).
 
 자료 형식 규칙: 표·열은 더하기만 한다(지우거나 이름을 바꾸지 않는다). 화면을 없애도 그 자료 표는 남긴다.
 형식이 바뀌는 첫 실행 때는 열기 전에 '형식변경전' 백업을 만든다(backup.before_migration).
@@ -18,7 +19,7 @@ from contextlib import contextmanager
 
 from .paths import data_dir
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 KINDS = ("homeroom", "subject", "club")
 ROLES = ("homeroom", "subject")  # 담임 / 비담임
 
@@ -76,7 +77,8 @@ CREATE TABLE IF NOT EXISTS records (
     created_at TEXT DEFAULT (datetime('now','localtime')),
     updated_at TEXT DEFAULT (datetime('now','localtime')),
     pos INTEGER,                     -- 화면에서 끌어 바꾼 순서(없으면 기본 순서)
-    tags_ver INTEGER DEFAULT 0       -- 태그가 바뀔 때마다 1씩(v9)
+    tags_ver INTEGER DEFAULT 0,      -- 태그가 바뀔 때마다 1씩(v9)
+    content_ver INTEGER DEFAULT 0    -- 내용·소속이 바뀔 때마다 1씩(v12, 트리거)
 );
 CREATE INDEX IF NOT EXISTS ix_records_slot ON records(group_id, item, student_no);
 CREATE TABLE IF NOT EXISTS record_tags (
@@ -174,6 +176,66 @@ CREATE TABLE IF NOT EXISTS schedules (
     date TEXT NOT NULL,          -- YYYY-MM-DD
     title TEXT NOT NULL
 );
+-- v12: 태그 AI 변환. 기록이 지워져도 이력은 남긴다(record_id에 FK를 걸지 않음).
+CREATE TABLE IF NOT EXISTS tag_works (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tag_id INTEGER,                  -- 태그가 지워져도 작업 이력은 남김
+    tag_name TEXT NOT NULL DEFAULT '', -- 만들 때 태그 이름
+    draft TEXT DEFAULT '{}',         -- 고치는 중인 프롬프트 {prompt, example, lib_id, lib_name}
+    confirmed TEXT DEFAULT '',       -- 확정한 설정 {cand_id, steps:[{prompt, example, request}], at}
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    updated_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS tag_cands (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_id INTEGER NOT NULL,
+    record_id INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'trial', -- trial(시험, 기록마다 3칸) / bulk(일괄 변환 결과)
+    run_id INTEGER,                  -- bulk일 때 실행
+    parent_id INTEGER,               -- [이 후보를 더 고치기]로 만든 경우 앞 후보
+    steps TEXT DEFAULT '[]',         -- 원문에서 이 결과까지 거친 단계 [{prompt, example, request}]
+    input_src TEXT DEFAULT 'original', -- original(처음 원문) / current(그때 기록 내용) / cand(앞 후보)
+    input_text TEXT DEFAULT '',      -- 이 단계에 보낸 글
+    record_ver INTEGER,              -- 만들 때 기록 내용 버전(반영 때 바뀌었는지 확인)
+    record_text TEXT DEFAULT '',     -- 만들 때 기록 내용
+    text TEXT NOT NULL DEFAULT '',   -- AI 결과
+    edited TEXT,                     -- 검토하며 고친 글(없으면 text)
+    checked INTEGER NOT NULL DEFAULT 0, -- 검토 표 체크
+    locked INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'ok', -- ok / failed
+    error TEXT DEFAULT '',
+    model TEXT DEFAULT '',
+    cost REAL DEFAULT 0,
+    meta TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS ix_tag_cands_work ON tag_cands(work_id, record_id);
+CREATE INDEX IF NOT EXISTS ix_tag_cands_run ON tag_cands(run_id);
+CREATE TABLE IF NOT EXISTS tag_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_id INTEGER NOT NULL,
+    steps TEXT DEFAULT '[]',         -- 이번 일괄에 쓴 확정 단계(그때 그대로)
+    filter TEXT DEFAULT '{}',        -- 그때 화면 조건
+    targets TEXT DEFAULT '[]',       -- 고정한 대상 기록 id
+    status TEXT NOT NULL DEFAULT 'running', -- running / done / stopped
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS tag_applies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_id INTEGER NOT NULL,
+    batch TEXT NOT NULL,             -- 한 번 [반영]에 함께 바뀐 묶음(되돌리기 단위)
+    record_id INTEGER NOT NULL,
+    cand_id INTEGER,
+    before_text TEXT NOT NULL,
+    before_ver INTEGER,
+    after_text TEXT NOT NULL,
+    after_ver INTEGER,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    undone_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_tag_applies_work ON tag_applies(work_id, batch);
+CREATE INDEX IF NOT EXISTS ix_tag_applies_record ON tag_applies(record_id);
 """
 
 
@@ -245,6 +307,12 @@ class YearDb:
             self._conn.execute("ALTER TABLE records ADD COLUMN pos INTEGER")
         if "tags_ver" not in cols:  # v9: 기록의 태그가 바뀔 때마다 1씩(일괄 태그 되돌리기 확인용)
             self._conn.execute("ALTER TABLE records ADD COLUMN tags_ver INTEGER DEFAULT 0")
+        if "content_ver" not in cols:  # v12: 내용·소속이 바뀔 때마다 1씩(태그 변환 반영 때 그사이 바뀌었는지 확인)
+            self._conn.execute("ALTER TABLE records ADD COLUMN content_ver INTEGER DEFAULT 0")
+        self._conn.execute(
+            "CREATE TRIGGER IF NOT EXISTS tr_records_content_ver AFTER UPDATE OF content, group_id, item, student_no ON records "
+            "WHEN NEW.content IS NOT OLD.content OR NEW.group_id IS NOT OLD.group_id OR NEW.item IS NOT OLD.item OR NEW.student_no IS NOT OLD.student_no "
+            "BEGIN UPDATE records SET content_ver=COALESCE(OLD.content_ver,0)+1 WHERE id=NEW.id; END")
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(groups)")}
         if "pair_id" not in cols:
             self._conn.execute("ALTER TABLE groups ADD COLUMN pair_id INTEGER")
