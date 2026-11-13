@@ -18,6 +18,7 @@ import webview
 from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, existing, export, ocr, openrouter, prompts, roster, scan, stdformat, updater, weights
 from .records import Records, items_of
 from .inbox import Inbox
+from .tagwork import TagWork, norm_chain, signature, step_system
 from .standards import Outlines, Standards, avoid_rule, new_words, outline_tidy_prompt, check_level, outline_rule, read_hwpx_text, read_pdf_text, similarity, standards_rule
 from .paths import data_dir
 from .textutil import count_bytes
@@ -72,6 +73,12 @@ def safe(fn):
             return {"ok": False, "error": f"처리하지 못했습니다: {e.__class__.__name__}: {e}"}
 
     return inner
+
+
+def ys_ok(api) -> bool:
+    """지금 학년도가 있는지(태그 작업 조회 전)."""
+    cfg = config.load()
+    return bool(cfg["current_year"] and cfg["current_year"] in db.list_years())
 
 
 class Api:
@@ -639,6 +646,12 @@ class Api:
             todo.append({"kind": "inbox", "label": f"인박스 확인 필요 {len(need)}묶음", "batch_id": need[0]["id"]})
         if ready:
             todo.append({"kind": "inbox", "label": f"인박스 보내기 대기 {len(ready)}묶음", "batch_id": ready[0]["id"]})
+        for w in TagWork(d).summary()[:3]:  # 진행 중인 태그 AI 변환
+            if w["tag_id"] is None:
+                continue
+            what = (f"검토 전 {w['pending']}건" if w["pending"] else "") + (f" 실패 {w['failed']}건" if w["failed"] else "") or "시험 중"
+            todo.append({"kind": "tagwork", "label": f"'{w['tag_name']}' 태그 변환 {what.strip()}", "tag_id": w["tag_id"],
+                         "step": "review" if (w["pending"] or w["failed"]) else "trial"})
         for kind, n, label, flt in (("stale", todo_stale, "채택 후 기록 변경", "stale"), ("final", todo_final, "최종안 만들기", "progress"),
                                     ("close", todo_close, "마감 검토", "final")):
             if n:
@@ -717,6 +730,160 @@ class Api:
     def tag_view(self, tag_id, flt=None):
         d = self._db()
         return Records(d).tag_view(d.role(), tag_id, flt or {})
+
+    # ---------- 태그 AI 변환(tagwork.py) ----------
+    def _tw(self):
+        return TagWork(self._db())
+
+    @safe
+    def tag_work(self, tag_id):
+        """태그 작업 열기: 작업·시험 후보·반영 묶음·일괄 실행 목록."""
+        tw = self._tw()
+        if not ys_ok(self):
+            raise db.DbError("학년도를 먼저 고르세요.")
+        w = tw.work_for_tag(tag_id)
+        return {"work": w, "trials": tw.trials(w["id"]), "batches": tw.batches(w["id"]), "runs": tw.runs(w["id"])}
+
+    @safe
+    def tag_draft_save(self, wid, draft):
+        self._editable()
+        return {"draft": self._tw().save_draft(wid, draft)}
+
+    @safe
+    def tag_trial_run(self, wid, rid, chain, parent_id=None, model_index=None):
+        """시험 변환 한 번: 처음이면 원문(또는 지금 내용)에 첫 단계, 이어 고치기면 앞 후보 글에 마지막 단계만 적용한다."""
+        self._editable()
+        tw = self._tw()
+        w = tw.work(wid)
+        r = tw.record_info(rid)
+        tw.check_target(r)
+        tw.trial_room(w["id"], r["id"])
+        chain = norm_chain(chain)
+        if parent_id:
+            par = tw.cand(parent_id)
+            if par["record_id"] != r["id"] or par["work_id"] != w["id"]:
+                raise db.DbError("이어서 고칠 후보가 이 기록의 후보가 아닙니다.")
+            if signature({**par["chain"], "steps": chain["steps"][:-1]}) != signature(par["chain"]) or chain["src"] != par["chain"]["src"]:
+                raise db.DbError("앞 후보의 단계와 맞지 않습니다. 화면을 다시 열어 주세요.")
+            src_text, input_src = (par["edited"] if par["edited"] is not None else par["text"]), "cand"
+        else:
+            if len(chain["steps"]) != 1:
+                raise db.DbError("처음 변환은 한 단계만 할 수 있습니다.")
+            src_text, input_src = tw.source_text(r, chain["src"]), chain["src"]
+        if not src_text.strip():
+            raise db.DbError("보낼 글이 비어 있습니다.")
+        cfg, model = self._model(model_index)
+        key = ("tag", int(r["id"]))
+        self._guard(key)
+        try:
+            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, len(chain["steps"]) - 1), src_text,
+                                       cfg["privacy_block"], extra=False)
+            nid, dropped = tw.add_trial(w["id"], r, chain, int(parent_id) if parent_id else None, input_src, src_text, text, model, cost, {})
+            return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
+        finally:
+            self._release(key)
+
+    @safe
+    def tag_cand_lock(self, cid, locked):
+        self._editable()
+        self._tw().lock_cand(cid, bool(locked))
+        return {}
+
+    @safe
+    def tag_cand_delete(self, cid):
+        self._editable()
+        self._tw().delete_trial(cid)
+        return {}
+
+    @safe
+    def tag_confirm(self, cid, apply=True):
+        """시험 후보 확정(그 기록에 반영 + 이 태그 설정으로)."""
+        self._editable()
+        return self._tw().confirm(cid, bool(apply))
+
+    @safe
+    def tag_plan(self, wid, flt=None):
+        d = self._db()
+        return TagWork(d).plan(wid, d.role(), flt or {})
+
+    @safe
+    def tag_run_create(self, wid, record_ids, flt=None):
+        self._editable()
+        return {"run": self._tw().create_run(wid, record_ids, flt or {})}
+
+    @safe
+    def tag_run_item(self, run_id, rid, model_index=None):
+        """일괄 변환 한 건: 확정 단계를 처음부터 그대로 재현한다. 실패도 기록해 [실패한 것만 다시]에 쓴다."""
+        self._editable()
+        tw = self._tw()
+        run = tw.run(run_id)
+        if int(rid) not in run["targets"]:
+            raise db.DbError("이번 변환 대상이 아닙니다.")
+        if tw.run_has_ok(run["id"], rid):
+            return {"skipped": True, "cost": 0, "run_cost": self._run_cost}
+        r = tw.record_info(rid)
+        chain = run["chain"]
+        cfg, model = self._model(model_index)
+        key = ("tag", int(r["id"]))
+        self._guard(key)
+        try:
+            tw.check_target(r)
+            text = tw.source_text(r, chain.get("src", "original"))
+            first = text
+            if not text.strip():
+                raise db.DbError("기록 내용이 비어 있습니다.")
+            total, outs = 0.0, []
+            for i in range(len(chain["steps"])):
+                text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, i), text, cfg["privacy_block"], extra=False)
+                total += cost
+                outs.append(text)
+            nid = tw.save_bulk(run, r, first, text, model, total, {"steps_out": outs[:-1]})
+            return self._ai_out({"id": nid, "cost": total})
+        except openrouter.Cancelled:
+            raise
+        except (db.DbError, openrouter.LlmError) as e:
+            tw.save_bulk(run, r, "", "", model, 0, {}, error=str(e))
+            raise
+        finally:
+            self._release(key)
+
+    @safe
+    def tag_run_finish(self, run_id, status="done"):
+        self._tw().finish_run(run_id, status)
+        return {}
+
+    @safe
+    def tag_review(self, wid, run_id=None):
+        tw = self._tw()
+        return {**tw.review(wid, run_id), "runs": tw.runs(wid), "batches": tw.batches(wid)}
+
+    @safe
+    def tag_cand_edit(self, cid, text):
+        self._editable()
+        self._tw().edit_cand(cid, text)
+        return {}
+
+    @safe
+    def tag_cand_check(self, cids, checked):
+        self._editable()
+        self._tw().check_cands(cids, bool(checked))
+        return {}
+
+    @safe
+    def tag_apply(self, wid, cids):
+        self._editable()
+        return self._tw().apply(wid, cids)
+
+    @safe
+    def tag_undo(self, wid, batch):
+        self._editable()
+        return self._tw().undo(wid, batch)
+
+    @safe
+    def tag_summary(self):
+        if not ys_ok(self):
+            return {"works": []}
+        return {"works": self._tw().summary()}
 
     @safe
     def record_state(self, rid):
@@ -941,8 +1108,8 @@ class Api:
         x = getattr(self, "_ai_extra", "")
         return {**(meta or {}), "extra": x} if x else meta
 
-    def _call_ai(self, key, model, system, user, privacy):
-        x = getattr(self, "_ai_extra", "")
+    def _call_ai(self, key, model, system, user, privacy, extra=True):
+        x = getattr(self, "_ai_extra", "") if extra else ""
         if x:
             system = (system + "\n\n[이번 추가 요구 사항 — 교사가 이번 실행에만 준 요청]\n<요청>\n" + x + "\n</요청>\n"
                       "- 위 요청을 반영하되, 앞의 규칙(학번·이름 쓰지 않기, 분량, 없는 사실 지어내지 않기, 원문 보존, 출력 형식)이 항상 우선한다.")

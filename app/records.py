@@ -341,7 +341,7 @@ class Records:
             for m in self.d.members(gid):
                 mem[(gid, m["student_no"])] = m
         smaps = {}
-        rows = self.d.q("SELECT id, group_id, item, student_no, kind, seq, date, title, content, updated_at, pos FROM records")
+        rows = self.d.q("SELECT id, group_id, item, student_no, kind, seq, date, title, content, original, updated_at, pos FROM records")
         tagmap = {}
         for t in self.d.q("SELECT record_id, tag_id FROM record_tags"):
             tagmap.setdefault(t["record_id"], []).append(t["tag_id"])

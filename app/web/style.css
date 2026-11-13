@@ -906,3 +906,48 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 .sent-chip.used { opacity: .55; background: #ecfdf5; border-color: #86efac; }
 .sel-insert { position: fixed; z-index: 3000; padding: 4px 10px; font-size: 13px; font-weight: 700; border-radius: 8px; background: var(--sel, #334155); color: #fff; border: none; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
 .wiz-dir { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13.5px; word-break: break-all; }
+/* 태그 AI 변환 */
+.tw-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 8px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.tw-tabs { display: flex; gap: 4px; }
+.tw-tab { border-radius: 999px; padding: 4px 12px; font-size: 13.5px; }
+.tw-tab.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.tw-body { display: flex; flex-direction: column; gap: 10px; }
+.tw-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tw-row select { width: auto; max-width: 520px; }
+.tw-confirmed { background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 8px 12px; font-size: 13.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tw-grid { display: grid; grid-template-columns: minmax(300px, 0.9fr) minmax(0, 1.6fr); gap: 12px; align-items: start; }
+.tw-left { display: flex; flex-direction: column; gap: 6px; }
+.tw-src { max-height: 160px; overflow: auto; font-size: 13.5px; }
+.tw-prhead { display: flex; align-items: center; gap: 6px; }
+.tw-prhead select { width: auto; max-width: 220px; font-size: 13px; }
+.tw-prompt { font-size: 13px; line-height: 1.5; min-height: 180px; }
+.tw-src-pick { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13.5px; }
+.tw-cands { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.tw-empty { border: 1px dashed var(--border); border-radius: 8px; padding: 20px; color: var(--muted); text-align: center; }
+.tw-cand { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); display: flex; flex-direction: column; min-width: 0; }
+.tw-cand.conf { border-color: #10b981; box-shadow: 0 0 0 2px #a7f3d0; }
+.tw-cand.locked { background: #fffbeb; }
+.tw-cand-head { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.tw-cand-head .badge.ok { background: #d1fae5; color: #065f46; }
+.tw-cand-text { padding: 8px 10px; white-space: pre-wrap; font-size: 13.5px; line-height: 1.6; max-height: 340px; overflow: auto; }
+.tw-cand-meta { padding: 0 10px 4px; font-size: 12px; }
+.tw-cand-foot { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; border-top: 1px solid var(--border); }
+.tw-cand-foot:has(> button) { flex-direction: row; align-items: center; }
+.tw-est { font-size: 13.5px; font-weight: 600; }
+.tw-plan-wrap { max-height: 46vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.tw-plan td, .tw-plan th { font-size: 13px; }
+.tw-plan tr.off td { color: var(--muted); }
+.tw-snip { max-width: 360px; }
+.tw-go { position: sticky; bottom: 0; background: var(--surface); padding: 8px 0; border-top: 1px solid var(--border); }
+.tw-filter { display: flex; gap: 4px; }
+.tw-filter .on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.tw-review { display: flex; flex-direction: column; gap: 8px; }
+.tw-rv { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+.tw-rv.off { background: var(--surface-2); }
+.tw-rv-who { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.tw-rv-cols { display: grid; grid-template-columns: 1fr 1.2fr; gap: 10px; }
+.tw-rv-cols .cmp-text { max-height: 150px; overflow: auto; font-size: 13px; }
+.tw-rv-cols textarea { font-size: 13.5px; line-height: 1.55; }
+.tw-batches { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 13.5px; }
+@media (max-width: 1100px) { .tw-grid, .tw-rv-cols { grid-template-columns: minmax(0, 1fr); } }
+.tw-head { position: sticky; top: -10px; z-index: 3; background: var(--surface); padding-top: 4px; }

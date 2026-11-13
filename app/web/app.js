@@ -429,6 +429,7 @@
       dash.todo.forEach((t) => todo.appendChild(el('button', { type: 'button', text: t.label, onclick: () => {
         if (t.kind === 'roster') { rosterSel = t.group_id; showPanel('roster'); return; }
         if (t.kind === 'inbox') { IB.bid = t.batch_id; showPanel('inbox'); return; }
+        if (t.kind === 'tagwork') { goTagWork(t.tag_id, '', t.step); return; }
         openRecords(t.group_id, t.item, null, t.filter);
       } })));
     }
@@ -3032,6 +3033,7 @@
   }
   // 저장 대기·진행 중인 것과 되돌리기·일괄 작업을 모두 끝낸다. 남은 글이 있으면 false(화면을 바꾸지 않는다)
   async function flushTagView() {
+    await twFlush(); // 태그 AI 변환: 프롬프트 초안·고친 결과 저장
     const jobs = [...TV.ops];
     for (const [rid, st] of TV.rec) if (tvHasDiff(st) && !(st.err && st.err.code)) jobs.push(tvSave(rid));
     jobs.push(...TV.queue.values());
@@ -3321,6 +3323,7 @@
     const name = TV.tag === 0 ? '태그 없음' : (d.tags.find((t) => t.id === TV.tag) || {}).name;
     const editable = d.records.filter(tvEditable).length;
     const shown = Math.min(TV.limit, d.records.length);
+    if (TV.tag > 0) sum.appendChild(TW.open ? el('span', { class: 'badge', text: '🤖 AI 변환 중' }) : el('button', { type: 'button', class: 'small primary ai-btn', title: '이 태그 기록 한 건으로 프롬프트를 시험하고, 확정한 프롬프트로 나머지를 한꺼번에 변환합니다', text: '🤖 이 태그 AI 변환', onclick: () => twOpen() }));
     addTo(sum, el('b', { text: name }), ` · ${d.students}명 ${d.records.length}건`,
       el('span', { class: 'muted', text: ` (고칠 수 있음 ${editable}건 · 읽기 전용 ${d.records.length - editable}건) · ${shown}/${d.records.length}건 표시` }),
       editable ? el('button', { type: 'button', class: 'small', text: `이 조건 모두 선택 (${editable}건)`, title: '지금 필터에 맞는 기록 중 고칠 수 있는 것을 모두 고릅니다(더 보기 아래 기록 포함)', onclick: () => tvSelectAll(true) }) : null,
@@ -3346,6 +3349,13 @@
     TV.slotUI.clear();
     const d = TV.data;
     tvRenderSum();
+    if (TW.open && TV.tag) { // 태그 AI 변환 작업 영역
+      $('tvBulk').hidden = true;
+      if (TW.tag !== TV.tag) { main.appendChild(el('p', { class: 'muted', text: '불러오는 중…' })); twLoad().then((ok) => { if (ok) twRender(); else tvRenderMain(); }); return; }
+      twRender();
+      return;
+    }
+    if (TW.open && !TV.tag) TW.open = false;
     if (TV.tag === null) {
       main.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: d.tags.length ? '태그를 고르세요. 그 태그가 붙은 기록이 학생 전부 한 화면에 모입니다.' : '아직 태그가 없습니다. 태그 관리에서 먼저 만드세요.' }),
         d.tags.length ? null : el('button', { type: 'button', class: 'primary', text: '태그 관리', onclick: () => showPanel('tags') })]));
@@ -3576,6 +3586,426 @@
     tvRenderSum();
     const why = [u.changed ? `${u.changed}건은 그 뒤 태그가 다시 바뀌어` : '', u.skipped - u.changed ? `${u.skipped - u.changed}건은 마감·삭제되어` : ''].filter(Boolean).join(', ');
     toast(why ? `${u.done}건을 되돌렸습니다. ${why} 건너뛰었습니다.` : `${u.done}건을 되돌렸습니다.`, why ? 6000 : 3000);
+  }
+
+  // ---------- 태그 AI 변환(태그별 기록 › [이 태그 AI 변환]) — docs/plan/tag-flow.md ----------
+  // ① 시험: 기록 한 건으로 프롬프트를 바꿔 가며 후보 3칸 → ✔ 확정(그 기록에 반영 + 단계가 태그 설정)
+  // ② 나머지 변환: 확정 단계를 대상마다 그대로 재현(결과는 후보, 기록은 아직 안 바뀜)
+  // ③ 검토·반영: 체크한 것만 기록에 반영, 반영 묶음 되돌리기
+  const TW = { open: false, tag: null, step: 'trial', work: null, trials: [], batches: [], runs: [], rid: null, src: 'original', req: '',
+    lib: null, plan: null, pick: new Set(), review: null, rfilter: 'all', saving: new Set(), draftTimer: null, cont: null };
+  const TW_STEPS = [['trial', '① 시험'], ['bulk', '② 나머지 변환'], ['review', '③ 검토·반영']];
+  function twTrack(p) { TW.saving.add(p); p.finally(() => TW.saving.delete(p)); return p; }
+  async function twFlush() {
+    if (TW.draftTimer) { clearTimeout(TW.draftTimer); TW.draftTimer = null; twTrack(twSaveDraft()); }
+    await Promise.all([...TW.saving]);
+  }
+  // 다른 화면에서 태그 AI 변환으로 바로 가기(인박스 보내기 뒤·현황판)
+  async function goTagWork(tagId, slot, step) {
+    if (!(await leaveOk())) return;
+    if (TV.year !== ys.year) { TV.year = ys.year; TV.data = null; TV.rec.clear(); TV.sel.clear(); TV.out.clear(); TV.undo.clear(); TV.bulk = null; TV.anchor = null; }
+    TV.tag = tagId; TV.flt = { ...TV_FLT0(), slot: slot || '' }; TV.limit = 100;
+    try { localStorage.setItem(tvTagKey(), String(tagId)); } catch (e) { /* 무시 */ }
+    TW.open = true; TW.step = step || 'trial'; TW.tag = null; TW.plan = null; TW.review = null;
+    showPanel('tagrec');
+  }
+  async function twOpen(step) {
+    if (!TV.tag) return;
+    if (!(await leaveOk())) return;
+    TW.open = true; TW.step = step || 'trial';
+    await twLoad();
+    tvRenderMain();
+  }
+  async function twClose() {
+    await twFlush();
+    TW.open = false; TW.plan = null; TW.review = null;
+    tvRenderMain();
+  }
+  async function twLoad() {
+    const r = await call('tag_work', TV.tag);
+    if (!r) { TW.open = false; return false; }
+    if (TW.tag !== TV.tag) { TW.rid = null; TW.plan = null; TW.review = null; TW.reviewRun = null; TW.cont = null; TW.req = ''; }
+    TW.tag = TV.tag; TW.work = r.work; TW.trials = r.trials; TW.batches = r.batches; TW.runs = r.runs;
+    if (!TW.lib) { const l = await rawCall('prompt_list'); TW.lib = l && l.ok ? l.prompts : []; }
+    if (!TW.work.draft || !TW.work.draft.prompt) { // 처음: 기본 프롬프트에서 시작
+      const base = TW.lib.find((p) => p.id === 'default') || TW.lib[0];
+      if (base) TW.work.draft = { prompt: base.prompt, example: base.example || '', lib_id: base.id, lib_name: base.name };
+    }
+    const recs = TV.data ? TV.data.records : [];
+    if (!recs.some((x) => x.id === TW.rid)) {
+      const withTrial = TW.trials.length ? TW.trials[TW.trials.length - 1].record_id : null;
+      const first = recs.find((x) => x.id === withTrial) || recs.find((x) => tvEditable(x) && x.kind === 'record') || null;
+      TW.rid = first ? first.id : null;
+    }
+    return true;
+  }
+  async function twSaveDraft() {
+    if (!TW.work) return;
+    const r = await rawCall('tag_draft_save', TW.work.id, TW.work.draft);
+    if (!r || r.ok === false) toast((r && r.error) || '프롬프트 초안을 저장하지 못했습니다.', 5000);
+  }
+  function twDraftChanged() {
+    if (TW.draftTimer) clearTimeout(TW.draftTimer);
+    TW.draftTimer = setTimeout(() => { TW.draftTimer = null; twTrack(twSaveDraft()); }, 700);
+  }
+  const twShort = (t, n) => { const s = String(t || '').replace(/\s+/g, ' ').trim(); return s.length > n ? `${s.slice(0, n)}…` : s; };
+  function twChainText(chain) {
+    if (!chain || !chain.steps) return '';
+    const parts = [chain.src === 'current' ? '지금 기록 내용' : '처음 원문'];
+    chain.steps.forEach((s, i) => parts.push(i === 0 ? `지침 '${twShort(s.prompt, 24)}'${s.request ? ` + 요청 '${twShort(s.request, 20)}'` : ''}` : `요청 '${twShort(s.request || '(전체 프롬프트 고침)', 24)}'`));
+    return parts.join(' → ');
+  }
+  function twChainInfo(chain, title) {
+    const lines = [`보낸 글: ${chain.src === 'current' ? '지금 기록 내용' : '처음 원문'}`];
+    chain.steps.forEach((s, i) => {
+      lines.push(`\n[${i + 1}단계]`);
+      if (s.prompt) lines.push(`지침:\n${s.prompt}`);
+      if (s.example) lines.push(`예시:\n${s.example}`);
+      if (s.request) lines.push(`${i === 0 ? '추가 요청' : '이어서 고칠 요청'}: ${s.request}`);
+      if (i > 0 && !s.prompt) lines.push('(지침은 1단계와 같음)');
+    });
+    alertBox(`${title || '이 후보를 만든 단계'}\n\n${lines.join('\n')}`);
+  }
+  function twRec(id) { return TV.data ? TV.data.records.find((x) => x.id === id) : null; }
+  function twRecLabel(x) { return `${x.name || x.student_no}${x.seq ? ` · ${x.seq}회` : x.kind === 'existing' ? ' · 기존 완성문' : ''}${x.title ? ` · ${x.title}` : ''}`; }
+
+  function twRender() {
+    const main = $('tvMain');
+    main.innerHTML = '';
+    const tagName = (TV.data.tags.find((t) => t.id === TV.tag) || {}).name || '';
+    const tabs = el('div', { class: 'tw-tabs', role: 'tablist' }, TW_STEPS.map(([k, label]) => el('button', { type: 'button', role: 'tab', class: 'tw-tab' + (TW.step === k ? ' on' : ''), 'aria-selected': TW.step === k ? 'true' : 'false', text: label,
+      onclick: async () => { await twFlush(); TW.step = k; if (k === 'review') TW.review = null; if (k === 'bulk') TW.plan = null; twRender(); } })));
+    main.appendChild(el('div', { class: 'tw-head' }, [el('b', { text: `🤖 '${tagName}' AI 변환` }), tabs, el('span', { class: 'spacer' }),
+      el('button', { type: 'button', class: 'small', text: '← 기록 목록으로', onclick: () => twClose() })]));
+    const body = el('div', { class: 'tw-body' });
+    main.appendChild(body);
+    if (TW.step === 'trial') twTrial(body);
+    else if (TW.step === 'bulk') twBulk(body);
+    else twReview(body);
+  }
+
+  // ① 시험
+  function twTrial(body) {
+    const recs = TV.data.records;
+    const w = TW.work;
+    if (!recs.length) { body.appendChild(el('p', { class: 'muted', text: '지금 조건에 맞는 기록이 없습니다. 필터를 바꿔 보세요.' })); return; }
+    body.appendChild(el('p', { class: 'hint', text: '기록 한 건으로 프롬프트를 고쳐 가며 변환해 보세요. 후보는 3칸까지 쌓이고(잠근 것은 남음), 마음에 드는 후보를 [✔ 확정]하면 그 기록에 반영되고 그 후보를 만든 단계로 ② 나머지 기록을 변환합니다.' }));
+    if (w.confirmed) body.appendChild(el('div', { class: 'tw-confirmed' }, [el('b', { text: '확정한 설정: ' }), `프롬프트 ${w.confirmed.ver_no || ''}번 · ${twChainText(w.confirmed.chain)} `,
+      el('button', { type: 'button', class: 'link', text: '자세히', onclick: () => twChainInfo(w.confirmed.chain, '확정한 설정') }),
+      el('button', { type: 'button', class: 'small primary', text: '② 나머지 변환으로 →', onclick: () => { TW.step = 'bulk'; TW.plan = null; twRender(); } })]));
+    // 시험할 기록
+    const sel = el('select', { 'aria-label': '시험할 기록', onchange: (e) => { TW.rid = +e.target.value; TW.cont = null; twRender(); } });
+    const groups = [['학생관찰기록', recs.filter((x) => x.kind === 'record')], ['기존 완성문', recs.filter((x) => x.kind !== 'record')]];
+    groups.forEach(([label, list]) => { if (list.length) sel.appendChild(el('optgroup', { label }, list.map((x) => el('option', { value: x.id, selected: x.id === TW.rid, disabled: !tvEditable(x), text: `${twRecLabel(x)} — ${twShort(x.content, 30)}${tvEditable(x) ? '' : ' (읽기 전용)'}` })))); });
+    const rec = twRec(TW.rid);
+    body.appendChild(el('div', { class: 'tw-row' }, [el('label', { class: 'inline' }, ['시험할 기록', sel]), rec ? el('span', { class: 'muted', text: `${tvSrcLabel(rec)} · ${rec.bytes}B` }) : null,
+      rec ? el('button', { type: 'button', class: 'link', text: '이 학생 항목별 기록 ↗', onclick: () => openRecords(rec.group_id, rec.item, rec.student_no) }) : null]));
+    if (!rec) return;
+    const trials = TW.trials.filter((t) => t.record_id === rec.id);
+    const hasOrig = !!(rec.original && rec.original !== rec.content);
+    const grid = el('div', { class: 'tw-grid' });
+    // 왼쪽: 원문·프롬프트
+    const left = el('div', { class: 'tw-left' });
+    left.appendChild(el('div', { class: 'col-label', text: hasOrig ? '처음 원문' : '원문(지금 기록 내용)' }));
+    left.appendChild(el('div', { class: 'cmp-text tw-src', text: hasOrig ? rec.original : rec.content }));
+    if (hasOrig) { left.appendChild(el('div', { class: 'col-label', text: '지금 기록 내용(앞서 반영한 글)' })); left.appendChild(el('div', { class: 'cmp-text tw-src', text: rec.content })); }
+    const libSel = el('select', { 'aria-label': '프롬프트 불러오기' }, [el('option', { value: '', text: '프롬프트 목록에서 불러오기…' }), ...(TW.lib || []).map((p) => el('option', { value: p.id, text: p.name }))]);
+    const pr = el('textarea', { class: 'tw-prompt', rows: 12, 'aria-label': '프롬프트(지침)' }); pr.value = (w.draft && w.draft.prompt) || '';
+    const ex = el('textarea', { rows: 3, 'aria-label': '예시', placeholder: '예시(선택): 문체·형식만 따라 합니다' }); ex.value = (w.draft && w.draft.example) || '';
+    libSel.addEventListener('change', async () => {
+      const p = (TW.lib || []).find((x) => x.id === libSel.value);
+      if (!p) return;
+      if ((pr.value.trim() && pr.value.trim() !== p.prompt.trim()) && !(await confirmBox(`지금 고치던 프롬프트를 '${p.name}'으로 바꿉니다. 이미 만든 후보에는 영향이 없습니다.`, '불러오기'))) { libSel.value = ''; return; }
+      pr.value = p.prompt; ex.value = p.example || '';
+      w.draft = { prompt: p.prompt, example: p.example || '', lib_id: p.id, lib_name: p.name };
+      twDraftChanged(); libSel.value = '';
+    });
+    const onEdit = () => { w.draft = { ...(w.draft || {}), prompt: pr.value, example: ex.value }; twDraftChanged(); };
+    pr.addEventListener('input', onEdit); ex.addEventListener('input', onEdit);
+    left.append(el('div', { class: 'tw-prhead' }, [el('span', { class: 'col-label', text: `프롬프트(지침)${w.draft && w.draft.lib_name ? ` · '${w.draft.lib_name}'에서 시작` : ''}` }), el('span', { class: 'spacer' }), libSel]), pr,
+      el('details', { open: !!ex.value }, [el('summary', { text: '예시(선택)' }), ex]));
+    const model = el('select', { 'aria-label': '모델' }); fillModelSelect(model);
+    const srcBox = el('div', { class: 'tw-src-pick' }, [el('span', { class: 'muted', text: '보낼 글:' }),
+      ...[['original', '처음 원문'], ['current', '지금 기록 내용']].map(([v, label]) => el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'radio', name: 'twSrc', checked: TW.src === v, onchange: () => { TW.src = v; } }), label]))]);
+    const req = el('input', { type: 'text', placeholder: '이번 추가 요청(선택): 예) 탐구 과정을 더 살려서', value: TW.req, oninput: (e) => { TW.req = e.target.value; } });
+    const full = trials.length >= 3 && trials.every((t) => t.locked);
+    const go = el('button', { type: 'button', class: 'primary ai-btn', disabled: !tvEditable(rec) || full, title: full ? '후보 3칸이 모두 잠겨 있습니다' : '', text: '✨ 이 프롬프트로 변환' });
+    go.addEventListener('click', () => twRunTrial(rec, { src: TW.src, steps: [{ prompt: pr.value, example: ex.value, request: TW.req.trim() }] }, null, model, go));
+    left.append(srcBox, req, el('div', { class: 'tw-row' }, [el('label', { class: 'inline', style: 'margin:0' }, ['모델', model]), el('span', { class: 'spacer' }), go]));
+    if (!tvEditable(rec)) left.appendChild(el('p', { class: 'warn-text', text: '마감·비활성·보관 학년도 기록은 변환할 수 없습니다.' }));
+    // 오른쪽: 후보 3칸
+    const right = el('div', { class: 'tw-cands' });
+    if (!trials.length) right.appendChild(el('div', { class: 'tw-empty', text: '아직 후보가 없습니다. 왼쪽에서 [✨ 이 프롬프트로 변환]을 누르세요.' }));
+    trials.slice().reverse().forEach((t) => right.appendChild(twCandCard(t, rec, model)));
+    grid.append(left, right);
+    body.appendChild(grid);
+  }
+  function twCandCard(t, rec, model) {
+    const conf = TW.work.confirmed && TW.work.confirmed.cand_id === t.id;
+    const steps = t.chain.steps.length;
+    const card = el('div', { class: 'tw-cand' + (conf ? ' conf' : '') + (t.locked ? ' locked' : '') });
+    card.appendChild(el('div', { class: 'tw-cand-head' }, [
+      el('b', { text: `프롬프트 ${t.ver_no || '?'}번` }), steps > 1 ? el('span', { class: 'badge', text: `이어 고침 ${steps - 1}번` }) : null,
+      t.chain.src === 'current' ? el('span', { class: 'badge', text: '지금 내용에서' }) : null, conf ? el('span', { class: 'badge ok', text: '✔ 확정' }) : null,
+      el('span', { class: 'spacer' }),
+      el('button', { type: 'button', class: 'small', title: '잠그면 새 후보가 생겨도 지워지지 않습니다', text: t.locked ? '🔒 잠김' : '🔓', onclick: async () => { if (await mutate('tag_cand_lock', t.id, !t.locked)) { t.locked = !t.locked; twRender(); } } }),
+      el('button', { type: 'button', class: 'small', text: '단계', title: '이 후보를 만든 프롬프트·요청 보기', onclick: () => twChainInfo(t.chain) }),
+      el('button', { type: 'button', class: 'small link danger-text', text: '지우기', onclick: async () => { if (await mutate('tag_cand_delete', t.id)) { TW.trials = TW.trials.filter((x) => x.id !== t.id); twRender(); } } })]));
+    card.appendChild(el('div', { class: 'tw-cand-text', text: t.text }));
+    card.appendChild(el('div', { class: 'muted tw-cand-meta', text: `${bytesOf(t.text)}B · ${t.model || ''} · ${fmtCredit(t.cost)} 크레딧 · ${t.created_at.slice(5, 16)}` }));
+    const foot = el('div', { class: 'tw-cand-foot' });
+    if (TW.cont === t.id) {
+      const rq = el('input', { type: 'text', placeholder: '이어서 고칠 요청: 예) 조금 더 짧게, 마지막 문장은 빼고', 'aria-label': '이어서 고칠 요청' });
+      const fp = el('textarea', { rows: 8, 'aria-label': '이 단계의 전체 프롬프트' }); fp.value = t.chain.steps[0].prompt;
+      const det = el('details', {}, [el('summary', { text: '전체 프롬프트 고치기(선택)' }), el('p', { class: 'hint', text: '비워 두거나 그대로 두면 1단계 지침을 그대로 지키며 요청만 반영합니다.' }), fp]);
+      const run = el('button', { type: 'button', class: 'primary ai-btn small', text: '✨ 이어서 고치기' });
+      run.addEventListener('click', () => {
+        const changed = fp.value.trim() && fp.value.trim() !== t.chain.steps[0].prompt.trim();
+        if (!rq.value.trim() && !changed) { toast('고칠 요청을 적어 주세요.'); rq.focus(); return; }
+        twRunTrial(rec, { src: t.chain.src, steps: [...t.chain.steps, { prompt: changed ? fp.value : '', example: '', request: rq.value.trim() }] }, t.id, model, run);
+      });
+      rq.addEventListener('keydown', (e) => { if (e.key === 'Enter') run.click(); });
+      foot.append(rq, det, el('div', { class: 'tw-row' }, [el('button', { type: 'button', class: 'small', text: '취소', onclick: () => { TW.cont = null; twRender(); } }), el('span', { class: 'spacer' }), run]));
+      setTimeout(() => rq.focus(), 30);
+    } else {
+      foot.append(
+        el('button', { type: 'button', class: 'small', disabled: !tvEditable(rec), text: '이 후보를 더 고치기', onclick: () => { TW.cont = t.id; twRender(); } }),
+        el('span', { class: 'spacer' }),
+        el('button', { type: 'button', class: 'small primary', disabled: !tvEditable(rec), text: '✔ 확정', onclick: () => twConfirm(t, rec) }));
+    }
+    card.appendChild(foot);
+    return card;
+  }
+  async function twRunTrial(rec, chain, parentId, model, btn) {
+    if (!(chain.steps[0].prompt || '').trim()) { toast('프롬프트(지침)를 입력해 주세요.'); return; }
+    await twFlush();
+    const out = await busyRun(btn, `tw${rec.id}`, () => aiRun({ title: parentId ? '이어서 고치기' : '시험 변환', skipConfirm: true,
+      jobs: [{ label: twRecLabel(rec), run: () => api.tag_trial_run(TW.work.id, rec.id, chain, parentId, model.value) }] }));
+    if (!out || !out.done) return;
+    TW.cont = null;
+    if (out.results[0].dropped) toast('새 후보를 만들고 잠기지 않은 가장 오래된 후보를 지웠습니다.');
+    await twLoad();
+    twRender();
+  }
+  async function twConfirm(t, rec) {
+    const steps = t.chain.steps.length;
+    const html = `<b>이 후보를 확정합니다.</b><br>· 이 후보로 '${escHtml(twRecLabel(rec))}' 기록 내용을 바꿉니다(처음 원문은 남고, ③의 반영 기록에서 되돌릴 수 있음).<br>`
+      + `· 이 후보를 만든 단계(${steps}단계: ${escHtml(twChainText(t.chain))})로 ② 나머지 기록을 변환합니다.${steps > 1 ? ' 나머지 기록도 같은 단계를 차례로 거치므로 AI를 기록마다 ' + steps + '번 부릅니다.' : ''}<br>`
+      + `· 최종안은 바뀌지 않습니다(학생별로 종합할 때 씁니다).<br><br>`
+      + `<label class="inline" style="margin:0"><input type="checkbox" id="twSaveLib"> 프롬프트 목록에도 저장</label> <input type="text" id="twLibName" placeholder="이름" style="width:220px" value="${escHtml(`${(TV.data.tags.find((x) => x.id === TV.tag) || {}).name || '태그'} 변환`)}">`
+      + (steps > 1 ? '<br><span class="muted">목록에는 1단계 지침과 예시만 저장됩니다(이어 고친 요청은 이 태그 작업에만 남음).</span>' : '');
+    const p = modal(html, true, true, '확정');
+    let save = false, name = '';
+    const cbx = $('twSaveLib'), nm = $('twLibName');
+    name = nm ? nm.value.trim() : '';
+    if (cbx) cbx.addEventListener('change', () => { save = cbx.checked; });
+    if (nm) nm.addEventListener('input', () => { name = nm.value.trim(); });
+    const ok = await p;
+    if (!ok) return;
+    const r = await call('tag_confirm', t.id, true);
+    if (!r) return;
+    if (save) {
+      const s = await rawCall('prompt_save', { name: name || '태그 변환', prompt: t.chain.steps[0].prompt, example: t.chain.steps[0].example || '' });
+      if (s && s.ok) { TW.lib = null; toast(`프롬프트 목록에 '${name}'으로 저장했습니다.`); } else toast((s && s.error) || '프롬프트 목록에 저장하지 못했습니다.', 5000);
+    }
+    const sk = r.applied && r.applied.skipped && r.applied.skipped[0];
+    if (sk) await alertBox(`설정은 확정했지만 기록은 바꾸지 않았습니다: ${sk.why}`);
+    await renderTagView(true);
+    await twLoad();
+    TW.step = 'bulk'; TW.plan = null;
+    twRender();
+    if (!sk) toast('확정했습니다. 이 단계로 나머지 기록을 변환할 수 있습니다.');
+  }
+
+  // ② 나머지 변환
+  async function twBulk(body) {
+    const w = TW.work;
+    if (!w.confirmed) {
+      body.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '먼저 ① 시험에서 마음에 드는 후보를 [✔ 확정]하세요. 그 후보를 만든 단계로 나머지 기록을 변환합니다.' }),
+        el('button', { type: 'button', class: 'primary', text: '① 시험으로', onclick: () => { TW.step = 'trial'; twRender(); } })]));
+      return;
+    }
+    body.appendChild(el('div', { class: 'tw-confirmed' }, [el('b', { text: '확정한 설정: ' }), `프롬프트 ${w.confirmed.ver_no || ''}번 · ${twChainText(w.confirmed.chain)} `,
+      el('button', { type: 'button', class: 'link', text: '자세히', onclick: () => twChainInfo(w.confirmed.chain, '확정한 설정') })]));
+    if (!TW.plan) {
+      body.appendChild(el('p', { class: 'muted', text: '대상을 불러오는 중…' }));
+      const r = await call('tag_plan', w.id, { ...TV.flt });
+      if (!r) return;
+      TW.plan = r; TW.pick = new Set(r.targets.filter((x) => x.default).map((x) => x.id));
+      twRender();
+      return;
+    }
+    const pl = TW.plan, ts = pl.targets;
+    const can = (x) => !x.blocked;
+    const steps = w.confirmed.chain.steps.length;
+    const flt = [TV.flt.scope ? $('tvScope').selectedOptions[0].textContent : '', TV.flt.slot ? $('tvSlot').selectedOptions[0].textContent : '', TV.flt.status !== 'all' ? $('tvStatus').selectedOptions[0].textContent : '', TV.flt.q ? `'${TV.flt.q}' 찾기` : ''].filter(Boolean);
+    body.appendChild(el('p', { class: 'hint', text: `지금 화면 조건(${flt.join(' · ') || '조건 없음: 이 학년도의 이 태그 전체'})의 기록입니다. 체크를 풀면 뺍니다. 이미 반영한 기록과 기존 완성문은 체크가 풀린 채 시작합니다. 변환 결과는 바로 반영되지 않고 ③에서 검토합니다.` }));
+    const items = Object.entries(pl.items);
+    if (items.length > 1) body.appendChild(el('div', { class: 'warn', text: `다른 항목 기록이 섞여 있습니다: ${items.map(([k, n]) => `${k} ${n}건`).join(' · ')}. 항목 필터로 나눠 실행하는 것을 권합니다.` }));
+    const nPick = () => ts.filter((x) => TW.pick.has(x.id) && can(x)).length;
+    const est = el('div', { class: 'tw-est' });
+    const goBtn = el('button', { type: 'button', class: 'primary ai-btn' });
+    const model = el('select', { 'aria-label': '모델' }); fillModelSelect(model);
+    const tbl = el('table', { class: 'tbl tw-plan' });
+    const drawEst = () => {
+      const n = nPick(), calls = n * steps;
+      const per = pl.cost_per_call;
+      est.textContent = `${n}건 · 단계 ${steps}개 → AI ${calls}회${per ? ` · 예상 약 ${fmtCredit(per * calls * 0.7)}~${fmtCredit(per * calls * 1.5)} 크레딧(시험 비용 기준, 모델을 바꾸면 달라짐)` : ''}`;
+      goBtn.textContent = `✨ ${n}건 변환 시작`; goBtn.disabled = !n;
+    };
+    const drawTbl = () => {
+      tbl.innerHTML = '';
+      tbl.appendChild(el('tr', {}, ['', '학생', '항목', '기록', '내용', '상태'].map((h) => el('th', { text: h }))));
+      ts.forEach((x) => {
+        const cb = el('input', { type: 'checkbox', disabled: !can(x), checked: TW.pick.has(x.id) && can(x), 'aria-label': `${x.name} 기록 고르기`, onchange: (e) => { if (e.target.checked) TW.pick.add(x.id); else TW.pick.delete(x.id); drawEst(); } });
+        const st = x.blocked ? x.blocked : x.applied ? '반영함' : x.kind !== 'record' ? '기존 완성문' : x.has_bulk ? '변환 결과 있음' : '';
+        tbl.appendChild(el('tr', { class: can(x) ? '' : 'off' }, [el('td', {}, [cb]), el('td', { text: `${x.grade || ''}-${x.class_no || ''}-${x.number || ''} ${x.name}` }), el('td', { text: x.slot_label }),
+          el('td', { text: x.kind === 'record' ? `${x.seq ? `${x.seq}회` : ''}${x.title ? ` ${x.title}` : ''}` : '기존 완성문' }), el('td', { class: 'tw-snip', text: twShort(x.content, 60) }), el('td', { text: st })]));
+      });
+      drawEst();
+    };
+    const setAll = (fn) => { TW.pick = new Set(ts.filter((x) => can(x) && fn(x)).map((x) => x.id)); drawTbl(); };
+    body.appendChild(el('div', { class: 'tw-row' }, [
+      el('button', { type: 'button', class: 'small', text: '모두 선택', onclick: () => setAll(() => true) }),
+      el('button', { type: 'button', class: 'small', text: '선택 해제', onclick: () => setAll(() => false) }),
+      el('button', { type: 'button', class: 'small', text: '변환 안 한 것만 선택', onclick: () => setAll((x) => !x.applied && !x.has_bulk && x.kind === 'record') }),
+      el('span', { class: 'spacer' }), el('button', { type: 'button', class: 'small', text: '↻ 대상 다시 불러오기', onclick: () => { TW.plan = null; twRender(); } })]));
+    body.appendChild(el('div', { class: 'tw-plan-wrap' }, [tbl]));
+    body.appendChild(el('div', { class: 'tw-row tw-go' }, [est, el('span', { class: 'spacer' }), el('label', { class: 'inline', style: 'margin:0' }, ['모델', model]), goBtn]));
+    goBtn.addEventListener('click', () => twStartBulk(ts.filter((x) => TW.pick.has(x.id) && can(x)), model, steps, flt));
+    drawTbl();
+  }
+  async function twStartBulk(list, model, steps, flt) {
+    if (!list.length) return;
+    const bal = await rawCall('balance');
+    const per = TW.plan.cost_per_call;
+    const estHi = per ? per * list.length * steps * 1.5 : null;
+    const low = bal && bal.ok && typeof bal.balance === 'number' && estHi && estHi > bal.balance;
+    const msg = `${list.length}건을 확정한 단계로 변환합니다(AI ${list.length * steps}회${per ? `, 예상 약 ${fmtCredit(per * list.length * steps * 0.7)}~${fmtCredit(estHi)} 크레딧` : ''}).\n대상 조건: ${flt.join(' · ') || '이 태그 전체'}\n결과는 ③ 검토·반영에서 확인한 뒤 반영합니다(기록은 아직 바뀌지 않음).${low ? `\n\n⚠ 남은 크레딧(${fmtCredit(bal.balance)})보다 많이 들 수 있습니다.` : ''}`;
+    if (!(await confirmBox(msg, '변환 시작'))) return;
+    await twFlush();
+    const r = await call('tag_run_create', TW.work.id, list.map((x) => x.id), { ...TV.flt });
+    if (!r) return;
+    await twRunItems(r.run.id, list.map((x) => ({ id: x.id, label: `${x.name} ${x.seq ? `${x.seq}회` : ''}`.trim() })), model.value);
+  }
+  async function twRunItems(runId, list, modelValue) {
+    await jobStart();
+    let out;
+    try {
+      out = await aiRun({ title: '태그 변환', skipConfirm: true,
+        jobs: list.map((x) => ({ label: x.label, run: () => api.tag_run_item(runId, x.id, modelValue) })),
+        summary: (o) => `${o.cancelled ? '바로 중지했습니다(처리 중이던 건은 저장하지 않음). ' : ''}완료 ${o.done}건 · 실패 ${o.fail}건${o.skipped ? ` · 처리하지 않음 ${o.skipped}건` : ''}\n③ 검토·반영에서 결과를 확인하고 체크한 것만 반영하세요.` });
+    } finally { await jobEnd(); }
+    await rawCall('tag_run_finish', runId, out && (out.stopped || out.cancelled) ? 'stopped' : 'done');
+    refreshBalance();
+    await twLoad();
+    TW.step = 'review'; TW.review = null; TW.plan = null;
+    twRender();
+  }
+
+  // ③ 검토·반영
+  async function twReview(body) {
+    const w = TW.work;
+    if (!TW.review) {
+      body.appendChild(el('p', { class: 'muted', text: '불러오는 중…' }));
+      const r = await call('tag_review', w.id, TW.reviewRun || null);
+      if (!r) return;
+      TW.review = r;
+      twRender();
+      return;
+    }
+    const rv = TW.review;
+    twBatches(body, rv.batches);
+    if (!rv.run) {
+      body.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '아직 나머지 변환을 하지 않았습니다.' }), el('button', { type: 'button', class: 'primary', text: '② 나머지 변환으로', onclick: () => { TW.step = 'bulk'; TW.plan = null; twRender(); } })]));
+      return;
+    }
+    const rows = rv.rows;
+    const stOf = (x) => (x.state === 'missing' ? '기록 없음' : x.state === 'none' ? '결과 없음' : x.state === 'failed' ? '실패' : x.applied ? '반영함' : x.changed ? '원문 바뀜' : x.closed ? '마감' : '반영 전');
+    const canApply = (x) => x.state === 'ok' && !x.applied && !x.changed && !x.closed;
+    const cnt = (f) => rows.filter(f).length;
+    const runSel = el('select', { 'aria-label': '변환 실행', onchange: (e) => { TW.reviewRun = +e.target.value; TW.review = null; twRender(); } },
+      rv.runs.map((x) => el('option', { value: x.id, selected: x.id === rv.run.id, text: `${x.created_at.slice(5, 16)} · ${x.total}건(성공 ${x.ok} · 실패 ${x.failed})${x.status === 'stopped' ? ' · 중지됨' : ''}` })));
+    const retry = rows.filter((x) => x.state === 'failed' || x.state === 'none');
+    const model = el('select', { 'aria-label': '모델' }); fillModelSelect(model);
+    body.appendChild(el('div', { class: 'tw-row' }, [el('label', { class: 'inline', style: 'margin:0' }, ['변환 실행', runSel]),
+      el('span', { class: 'muted', text: `반영 전 ${cnt((x) => canApply(x))} · 반영함 ${cnt((x) => x.applied)} · 실패 ${cnt((x) => x.state === 'failed')} · 결과 없음 ${cnt((x) => x.state === 'none')} · 원문 바뀜 ${cnt((x) => x.state === 'ok' && x.changed && !x.applied)}` }),
+      el('span', { class: 'spacer' }),
+      retry.length ? el('label', { class: 'inline', style: 'margin:0' }, ['모델', model]) : null,
+      retry.length ? el('button', { type: 'button', class: 'ai-btn small', text: `실패·결과 없음 ${retry.length}건 다시 변환`, onclick: () => twRunItems(rv.run.id, retry.map((x) => ({ id: x.record_id, label: x.name })), model.value) }) : null]));
+    const fsel = el('div', { class: 'tw-filter' }, [['all', '전체'], ['todo', '반영 전'], ['failed', '실패'], ['changed', '원문 바뀜'], ['applied', '반영함']].map(([k, label]) => el('button', { type: 'button', class: 'small' + (TW.rfilter === k ? ' on' : ''), text: label, onclick: () => { TW.rfilter = k; twRender(); } })));
+    const show = rows.filter((x) => TW.rfilter === 'all' || (TW.rfilter === 'todo' && canApply(x)) || (TW.rfilter === 'failed' && x.state === 'failed') || (TW.rfilter === 'changed' && x.changed && !x.applied) || (TW.rfilter === 'applied' && x.applied));
+    const checked = () => rows.filter((x) => canApply(x) && x.cand.checked);
+    const applyBtn = el('button', { type: 'button', class: 'primary' });
+    const drawApply = () => { const n = checked().length; applyBtn.textContent = `체크한 ${n}건 기록에 반영`; applyBtn.disabled = !n; };
+    const setCheck = async (list, on) => {
+      const ids = list.filter(canApply).map((x) => x.cand.id);
+      if (!ids.length) return;
+      if (!(await mutate('tag_cand_check', ids, on))) return;
+      list.forEach((x) => { if (canApply(x)) x.cand.checked = on ? 1 : 0; });
+      twRender();
+    };
+    body.appendChild(el('div', { class: 'tw-row' }, [fsel, el('span', { class: 'spacer' }),
+      el('button', { type: 'button', class: 'small', text: '보이는 것 모두 체크', onclick: () => setCheck(show, true) }),
+      el('button', { type: 'button', class: 'small', text: '체크 해제', onclick: () => setCheck(rows, false) })]));
+    const list = el('div', { class: 'tw-review' });
+    show.forEach((x) => list.appendChild(twReviewRow(x, canApply(x), stOf(x), drawApply)));
+    if (!show.length) list.appendChild(el('p', { class: 'muted', text: '이 조건의 결과가 없습니다.' }));
+    body.appendChild(list);
+    applyBtn.addEventListener('click', () => twApply(checked()));
+    body.appendChild(el('div', { class: 'tw-row tw-go' }, [el('span', { class: 'muted', text: '반영하면 기록 내용이 결과로 바뀝니다(처음 원문은 남음). 최종안은 바뀌지 않고 \'확인 필요\'로 표시됩니다.' }), el('span', { class: 'spacer' }), applyBtn]));
+    drawApply();
+  }
+  function twReviewRow(x, can, st, onCheck) {
+    const c = x.cand;
+    const row = el('div', { class: 'tw-rv' + (can ? '' : ' off') });
+    const cb = el('input', { type: 'checkbox', disabled: !can, checked: !!(c && c.checked && can), 'aria-label': `${x.name} 결과 반영 체크` });
+    cb.addEventListener('change', async () => { if (await mutate('tag_cand_check', [c.id], cb.checked)) { c.checked = cb.checked ? 1 : 0; onCheck(); } else cb.checked = !cb.checked; });
+    const who = el('div', { class: 'tw-rv-who' }, [cb, el('b', { text: `${x.grade || ''}-${x.class_no || ''}-${x.number || ''} ${x.name}` }),
+      el('span', { class: `st-chip ${x.applied ? 'confirmed' : can ? 'suggested' : 'excluded'}`, text: st }),
+      x.group_id ? el('button', { type: 'button', class: 'link', text: '항목별 기록 ↗', onclick: () => openRecords(x.group_id, x.item, x.student_no) }) : null]);
+    row.appendChild(who);
+    if (!c) { row.appendChild(el('div', { class: 'muted', text: x.state === 'missing' ? '기록이 지워졌습니다.' : '결과가 없습니다(중지됐거나 아직 변환하지 않음).' })); return row; }
+    if (c.status === 'failed') { row.appendChild(el('div', { class: 'danger-text', text: c.error || '실패' })); return row; }
+    const ta = el('textarea', { rows: 5, disabled: !!x.applied, 'aria-label': `${x.name} 변환 결과` }); ta.value = c.edited !== null && c.edited !== undefined ? c.edited : c.text;
+    let timer = null;
+    const save = () => { timer = null; const v = ta.value; twTrack(rawCall('tag_cand_edit', c.id, v).then((r) => { if (r && r.ok) c.edited = v.trim() === c.text.trim() ? null : v; else toast((r && r.error) || '고친 글을 저장하지 못했습니다.', 5000); })); };
+    ta.addEventListener('input', () => { if (timer) clearTimeout(timer); timer = setTimeout(save, 600); });
+    ta.addEventListener('blur', () => { if (timer) { clearTimeout(timer); save(); } });
+    row.appendChild(el('div', { class: 'tw-rv-cols' }, [
+      el('div', {}, [el('div', { class: 'col-label', text: x.changed && !x.applied ? '보낸 원문 (그 뒤 기록이 바뀜)' : '보낸 원문' }), el('div', { class: 'cmp-text', text: c.input_text })]),
+      el('div', {}, [el('div', { class: 'col-label', text: `변환 결과${c.edited !== null && c.edited !== undefined ? ' (고침)' : ''} · ${fmtCredit(c.cost)} 크레딧` }), ta])]));
+    return row;
+  }
+  async function twApply(list) {
+    if (!list.length) return;
+    await twFlush();
+    if (!(await confirmBox(`${list.length}건의 기록 내용을 변환 결과로 바꿉니다.\n처음 원문은 남고, 아래 '반영 기록'의 [되돌리기]로 이번 반영을 되돌릴 수 있습니다(앱을 껐다 켜도 가능).\n최종안은 바뀌지 않고 '확인 필요'로 표시됩니다.`, '반영'))) return;
+    const r = await mutate('tag_apply', TW.work.id, list.map((x) => x.cand.id));
+    if (!r) return;
+    if (r.skipped.length) await alertBox(`${r.applied.length}건을 반영했습니다.\n반영하지 않은 ${r.skipped.length}건:\n${r.skipped.map((s) => `· ${(list.find((x) => x.record_id === s.record_id) || {}).name || s.record_id}: ${s.why}`).join('\n')}`);
+    TW.review = null;
+    await renderTagView(true);
+    const first = r.applied[0];
+    if (first) actionToast(`${r.applied.length}건을 기록에 반영했습니다.`, '바뀐 학생 항목별 기록 보기', () => openRecords(first.group_id, first.item, first.student_no), 15000);
+  }
+  function twBatches(body, batches) {
+    if (!batches || !batches.length) return;
+    const live = batches.filter((b) => b.undone < b.count);
+    const box = el('details', { class: 'tw-batches', open: false }, [el('summary', { text: `반영 기록 ${batches.length}번${live.length ? ` (되돌릴 수 있음 ${live.length}번)` : ''}` })]);
+    batches.forEach((b) => box.appendChild(el('div', { class: 'tw-row' }, [el('span', { text: `${b.at.slice(5, 16)} · ${b.count}건${b.undone ? ` (되돌림 ${b.undone}건)` : ''}` }),
+      b.undone < b.count ? el('button', { type: 'button', class: 'small', text: '이 반영 되돌리기', onclick: () => twUndo(b) }) : el('span', { class: 'muted', text: '되돌림' })])));
+    body.appendChild(box);
+  }
+  async function twUndo(b) {
+    if (!(await confirmBox(`${b.at.slice(5, 16)}에 반영한 ${b.count - b.undone}건을 반영 전 내용으로 되돌립니다.\n반영 뒤 직접 고쳤거나 마감한 기록은 그대로 두고 알려 드립니다.`, '되돌리기'))) return;
+    const r = await mutate('tag_undo', TW.work.id, b.batch);
+    if (!r) return;
+    await alertBox(`${r.undone.length}건을 되돌렸습니다.${r.skipped.length ? `\n그대로 둔 ${r.skipped.length}건: ${[...new Set(r.skipped.map((s) => s.why))].join(', ')}` : ''}`);
+    TW.review = null;
+    await renderTagView(true);
+    await twLoad();
+    twRender();
   }
 
   // ---------- 태그 관리 ----------
@@ -4223,7 +4653,11 @@
       if (!tagSet.size && !(await confirmBox('태그를 고르지 않았습니다. 태그 없이 보낼까요?\n\n보낸 뒤에도 보낸 묶음 화면의 [태그 지정]으로 이 묶음의 기록 전체에 한꺼번에 붙일 수 있습니다.', '태그 없이 보내기'))) return;
       const res = await mutate('inbox_send', b.id, action);
       if (!res) return;
-      toast(`${res.students}명 ${res.records}건 보냈습니다.`);
+      const tids = [...tagSet];
+      if (tids.length) {
+        const slot = (ys.groups || []).some((g) => g.id === b.group_id && g.kind === 'homeroom') ? `i:${b.item}` : `g:${b.group_id}:${b.item}`;
+        actionToast(`${res.students}명 ${res.records}건 보냈습니다.`, '이 태그로 AI 변환하기', () => goTagWork(tids[0], slot, 'trial'), 15000);
+      } else toast(`${res.students}명 ${res.records}건 보냈습니다.`);
       await refreshInboxBadge();
       renderInboxList();
       loadBatch();
@@ -4274,6 +4708,14 @@
           el('button', { type: 'button', class: 'primary', text: '고른 태그 붙이기', onclick: () => run('add') })]));
     });
   }
+  async function sentTagWork(b) {
+    const info = await call('inbox_sent_info', b.id);
+    if (!info) return;
+    const ids = Object.entries(info.tag_counts || {}).sort((x, y) => y[1] - x[1]).map(([id]) => +id);
+    if (!ids.length) { toast('이 묶음 기록에 붙은 태그가 없습니다. 먼저 [🏷 이 묶음 기록에 태그 지정]으로 태그를 붙이세요.', 6000); return; }
+    const slot = (ys.groups || []).some((g) => g.id === b.group_id && g.kind === 'homeroom') ? `i:${b.item}` : `g:${b.group_id}:${b.item}`;
+    goTagWork(ids[0], slot, 'trial');
+  }
   // 보낸 묶음: 이 묶음으로 넣은 기록을 모든 학생에서 지우기(되돌릴 수 없음 → '확인했어요' 입력)
   async function sentDelete(b) {
     const info = await call('inbox_sent_info', b.id);
@@ -4303,6 +4745,7 @@
       el('div', { class: 'toolbar' }, [
         el('button', { type: 'button', class: 'primary', text: '항목별 기록에서 보기', onclick: () => openRecords(b.group_id, b.item, (v.rows.find((r) => r.state === 'confirmed') || {}).student_no) }),
         el('button', { type: 'button', text: '🏷 이 묶음 기록에 태그 지정', onclick: () => sentTags(b) }),
+        el('button', { type: 'button', class: 'ai-btn', text: '🤖 태그로 AI 변환', title: '이 묶음 기록에 붙은 태그로 태그별 기록의 AI 변환을 엽니다', onclick: () => sentTagWork(b) }),
         el('span', { class: 'spacer' }),
         el('button', { type: 'button', class: 'danger-text', text: '보낸 기록 모두 삭제', onclick: () => sentDelete(b) }),
         el('button', { type: 'button', class: 'link danger-text', text: '이력에서 지우기', title: '인박스 이력만 지웁니다(항목에 들어간 기록은 그대로)', onclick: async () => {
