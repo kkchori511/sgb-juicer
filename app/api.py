@@ -1908,7 +1908,8 @@ class Api:
         sk = skill if isinstance(skill, dict) else {}
         info = {"scores": [int(v) for v in (sk.get("scores") or []) if isinstance(v, (int, float))][:4], "tries": int(sk.get("tries") or 0),
                 "lib_id": pid, "from_chain": x["chain"]}
-        out = tw.confirm(cid, True, chain={"src": x["chain"]["src"], "steps": [{"prompt": prompt, "example": str(example or "")}]}, extra={"skill": info})
+        # v0.19: 설정 확정만(시험한 기록의 확정은 결과 묶음에서 따로)
+        out = tw.confirm(cid, False, chain={"src": x["chain"]["src"], "steps": [{"prompt": prompt, "example": str(example or "")}]}, extra={"skill": info})
         return {**out, "lib_id": pid}
 
     @safe
