@@ -913,12 +913,6 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 .direct-tbl input { padding: 2px 4px; }
 .direct-tbl tr.row-bad td { background: #fef2f2; }
 
-/* 후보 문장을 최종안에 넣기 */
-.sent-pick { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; padding: 8px; border: 1px dashed var(--border); border-radius: 8px; background: #f8fafc; }
-.sent-pick .small-note { flex-basis: 100%; }
-.sent-chip { text-align: left; font-size: 13px; padding: 4px 8px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; max-width: 100%; white-space: normal; }
-.sent-chip:hover { border-color: var(--sel, #334155); background: #eef2ff; }
-.sent-chip.used { opacity: .55; background: #ecfdf5; border-color: #86efac; }
 .sel-insert { position: fixed; z-index: 3000; padding: 4px 10px; font-size: 13px; font-weight: 700; border-radius: 8px; background: var(--sel, #334155); color: #fff; border: none; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
 .wiz-dir { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13.5px; word-break: break-all; }
 /* 태그 AI 변환 */
@@ -1026,7 +1020,7 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 @media (max-width: 980px) { .cw-body { grid-template-columns: minmax(0, 1fr); } .wiz-picks { grid-template-columns: 1fr; } }
 
 /* 앱 창(pywebview)은 글자 선택을 막아 두므로, 글 내용 칸만 끌어 고를 수 있게 푼다(원문에서 고른 부분 넣기·복사) */
-.cmp-text, .tw-cand-text, .cw-msg .cw-text, .cw-cand-text, .rcard-body { -webkit-user-select: text; user-select: text; cursor: text; }
+.cmp-text, .tw-cand-text, .cw-msg .cw-text, .cw-cand-text, .rcard-body, .cand-body { -webkit-user-select: text; user-select: text; cursor: text; }
 /* 스킬화 창 */
 .sk-tries { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .sk-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-bottom: 10px; }

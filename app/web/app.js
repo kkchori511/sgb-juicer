@@ -2263,9 +2263,6 @@
     actionToast('최종안으로 채택했습니다.', '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, prev, ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
   }
   // ---------- 후보 문장을 최종안에 넣기 ----------
-  function splitSentences(text) {
-    return String(text || '').split(/\n+/).flatMap((p) => p.match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g) || []).map((x) => x.trim()).filter(Boolean);
-  }
   // 최종안의 커서 자리(없으면 맨 끝)에 넣는다. 브라우저 되돌리기(Ctrl+Z)가 되도록 insertText를 쓴다.
   function insertToFinal(text) {
     const fd = finalDraft;
@@ -2283,30 +2280,12 @@
     ta._sel = [ta.selectionStart, ta.selectionEnd];
     return true;
   }
-  function sentencePicker(cd) {
-    const box = el('div', { class: 'sent-pick', hidden: true });
-    const draw = () => {
-      box.innerHTML = '';
-      const fin = finalDraft && finalDraft.ta ? finalDraft.ta.value.replace(/\s+/g, ' ') : '';
-      box.appendChild(el('div', { class: 'muted small-note', text: '문장을 누르면 최종안의 커서 자리(없으면 맨 끝)에 들어갑니다. Ctrl+Z로 되돌릴 수 있습니다. 문장 일부만 필요하면 후보 글을 마우스로 골라 [최종안에 넣기]를 누르세요.' }));
-      splitSentences(cd.text).forEach((x) => {
-        const used = fin.includes(x.replace(/\s+/g, ' '));
-        box.appendChild(el('button', { type: 'button', class: 'sent-chip' + (used ? ' used' : ''), title: used ? '이미 최종안에 있는 문장' : '최종안에 넣기', text: (used ? '✔ ' : '') + x,
-          onclick: () => { if (insertToFinal(x)) draw(); } }));
-      });
-    };
-    box.toggle = () => { box.hidden = !box.hidden; if (!box.hidden) draw(); };
-    return box;
-  }
   function candEl(cd, locked, extra) {
-    const picker = sentencePicker(cd);
-    const pickBtn = el('button', { type: 'button', class: 'small', disabled: locked, title: '이 후보의 문장을 골라 최종안에 넣습니다', text: '문장 골라 넣기', onclick: () => { picker.toggle(); pickBtn.classList.toggle('on', !picker.hidden); } });
     return el('div', { class: 'cand' + (cd.locked ? ' locked' : '') }, [
       el('div', { class: 'cand-head' }, [el('b', { text: OP_LABEL[cd.op] || cd.op }), stdBadge(cd.meta), cd.meta.extra ? el('span', { class: 'badge extra-badge', title: cd.meta.extra, text: `추가 요구: ${cd.meta.extra.length > 24 ? cd.meta.extra.slice(0, 24) + '…' : cd.meta.extra}` }) : null, cd.created_at.slice(5, 16), cd.meta.model ? `· ${cd.meta.model}` : '',
         cd.meta.ratios ? `· 비율 ${cd.meta.ratios.join('/')}%` : '', el('span', { class: 'spacer' }), bytesEl(cd.bytes, R.target)]),
-      el('div', { class: 'cand-body', text: cd.text }),
-      picker,
-      el('div', { class: 'rcard-foot' }, [...(extra || []), pickBtn, el('span', { class: 'spacer' }),
+      el('div', { class: 'cand-body', title: '필요한 부분을 마우스로 끌어 고른 뒤 Ctrl+C로 복사하거나 [⤵ 최종안에 넣기]', text: cd.text }),
+      el('div', { class: 'rcard-foot' }, [...(extra || []), el('span', { class: 'spacer' }),
         el('button', { type: 'button', class: 'small', title: '새 결과가 생겨도 지우지 않음', text: cd.locked ? '🔒 보관 잠금됨' : '🔓 보관 잠금', onclick: async () => { if (await mutate('lock_result', cd.id, !cd.locked)) loadStudent(true); } }),
         el('button', { type: 'button', class: 'small link danger-text', disabled: locked, text: '삭제', onclick: async () => { if (await mutate('delete_result', cd.id)) loadStudent(true); } })]),
     ]);
