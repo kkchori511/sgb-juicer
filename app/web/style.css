@@ -108,9 +108,10 @@ code { background: var(--surface-2); border: 1px solid var(--border); padding: 1
 .nav-fold.open-parent { color: var(--accent-hover); }
 .nav-sub { display: flex; flex-direction: column; gap: 1px; margin: 0 0 4px 22px; padding-left: 10px; border-left: 2px solid var(--border); }
 .nav-sub[hidden] { display: none; }
+.nav-cat-sep { height: 1px; background: var(--border); margin: 6px 10px 2px 6px; }
 .nav-cat { font-size: 12px; font-weight: 700; color: var(--muted, #999); padding: 6px 10px 2px; letter-spacing: .02em; }
 .nav-item { font-size: 14px; font-weight: 600; padding: 6px 10px; }
-.app.collapsed .nav-sub, .app.collapsed .nav-cat { display: none; }
+.app.collapsed .nav-sub, .app.collapsed .nav-cat, .app.collapsed .nav-cat-sep { display: none; }
 .nav-sep { height: 1px; background: var(--border); margin: 8px 4px; }
 .app.collapsed .sidebar { width: var(--side-w-collapsed); }
 .app.collapsed .nav span { display: none; }
