@@ -53,7 +53,10 @@ def test_migration():
     assert counts(copy) == before
     assert d.get_meta("schema_version") == str(db.SCHEMA_VERSION)
     d._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    assert counts(dst) == before, (counts(dst), before)  # 자료 건수가 줄지 않음
+    after = counts(dst)
+    # 자료 건수가 줄지 않음(v14: 기록당 태그 하나 — 태그가 여러 개던 기록은 앞 태그만 남아 record_tags만 줄 수 있음)
+    assert {k: v for k, v in after.items() if k != "record_tags"} == {k: v for k, v in before.items() if k != "record_tags"}, (after, before)
+    assert after["record_tags"] == d.q("SELECT COUNT(DISTINCT record_id) n FROM record_tags")[0]["n"]
     assert d.q("SELECT COUNT(*) n FROM outlines")[0]["n"] == 0
     # 다시 열어도(이미 새 형식) 백업을 또 만들지 않음
     db.close_all()

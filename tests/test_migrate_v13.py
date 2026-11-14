@@ -33,7 +33,7 @@ def test_v12_to_v13():
     d = db.open_year(2026)
     olds = [p for p in backup_dir().iterdir() if p.name.endswith("_형식변경전")]
     assert len(olds) == 1 and (olds[0] / backup.DONE).exists()
-    assert d.get_meta("schema_version") == "13"
+    assert d.get_meta("schema_version") == str(db.SCHEMA_VERSION)
     d.checkpoint()
     assert snap(dst) == before, "자료가 바뀜"
     assert d.q("SELECT COUNT(*) n FROM records WHERE confirmed=1")[0]["n"] == 0

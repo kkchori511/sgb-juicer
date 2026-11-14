@@ -205,8 +205,8 @@ class Records:
                 made += 1
                 for bid, ids in c.execute("SELECT id, tag_ids FROM inbox_batches WHERE TRIM(title)=? AND stage<>'sent'", (name,)).fetchall():
                     ids = json.loads(ids or "[]")
-                    if tid not in ids:
-                        c.execute("UPDATE inbox_batches SET tag_ids=? WHERE id=?", (json.dumps(ids + [tid]), bid))
+                    if not ids:  # 묶음당 태그 하나: 태그가 없는 묶음에만
+                        c.execute("UPDATE inbox_batches SET tag_ids=? WHERE id=?", (json.dumps([tid]), bid))
                         attached += 1
         return made, attached
 
@@ -231,17 +231,21 @@ class Records:
             c.execute("DELETE FROM tags WHERE id=?", (int(tid),))
 
     def tag_records(self, record_ids, tag_ids, mode="add"):
-        """여러 기록에 태그를 한 번에. mode: add(추가) / remove(빼기)"""
+        """여러 기록의 태그를 한 번에. mode: add(=그 태그 하나로 바꾸기, 기록당 태그 하나) / remove(빼기)"""
         rids = [int(x) for x in record_ids or []]
         tids = [int(x) for x in tag_ids or []]
         if not rids:
             raise DbError("기록을 먼저 고르세요.")
+        if mode != "remove":
+            tids = one_tag(tids)
         for rid in rids:
             r = self.record(rid)
             self.require_open(r["group_id"], r["item"], r["student_no"])
         with self.d.tx() as c:
             for rid in rids:
                 n = 0
+                if mode != "remove":  # 태그 하나로 바꾸기: 다른 태그는 뗀다
+                    n += c.execute("DELETE FROM record_tags WHERE record_id=? AND tag_id NOT IN (" + ",".join("?" * len(tids)) + ")", (rid, *tids)).rowcount
                 for tid in tids:
                     if mode == "remove":
                         n += c.execute("DELETE FROM record_tags WHERE record_id=? AND tag_id=?", (rid, tid)).rowcount
@@ -263,7 +267,11 @@ class Records:
                 f"SELECT id, tags_ver FROM records WHERE id IN ({','.join('?' * len(rids)) or 'NULL'})", tuple(rids))}
         if mode == "remove":
             return [[r, t, ver.get(r, 0)] for r in rids for t in tids if (r, t) in have]
-        return [[r, t, ver.get(r, 0)] for r in rids for t in tids if (r, t) not in have]
+        tids = one_tag(tids)
+        before = {}
+        for r, t in have:
+            before.setdefault(r, t)
+        return [[r, t, ver.get(r, 0), before.get(r, 0)] for r in rids for t in tids if (r, t) not in have]
 
     def undo_tag_pairs(self, pairs, mode):
         """일괄 태그 되돌리기: mode는 처음 실행한 동작(add면 지금 빼고, remove면 다시 붙인다).
@@ -285,6 +293,9 @@ class Records:
                     continue
                 if mode == "add":
                     c.execute("DELETE FROM record_tags WHERE record_id=? AND tag_id=?", (rid, tid))
+                    old = int(p[3]) if len(p) > 3 and p[3] else 0  # 태그 바꾸기 전 태그로 돌려놓기
+                    if old and c.execute("SELECT 1 FROM tags WHERE id=?", (old,)).fetchone():
+                        c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (rid, old))
                 else:
                     c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (rid, tid))
                 if rid not in bumped:
@@ -574,7 +585,7 @@ class Records:
                 (int(gid), item, str(sno), kind, seq, (data.get("date") or "").strip(), (data.get("title") or "").strip(),
                  content, data.get("source") or ("existing" if kind == "existing" else "manual")),
             ).lastrowid
-            for tid in data.get("tag_ids") or []:
+            for tid in one_tag(data.get("tag_ids")):
                 c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (rid, int(tid)))
             self._stale(c, gid, item, sno)
         return rid
@@ -722,7 +733,7 @@ class Records:
             c.execute(f"UPDATE records SET {sets}, updated_at=datetime('now','localtime') WHERE id=?", (*fields.values(), r["id"]))
         if "tag_ids" in data:
             old = sorted(x[0] for x in c.execute("SELECT tag_id FROM record_tags WHERE record_id=?", (r["id"],)).fetchall())
-            new = sorted({int(t) for t in data["tag_ids"] or []})
+            new = one_tag(data["tag_ids"])
             if old != new:
                 c.execute("DELETE FROM record_tags WHERE record_id=?", (r["id"],))
                 for tid in new:
@@ -1314,6 +1325,14 @@ class Records:
         else:
             rows.sort(key=lambda r: r["student_no"])
         return {"first": g1["label"], "second": g2["label"], "total": total, "rows": rows}
+
+
+def one_tag(tag_ids):
+    """기록(묶음)당 태그는 하나(태그 = 생기부에 넣을 한 묶음). 두 개 이상이면 거절."""
+    ids = list(dict.fromkeys(int(t) for t in tag_ids or []))
+    if len(ids) > 1:
+        raise DbError("자료 하나에는 태그를 하나만 붙일 수 있습니다(태그 = 한 묶음).")
+    return ids
 
 
 def _result_out(r):

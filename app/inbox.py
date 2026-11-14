@@ -9,7 +9,7 @@ import json
 import re
 
 from .db import DbError, YearDb
-from .records import Records
+from .records import Records, one_tag
 from . import scan
 from .roster import split_student_no
 from .textutil import count_bytes
@@ -371,7 +371,7 @@ class Inbox:
         if "date" in data:
             fields["date"] = (data["date"] or "").strip()
         if "tag_ids" in data:
-            fields["tag_ids"] = json.dumps([int(x) for x in data["tag_ids"] or []])
+            fields["tag_ids"] = json.dumps(one_tag(data["tag_ids"]))
         regroup = False
         if "group_id" in data or "item" in data:
             gid = int(data.get("group_id", b["group_id"]))
@@ -889,7 +889,7 @@ class Inbox:
             rounds = b["meta"].get("rounds") or []
             n_round = max([x["n"] for x in rounds] or [0]) + 1
             src = self._src(bid, n_round)
-            tag_ids = sorted(set(tag_ids) | {t for t in prev_tags if t in valid_tags})
+            tag_ids = (tag_ids or [t for t in prev_tags if t in valid_tags])[:1]  # 묶음당 태그 하나(이번 태그, 없으면 앞 회차 태그)
             mapping = {}
             seqs = {}
             for r in rows:

@@ -2435,12 +2435,14 @@
   // list: 태그 목록(없으면 항목별 기록 화면의 목록)
   function tagPicker(selected, list) {
     const box = el('div', { class: 'tagpick' });
-    const set = new Set(selected || []);
+    const set = new Set((selected || []).slice(0, 1));
     const all = () => list || (R.view && R.view.tags) || [];
     const draw = () => {
       box.innerHTML = '';
-      all().forEach((t) => box.appendChild(el('button', { type: 'button', class: (set.has(t.id) ? 'on' : '') + tagC(t.id), text: t.name, onclick: () => { if (set.has(t.id)) set.delete(t.id); else set.add(t.id); draw(); } })));
+      // 자료 하나에 태그 하나(태그 = 생기부에 넣을 한 묶음): 다른 태그를 누르면 바뀌고, 다시 누르면 해제
+      all().forEach((t) => box.appendChild(el('button', { type: 'button', class: (set.has(t.id) ? 'on' : '') + tagC(t.id), text: t.name, onclick: () => { const on = set.has(t.id); set.clear(); if (!on) set.add(t.id); draw(); } })));
       if (!all().length) box.appendChild(el('span', { class: 'muted', text: '태그가 없습니다. 메뉴의 [태그]에서 만드세요.' }));
+      else box.appendChild(el('span', { class: 'muted small-note', text: '태그는 하나만(태그 = 한 묶음)' }));
     };
     draw();
     box.value = () => [...set];
@@ -2500,10 +2502,10 @@
       box.style.height = 'auto';
       box.style.width = 'min(560px, 92vw)';
       const tags = tagPicker([]);
-      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `태그 일괄 지정 · ${ids.length}건` })]), tags,
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `태그 일괄 지정 · ${ids.length}건` })]), el('p', { class: 'hint', text: '고른 기록을 그 태그 하나로 바꿉니다(자료 하나에 태그 하나).' }), tags,
         el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }),
           el('button', { type: 'button', text: '고른 태그 빼기', onclick: async () => { if (await mutate('tag_records', ids, tags.value(), 'remove')) { closeSheet(); loadStudent(true); } } }),
-          el('button', { type: 'button', class: 'primary', text: '고른 태그 붙이기', onclick: async () => { if (await mutate('tag_records', ids, tags.value(), 'add')) { closeSheet(); toast('태그를 붙였습니다.'); loadStudent(true); } } })]));
+          el('button', { type: 'button', class: 'primary', text: '이 태그로 바꾸기', onclick: async () => { if (!tags.value().length) { toast('태그를 고르세요.'); return; } if (await mutate('tag_records', ids, tags.value(), 'add')) { closeSheet(); toast('태그를 바꿨습니다.'); loadStudent(true); } } })]));
     });
   }
 
@@ -2844,7 +2846,7 @@
       });
       addTo(box,
         el('div', { class: 'sheet-head' }, [el('h2', { text: `전체 학생 이어 붙이기 · ${s.label}` }), el('span', { class: 'muted', text: `목표 ${R.target}B` })]),
-        el('p', { class: 'hint', text: '학생마다 확정 기록을 아래 활동(태그) 순서로 내용 그대로 이어 최종안에 넣습니다. 그 학생에게 없는 활동은 건너뜁니다. 태그가 여럿인 기록은 순서상 가장 앞 태그 자리에 한 번만 들어갑니다. 같은 활동 안에서는 학생별 기록 순서를 따릅니다.' }),
+        el('p', { class: 'hint', text: '학생마다 확정 기록을 아래 활동(태그) 순서로 내용 그대로 이어 최종안에 넣습니다. 그 학생에게 없는 활동은 건너뜁니다. 같은 활동(태그) 안에서는 학생별 기록 순서를 따릅니다.' }),
         el('div', { class: 'col-label', text: '활동 순서 (끌거나 ▲▼)' }), list,
         el('div', { class: 'map-row' }, [el('label', {}, [onlyNew, ` 최종안 없는 학생만 (${eligible.length - withFinal.length}명)`]), el('label', {}, [over, ` 최종안 있는 학생도 바꾸기 (+${withFinal.length}명)`])]),
         count,
@@ -3829,22 +3831,16 @@
     }
     // 태그 칩
     const chips = el('div', { class: 'tv-chips' });
+    // 태그는 하나(태그 = 한 묶음): [태그 ▾]에서 바꾸면 그 묶음으로 옮겨 간다
     const drawChips = () => {
       chips.innerHTML = '';
       const names = new Map((TV.data.tags || []).map((t) => [t.id, t.name]));
-      const off = !can || st.busy;
-      st.draft.tag_ids.forEach((tid) => chips.appendChild(el('span', { class: 'tag' + tagC(tid) + (tid === TV.tag ? ' cur' : '') }, [names.get(tid) || '(지운 태그)',
-        off ? null : el('button', { type: 'button', class: 'x', text: '×', title: `이 기록에서 '${names.get(tid)}' 태그만 빼기`, 'aria-label': `${who}에서 ${names.get(tid)} 태그만 빼기`,
-          onclick: () => { st.draft.tag_ids = st.draft.tag_ids.filter((x) => x !== tid); drawChips(); tvSave(r.id); } })])));
-      if (!off) {
-        const rest = (TV.data.tags || []).filter((t) => !st.draft.tag_ids.includes(t.id));
-        if (rest.length) {
-          const add = el('select', { class: 'tv-addtag', 'aria-label': `${who}에 태그 더하기` }, [el('option', { value: '', text: '+ 태그' }), ...rest.map((t) => el('option', { value: t.id, text: t.name }))]);
-          add.addEventListener('change', () => { if (!add.value) return; st.draft.tag_ids = [...st.draft.tag_ids, +add.value]; drawChips(); tvSave(r.id); });
-          chips.appendChild(add);
-        }
-      }
-      if (!st.draft.tag_ids.length && !can) chips.appendChild(el('span', { class: 'muted', text: '태그 없음' }));
+      const cur = st.draft.tag_ids[0] || 0;
+      if (!can || st.busy) { chips.appendChild(cur ? el('span', { class: 'tag' + tagC(cur) + (cur === TV.tag ? ' cur' : ''), text: names.get(cur) || '(지운 태그)' }) : el('span', { class: 'muted', text: '태그 없음' })); return; }
+      const sel = el('select', { class: 'tv-addtag', 'aria-label': `${who} 태그`, title: '태그를 바꾸면 그 묶음으로 옮겨 갑니다' },
+        [el('option', { value: '0', text: '(태그 없음)', selected: !cur }), ...(TV.data.tags || []).map((t) => el('option', { value: t.id, text: `태그: ${t.name}`, selected: t.id === cur }))]);
+      sel.addEventListener('change', () => { const v = +sel.value; st.draft.tag_ids = v ? [v] : []; drawChips(); tvSave(r.id); });
+      chips.appendChild(sel);
     };
     drawChips();
     const state = el('span', { class: 'tv-state', 'aria-live': 'polite' });
@@ -3910,7 +3906,7 @@
     const recs = TV.data.records.filter((r) => TV.sel.has(r.id));
     const n = new Set(recs.map((r) => r.student_no)).size;
     const tagSel = (ph) => el('select', { 'aria-label': ph }, [el('option', { value: '', text: ph }), ...TV.data.tags.map((t) => el('option', { value: t.id, text: t.name }))]);
-    const addSel = tagSel('태그 더하기…'), rmSel = tagSel('태그 빼기…');
+    const addSel = tagSel('태그 바꾸기…'), rmSel = tagSel('태그 빼기…');
     addSel.addEventListener('change', () => tvBulkRun(addSel, 'add', n));
     rmSel.addEventListener('change', () => tvBulkRun(rmSel, 'remove', n));
     const titleIn = el('input', { type: 'text', class: 'tv-bulk-in', placeholder: '활동명', 'aria-label': '고른 기록에 넣을 활동명' });
@@ -3982,7 +3978,7 @@
     const r = await tvOp(() => mutate('tag_records_undoable', ids, [tid], mode, TV.year));
     if (!r) return;
     tvApplyStates(r.states);
-    TV.bulk = { text: `${n}명 ${ids.length}건 중 ${r.pairs.length}건에 '${tname}' 태그 ${mode === 'add' ? '더함' : '뺌'}`, pairs: r.pairs, mode };
+    TV.bulk = { text: `${n}명 ${ids.length}건 중 ${r.pairs.length}건 '${tname}' 태그${mode === 'add' ? '로 바꿈' : ' 뺌'}`, pairs: r.pairs, mode };
     tvRenderSum();
     toast(`${TV.bulk.text}. 위 요약 줄의 [되돌리기]로 취소할 수 있습니다.`);
   }
@@ -5758,7 +5754,7 @@
     const tags = await call('tags');
     const drawTags = () => {
       tagsBox.innerHTML = '';
-      (tags ? tags.tags : []).forEach((t) => tagsBox.appendChild(el('button', { type: 'button', class: (tagSet.has(t.id) ? 'on' : '') + tagC(t.id), text: t.name, onclick: async () => { if (tagSet.has(t.id)) tagSet.delete(t.id); else tagSet.add(t.id); drawTags(); await mutate('inbox_update', b.id, { tag_ids: [...tagSet] }); } })));
+      (tags ? tags.tags : []).forEach((t) => tagsBox.appendChild(el('button', { type: 'button', class: (tagSet.has(t.id) ? 'on' : '') + tagC(t.id), text: t.name, onclick: async () => { const on = tagSet.has(t.id); tagSet.clear(); if (!on) tagSet.add(t.id); drawTags(); await mutate('inbox_update', b.id, { tag_ids: [...tagSet] }); } })));
       if (!tags || !tags.tags.length) tagsBox.appendChild(el('span', { class: 'muted', text: '태그가 없습니다(메뉴의 태그에서 만들기).' }));
     };
     drawTags();
@@ -5818,7 +5814,7 @@
         if (!r) return;
         closeSheet();
         const n = new Set(r.pairs.map((p) => p[0])).size;
-        actionToast(`${n}건에 태그를 ${mode === 'add' ? '붙였습니다' : '뺐습니다'}.`, '되돌리기', async () => {
+        actionToast(`${n}건의 태그를 ${mode === 'add' ? '바꿨습니다' : '뺐습니다'}.`, '되돌리기', async () => {
           if (await mutate('undo_tag_records', r.pairs, mode)) toast('되돌렸습니다.');
         }, 20000);
       };
@@ -5828,7 +5824,7 @@
         tags,
         el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }),
           el('button', { type: 'button', text: '고른 태그 빼기', onclick: () => run('remove') }),
-          el('button', { type: 'button', class: 'primary', text: '고른 태그 붙이기', onclick: () => run('add') })]));
+          el('button', { type: 'button', class: 'primary', text: '이 태그로 바꾸기', onclick: () => run('add') })]));
     });
   }
   async function sentTagWork(b) {

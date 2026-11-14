@@ -9,6 +9,7 @@ v6: 기록 순서(records.pos). v7: 선택과목 수업(memberships.section). v8
 v9: 기록 태그 버전(records.tags_ver). v10: 자율·진로·동아리 활동 개요(outlines). v11: 인박스 행 열 역할(inbox_rows.ext).
 v12: 태그 AI 변환(tag_works·tag_cands·tag_runs·tag_applies), 기록 내용 버전(records.content_ver, 트리거로 증가).
 v13: 기록 확정(records.confirmed·confirmed_at). 확정본=content, 원문=original(없으면 content).
+v14: 기록당 태그 하나(태그 = 한 묶음). 여러 개면 태그 관리 순서상 앞 태그만 남기고, 뗀 목록은 meta 'tag_single_removed'에 남긴다.
 
 자료 형식 규칙: 표·열은 더하기만 한다(지우거나 이름을 바꾸지 않는다). 화면을 없애도 그 자료 표는 남긴다.
 형식이 바뀌는 첫 실행 때는 열기 전에 '형식변경전' 백업을 만든다(backup.before_migration).
@@ -20,7 +21,7 @@ from contextlib import contextmanager
 
 from .paths import data_dir
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 KINDS = ("homeroom", "subject", "club")
 ROLES = ("homeroom", "subject")  # 담임 / 비담임
 
@@ -295,8 +296,49 @@ class YearDb:
         self._conn.execute("PRAGMA synchronous = FULL")
         self._conn.executescript(SCHEMA)
         self._migrate()
-        if (_int(self.get_meta("schema_version")) or 0) < SCHEMA_VERSION:
+        old = _int(self.get_meta("schema_version")) or 0
+        if 0 < old < 14:
+            self._single_tag()
+        if old < SCHEMA_VERSION:
             self.set_meta("schema_version", str(SCHEMA_VERSION))
+
+    def _single_tag(self):
+        """v14: 기록당 태그 하나. 태그 관리 순서(sort_order, 이름)상 앞 태그만 남기고 나머지 연결을 뗀다(형식변경전 백업이 먼저 만들어짐)."""
+        import json
+        rows = self._conn.execute(
+            "SELECT rt.record_id, rt.tag_id, t.name FROM record_tags rt JOIN tags t ON t.id=rt.tag_id "
+            "WHERE rt.record_id IN (SELECT record_id FROM record_tags GROUP BY record_id HAVING COUNT(*)>1) "
+            "ORDER BY rt.record_id, t.sort_order, t.name").fetchall()
+        removed, seen = [], set()
+        for r in rows:
+            if r["record_id"] in seen:
+                removed.append({"record_id": r["record_id"], "tag_id": r["tag_id"], "tag": r["name"]})
+            seen.add(r["record_id"])
+        batches = []  # 인박스 묶음도 태그 하나로
+        order = {r["id"]: k for k, r in enumerate(self._conn.execute("SELECT id FROM tags ORDER BY sort_order, name").fetchall())}
+        for b in self._conn.execute("SELECT id, tag_ids FROM inbox_batches").fetchall():
+            try:
+                ids = json.loads(b["tag_ids"] or "[]")
+            except ValueError:
+                continue
+            if len(ids) > 1:
+                batches.append((b["id"], sorted(ids, key=lambda t: order.get(t, 1e9))[:1], ids))
+        if not removed and not batches:
+            return
+        self._conn.execute("BEGIN")
+        try:
+            for bid, keep, _ in batches:
+                self._conn.execute("UPDATE inbox_batches SET tag_ids=? WHERE id=?", (json.dumps(keep), bid))
+            for x in removed:
+                self._conn.execute("DELETE FROM record_tags WHERE record_id=? AND tag_id=?", (x["record_id"], x["tag_id"]))
+            for rid in {x["record_id"] for x in removed}:
+                self._conn.execute("UPDATE records SET tags_ver=COALESCE(tags_ver,0)+1 WHERE id=?", (rid,))
+            self._conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('tag_single_removed', ?)",
+                               (json.dumps({"records": removed, "inbox_batches": [{"id": b, "before": ids} for b, _, ids in batches]}, ensure_ascii=False),))
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
 
     def _migrate(self):
         """이전 버전 파일에 빠진 열을 채운다(CREATE IF NOT EXISTS로는 열이 추가되지 않음)."""

@@ -34,7 +34,7 @@ def main():
     t = ok(api.add_tag("독서"))["id"]
     t2 = ok(api.add_tag("탐구"))["id"]
     a = ok(api.add_record(hr, "career", "20301", {"content": "진로 독서", "tag_ids": [t]}))["id"]
-    b = ok(api.add_record(m1, "subject", "20301", {"content": "수학 독서", "tag_ids": [t, t2]}))["id"]
+    b = ok(api.add_record(m1, "subject", "20301", {"content": "수학 독서", "tag_ids": [t]}))["id"]
     c = ok(api.add_record(m1, "subject", "20401", {"content": "4반 수학 독서", "tag_ids": [t]}))["id"]
     d = ok(api.add_record(m2, "subject", "20301", {"content": "과학 독서", "tag_ids": [t]}))["id"]
     e = ok(api.add_record(hr, "autonomy", "20302", {"content": "태그 없음"}))["id"]
@@ -42,7 +42,8 @@ def main():
     v = ok(api.tag_view(t, {}))
     assert [r["id"] for r in v["records"]] == [a, b, d, c], [r["id"] for r in v["records"]]  # 2-3반 김철수(진로→수학→과학), 2-4반 박민수
     assert v["students"] == 2 and v["untagged"] == 1
-    assert {x["name"]: x["count"] for x in v["tags"]} == {"독서": 4, "탐구": 1}
+    assert {x["name"]: x["count"] for x in v["tags"]} == {"독서": 4, "탐구": 0}
+    assert not api.add_record(hr, "career", "20301", {"content": "두 태그", "tag_ids": [t, t2]})["ok"]  # 기록당 태그 하나
     assert [o["key"] for o in v["options"]["classes"]] == ["c:2-3", "c:2-4"]
     labels = [o["label"] for o in v["options"]["sections"]]
     assert labels == ["과학(1학기) · A반", "수학(1학기) · A반"], labels  # 같은 'A반'도 담당으로 구분
@@ -54,7 +55,7 @@ def main():
     assert [r["id"] for r in ok(api.tag_view(t, {"q": "4반"}))["records"]] == [c]
     assert [r["id"] for r in ok(api.tag_view(0, {}))["records"]] == [e]
     # 태그별 수는 태그 선택을 뺀 다른 필터 적용
-    assert {x["name"]: x["count"] for x in ok(api.tag_view(t, {"scope": f"s:{m1}:A반"}))["tags"]} == {"독서": 2, "탐구": 1}
+    assert {x["name"]: x["count"] for x in ok(api.tag_view(t, {"scope": f"s:{m1}:A반"}))["tags"]} == {"독서": 2, "탐구": 0}
 
     # 바로 고치기 → 되돌리기
     r1 = ok(api.update_record(a, {"content": "진로 독서 고침"}))["record"]
@@ -68,10 +69,11 @@ def main():
     # 불러온 뒤 다른 곳에서 바뀌었으면 덮지 않음
     assert not api.update_record(a, {"content": "덮기", "expect": {"content": "옛 내용"}})["ok"]
     ok(api.update_record(a, {"content": "3차", "expect": {"content": "2차"}}))
-    # 태그 빼기 되돌리기
+    # 태그 바꾸기 되돌리기(태그는 하나)
     ok(api.update_record(b, {"tag_ids": [t2]}))
-    r3 = ok(api.revert_record(b, {"tag_ids": [t, t2]}, {"tag_ids": [t2]}))["record"]
-    assert r3["tag_ids"] == sorted([t, t2])
+    r3 = ok(api.revert_record(b, {"tag_ids": [t]}, {"tag_ids": [t2]}))["record"]
+    assert r3["tag_ids"] == [t]
+    assert not api.update_record(b, {"tag_ids": [t, t2]})["ok"]
     # 마감되면 되돌리지 않음
     ok(api.update_record(d, {"content": "과학 고침"}))
     ok(api.edit_final(m2, "subject", "20301", "최종"))
@@ -80,22 +82,23 @@ def main():
     assert ok(api.tag_view(t, {"status": "closed"}))["records"][0]["id"] == d
     assert d not in [r["id"] for r in ok(api.tag_view(t, {"status": "open"}))["records"]]
 
-    # 일괄 태그 + 되돌리기(이미 있던 태그는 되돌릴 때 건드리지 않음)
+    # 일괄 태그 바꾸기(그 태그 하나로) + 되돌리기(앞 태그로 돌아감)
     pairs = ok(api.tag_records_undoable([a, b], [t2], "add"))["pairs"]
-    assert [p[:2] for p in pairs] == [[a, t2]], pairs
+    assert [p[:2] for p in pairs] == [[a, t2], [b, t2]] and [p[3] for p in pairs] == [t, t], pairs
+    assert ok(api.tag_view(t2, {}))["records"] and not [r for r in ok(api.tag_view(t, {}))["records"] if r["id"] in (a, b)]
     ok(api.undo_tag_records(pairs, "add"))
-    assert t2 not in ok(api.tag_view(t, {}))["records"][0]["tags"]
-    assert t2 in [r for r in ok(api.tag_view(t, {}))["records"] if r["id"] == b][0]["tags"]
+    assert sorted(r["id"] for r in ok(api.tag_view(t, {}))["records"] if r["id"] in (a, b)) == sorted([a, b])
+    assert all(r["tags"] == [t] for r in ok(api.tag_view(t, {}))["records"] if r["id"] in (a, b))
     pairs = ok(api.tag_records_undoable([a], [t], "remove"))["pairs"]
     assert a not in [r["id"] for r in ok(api.tag_view(t, {}))["records"]]
     ok(api.undo_tag_records(pairs, "remove"))
     assert a in [r["id"] for r in ok(api.tag_view(t, {}))["records"]]
     # W05: 일괄로 붙인 뒤 다른 곳에서 뺐다가 다시 붙였으면 되돌리기가 건드리지 않음
     pairs = ok(api.tag_records_undoable([a], [t2], "add"))["pairs"]
-    ok(api.update_record(a, {"tag_ids": [t]})); ok(api.update_record(a, {"tag_ids": [t, t2]}))
+    ok(api.update_record(a, {"tag_ids": [t]})); ok(api.update_record(a, {"tag_ids": [t2]}))
     u = ok(api.undo_tag_records(pairs, "add"))
     assert u["done"] == 0 and u["changed"] == 1, u
-    assert t2 in [r for r in ok(api.tag_view(t, {}))["records"] if r["id"] == a][0]["tags"]
+    assert [r for r in ok(api.tag_view(t2, {}))["records"] if r["id"] == a][0]["tags"] == [t2]
     ok(api.update_record(a, {"tag_ids": [t]}))
     # W03: 충돌·마감 오류는 code로 구분
     assert api.update_record(a, {"content": "x", "expect": {"content": "옛"}})["code"] == "conflict"
