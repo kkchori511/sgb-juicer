@@ -8,6 +8,7 @@ v5: 과목별 성취기준(standards).
 v6: 기록 순서(records.pos). v7: 선택과목 수업(memberships.section). v8: 1·2학기 합산 과목(groups.pair_id·pair_total).
 v9: 기록 태그 버전(records.tags_ver). v10: 자율·진로·동아리 활동 개요(outlines). v11: 인박스 행 열 역할(inbox_rows.ext).
 v12: 태그 AI 변환(tag_works·tag_cands·tag_runs·tag_applies), 기록 내용 버전(records.content_ver, 트리거로 증가).
+v13: 기록 확정(records.confirmed·confirmed_at). 확정본=content, 원문=original(없으면 content).
 
 자료 형식 규칙: 표·열은 더하기만 한다(지우거나 이름을 바꾸지 않는다). 화면을 없애도 그 자료 표는 남긴다.
 형식이 바뀌는 첫 실행 때는 열기 전에 '형식변경전' 백업을 만든다(backup.before_migration).
@@ -19,7 +20,7 @@ from contextlib import contextmanager
 
 from .paths import data_dir
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 KINDS = ("homeroom", "subject", "club")
 ROLES = ("homeroom", "subject")  # 담임 / 비담임
 
@@ -78,7 +79,9 @@ CREATE TABLE IF NOT EXISTS records (
     updated_at TEXT DEFAULT (datetime('now','localtime')),
     pos INTEGER,                     -- 화면에서 끌어 바꾼 순서(없으면 기본 순서)
     tags_ver INTEGER DEFAULT 0,      -- 태그가 바뀔 때마다 1씩(v9)
-    content_ver INTEGER DEFAULT 0    -- 내용·소속이 바뀔 때마다 1씩(v12, 트리거)
+    content_ver INTEGER DEFAULT 0,   -- 내용·소속이 바뀔 때마다 1씩(v12, 트리거)
+    confirmed INTEGER DEFAULT 0,     -- 기록 확정(v13): 1이면 content가 확정본, 최종안 이어 붙이기 대상
+    confirmed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_records_slot ON records(group_id, item, student_no);
 CREATE TABLE IF NOT EXISTS record_tags (
@@ -309,6 +312,9 @@ class YearDb:
             self._conn.execute("ALTER TABLE records ADD COLUMN tags_ver INTEGER DEFAULT 0")
         if "content_ver" not in cols:  # v12: 내용·소속이 바뀔 때마다 1씩(태그 변환 반영 때 그사이 바뀌었는지 확인)
             self._conn.execute("ALTER TABLE records ADD COLUMN content_ver INTEGER DEFAULT 0")
+        if "confirmed" not in cols:  # v13: 기록 확정
+            self._conn.execute("ALTER TABLE records ADD COLUMN confirmed INTEGER DEFAULT 0")
+            self._conn.execute("ALTER TABLE records ADD COLUMN confirmed_at TEXT")
         self._conn.execute(
             "CREATE TRIGGER IF NOT EXISTS tr_records_content_ver AFTER UPDATE OF content, group_id, item, student_no ON records "
             "WHEN NEW.content IS NOT OLD.content OR NEW.group_id IS NOT OLD.group_id OR NEW.item IS NOT OLD.item OR NEW.student_no IS NOT OLD.student_no "

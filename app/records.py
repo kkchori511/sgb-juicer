@@ -387,7 +387,7 @@ class Records:
             for m in self.d.members(gid):
                 mem[(gid, m["student_no"])] = m
         smaps = {}
-        rows = self.d.q("SELECT id, group_id, item, student_no, kind, seq, date, title, content, original, updated_at, pos FROM records")
+        rows = self.d.q("SELECT id, group_id, item, student_no, kind, seq, date, title, content, original, updated_at, pos, confirmed FROM records")
         tagmap = {}
         for t in self.d.q("SELECT record_id, tag_id FROM record_tags"):
             tagmap.setdefault(t["record_id"], []).append(t["tag_id"])
@@ -465,6 +465,19 @@ class Records:
             sel = [r for r in base if tid in r["tags"]]
         sel.sort(key=lambda r: (r["grade"] or 99, r["class_no"] or 999, r["number"] or 999, r["student_no"], r["slot_order"],
                                 r["pos"] is None, r["pos"] or 0, r["kind"] == "record", r["seq"] or 0, r["id"]))
+        # 결과 묶음(항목별 정제·태그 변환)과 확정 상태 — 항목별 기록과 같은 자료
+        ids = [r["id"] for r in sel]
+        if ids:
+            resmap = {}
+            for i in range(0, len(ids), 500):
+                part = ids[i:i + 500]
+                for res in self.d.q(f"SELECT * FROM results WHERE record_id IN ({','.join('?' * len(part))}) ORDER BY id", tuple(part)):
+                    resmap.setdefault(res["record_id"], []).append(_result_out(res))
+            tagc = {}
+            for i in range(0, len(ids), 500):
+                tagc.update(self.tag_cands_for(ids[i:i + 500]))
+            for r in sel:
+                self._bundle(r, resmap.get(r["id"], []), tagc.get(r["id"], []))
         items = []
         for it in ("autonomy", "career", "behavior", "subject", "club"):
             if any(s["item"] == it for s in slots):
@@ -502,11 +515,46 @@ class Records:
         cands = {}
         for res in self.d.q(f"SELECT * FROM results WHERE record_id IN ({marks}) ORDER BY id", tuple(ids)):
             cands.setdefault(res["record_id"], []).append(_result_out(res))
+        tagc = self.tag_cands_for(ids)
         for r in recs:
             r["tags"] = tagmap.get(r["id"], [])
             r["candidates"] = cands.get(r["id"], [])
             r["bytes"] = count_bytes(r["content"])
+            self._bundle(r, r["candidates"], tagc.get(r["id"], []))
         return recs
+
+    def tag_cands_for(self, ids):
+        """기록들의 태그 AI 변환 결과(시험·일괄, 성공한 것) — 항목별 기록의 결과 묶음에 함께 보인다."""
+        out = {}
+        if not ids:
+            return out
+        marks = ",".join("?" * len(ids))
+        for x in self.d.q(f"""SELECT c.id, c.record_id, c.kind, c.text, c.edited, c.model, c.created_at, w.tag_name, w.tag_id
+                              FROM tag_cands c JOIN tag_works w ON w.id=c.work_id
+                              WHERE c.record_id IN ({marks}) AND c.status='ok' ORDER BY c.id""", tuple(int(i) for i in ids)):
+            text = (x["edited"] if x["edited"] is not None else x["text"]) or ""
+            if text.strip():
+                out.setdefault(x["record_id"], []).append({**dict(x), "text": text})
+        return out
+
+    @staticmethod
+    def _bundle(r, results, tagc):
+        """기록 한 건 = 원문 + 결과 묶음(최신이 위). 원문: original(없으면 content). 확정이면 content가 확정본.
+        확정 전인데 예전에 결과로 바꿔 둔 기록(original≠content)은 그 글을 '이전 반영본' 결과로 보여 준다."""
+        r["confirmed"] = bool(r.get("confirmed"))
+        r["orig"] = r["original"] if r.get("original") is not None else r["content"]
+        b = []
+        for c in results:
+            b.append({"src": "rec", "id": c["id"], "op": c["op"], "text": c["text"], "bytes": c["bytes"], "created_at": c["created_at"],
+                      "meta": c["meta"], "label": (c["meta"] or {}).get("label") or ""})
+        for c in tagc:
+            b.append({"src": "tag", "id": c["id"], "op": "tag_" + (c["kind"] or "trial"), "text": c["text"], "bytes": count_bytes(c["text"]),
+                      "created_at": c["created_at"], "meta": {"model": c["model"], "tag_name": c["tag_name"], "tag_id": c["tag_id"]}, "label": ""})
+        b.sort(key=lambda x: (x["created_at"] or "", x["src"] == "tag", x["id"]), reverse=True)
+        if not r["confirmed"] and r.get("original") is not None and r["content"] != r["original"]:
+            b.insert(0, {"src": "cur", "id": 0, "op": "prev_applied", "text": r["content"], "bytes": count_bytes(r["content"]),
+                         "created_at": r.get("updated_at") or "", "meta": {}, "label": "이전 반영본"})
+        r["bundle"] = b
 
     def add_record(self, gid, item, sno, data):
         self.slot(gid, item)
@@ -643,6 +691,17 @@ class Records:
         for k in ("date", "title", "content"):
             if k in data:
                 fields[k] = (data[k] or "").strip()
+        if "orig" in data:  # 확정 전 원문 고치기: 원문이 따로 있으면 그쪽을, 없으면 내용을 고친다
+            t = (data["orig"] or "").strip()
+            if r["original"] is None:
+                fields["content"] = t
+            elif r["content"] == r["original"]:
+                fields["content"] = t
+                fields["original"] = t
+            else:
+                fields["original"] = t
+            if not t:
+                raise DbError("원문을 비울 수 없습니다. 지우려면 [삭제]를 누르세요.")
         if "content" in fields and not fields["content"]:
             raise DbError("내용을 비울 수 없습니다. 지우려면 [삭제]를 누르세요.")
         if "weight" in data:
@@ -673,18 +732,175 @@ class Records:
             self._stale(c, r["group_id"], r["item"], r["student_no"])
 
     def apply_candidate_to_record(self, result_id):
-        """기록 한 건의 정제 후보로 기록 내용을 바꾼다(처음 원문은 original에 남긴다)."""
+        """기록 한 건의 결과로 그 기록을 확정한다(처음 원문은 original에 남긴다)."""
         res = self.result(result_id)
         if not res["record_id"]:
             raise DbError("기록 후보가 아닙니다.")
-        r = self.record(res["record_id"])
-        self.require_open(r["group_id"], r["item"], r["student_no"])
+        self.confirm_record(res["record_id"], res["text"])
+
+    # ---------- 기록 확정(v13) ----------
+    def confirm_record(self, rid, text):
+        """결과·직접 작성·원문 중 하나를 이 기록의 확정본으로. 원문은 original에 남는다(원문 그대로 확정이면 그대로)."""
+        text = (text or "").strip()
+        if not text:
+            raise DbError("확정할 글이 비어 있습니다.")
         with self.d.tx() as c:
-            c.execute(
-                "UPDATE records SET content=?, original=COALESCE(original, content), updated_at=datetime('now','localtime') WHERE id=?",
-                (res["text"], r["id"]),
-            )
+            r = self.record(rid)
+            self.require_open(r["group_id"], r["item"], r["student_no"])
+            orig = r["original"] if r["original"] is not None else r["content"]
+            if r["confirmed"] and r["content"] != text and r["content"] != orig:  # 다른 글로 다시 확정: 앞 확정본은 결과로 남김
+                self._add_plain(c, r, "prev", r["content"], {"label": "이전 확정본"})
+            original = r["original"] if r["original"] is not None else (orig if text != orig else None)
+            c.execute("UPDATE records SET content=?, original=?, confirmed=1, confirmed_at=datetime('now','localtime'), "
+                      "updated_at=datetime('now','localtime') WHERE id=?", (text, original, r["id"]))
             self._stale(c, r["group_id"], r["item"], r["student_no"])
+
+    def unconfirm_record(self, rid):
+        """확정 풀기: 확정본은 '이전 확정본' 결과로 남기고 원문으로 돌아간다."""
+        with self.d.tx() as c:
+            r = self.record(rid)
+            self.require_open(r["group_id"], r["item"], r["student_no"])
+            if not r["confirmed"]:
+                return
+            orig = r["original"] if r["original"] is not None else r["content"]
+            if r["content"] != orig:
+                self._add_plain(c, r, "prev", r["content"], {"label": "이전 확정본"})
+            c.execute("UPDATE records SET content=?, confirmed=0, confirmed_at=NULL, updated_at=datetime('now','localtime') WHERE id=?",
+                      (orig, r["id"]))
+            self._stale(c, r["group_id"], r["item"], r["student_no"])
+
+    @staticmethod
+    def _add_plain(c, r, op, text, meta):
+        return c.execute("INSERT INTO results(group_id,item,student_no,record_id,op,text,meta,cost) VALUES(?,?,?,?,?,?,?,0)",
+                         (r["group_id"], r["item"], r["student_no"], r["id"], op, text, json.dumps(meta, ensure_ascii=False))).lastrowid
+
+    def save_draft(self, rid, text):
+        """[직접 작성] → 후보로 저장(✍ 직접 작성)."""
+        text = (text or "").strip()
+        if not text:
+            raise DbError("작성한 글이 비어 있습니다.")
+        with self.d.tx() as c:
+            r = self.record(rid)
+            self.require_open(r["group_id"], r["item"], r["student_no"])
+            return self._add_plain(c, r, "draft", text, {"label": "직접 작성"})
+
+    def new_record_from(self, rid, text):
+        """[직접 작성] → 새 기록으로 저장(같은 활동명·날짜·태그, 확정된 상태). 반환: 새 기록 id."""
+        text = (text or "").strip()
+        if not text:
+            raise DbError("작성한 글이 비어 있습니다.")
+        r = self.record(rid)
+        tag_ids = [x["tag_id"] for x in self.d.q("SELECT tag_id FROM record_tags WHERE record_id=?", (r["id"],))]
+        nid = self.add_record(r["group_id"], r["item"], r["student_no"],
+                              {"content": text, "title": r["title"], "date": r["date"], "tag_ids": tag_ids, "source": "draft"})
+        with self.d.tx() as c:
+            c.execute("UPDATE records SET confirmed=1, confirmed_at=datetime('now','localtime') WHERE id=?", (nid,))
+        return nid
+
+    def _ordered(self, c, gid, item, sno):
+        return [dict(x) for x in c.execute(
+            "SELECT id, content, confirmed, title FROM records WHERE group_id=? AND item=? AND student_no=? "
+            "ORDER BY pos IS NULL, pos, kind='record', COALESCE(seq, 0), id", (int(gid), item, str(sno)))]
+
+    @staticmethod
+    def join_text(texts):
+        """확정본들을 내용 그대로 띄어쓰기 한 칸으로 잇는다(NEIS는 줄바꿈 불가)."""
+        return " ".join(" ".join(t.split()) for t in texts if (t or "").strip())
+
+    def join_confirmed(self, gid, item, sno, ids):
+        """확정 기록을 고른 순서대로 이어 최종안으로. 그 순서를 기록 순서에도 저장. 반환: 바꾸기 전 최종안 글."""
+        self.slot(gid, item)
+        ids = [int(x) for x in ids or []]
+        if not ids:
+            raise DbError("이어 붙일 확정 기록이 없습니다.")
+        with self.d.tx() as c:
+            self.require_open(gid, item, sno)
+            rows = self._ordered(c, gid, item, sno)
+            by = {x["id"]: x for x in rows}
+            if any(i not in by or not by[i]["confirmed"] for i in ids) or len(set(ids)) != len(ids):
+                raise DbError("확정 기록이 바뀌었습니다. 화면을 다시 열어 주세요.")
+            # 순서 저장: 확정 기록 자리만 새 순서로 바꾼다
+            slots = [k for k, x in enumerate(rows) if x["id"] in set(ids)]
+            new = list(rows)
+            for k, rid in zip(slots, ids):
+                new[k] = by[rid]
+            for k, x in enumerate(new):
+                c.execute("UPDATE records SET pos=? WHERE id=?", (k + 1, x["id"]))
+            prev = c.execute("SELECT text FROM finals WHERE group_id=? AND item=? AND student_no=?", (int(gid), item, str(sno))).fetchone()
+            self._upsert_final(c, gid, item, sno, self.join_text(by[i]["content"] for i in ids), "join", {"op": "join", "record_ids": ids})
+        return prev["text"] if prev else ""
+
+    # ---------- 전체 학생 이어 붙이기 ----------
+    def _bulk_rows(self, gid, item):
+        recs = self.d.q("SELECT id, student_no, content FROM records WHERE group_id=? AND item=? AND confirmed=1 "
+                        "ORDER BY student_no, pos IS NULL, pos, kind='record', COALESCE(seq, 0), id", (int(gid), item))
+        tags = {}
+        if recs:
+            marks = ",".join("?" * len(recs))
+            for t in self.d.q(f"SELECT record_id, tag_id FROM record_tags WHERE record_id IN ({marks})", tuple(r["id"] for r in recs)):
+                tags.setdefault(t["record_id"], set()).add(t["tag_id"])
+        for r in recs:
+            r["tag_ids"] = tags.get(r["id"], set())
+        return recs
+
+    def join_bulk_view(self, gid, item):
+        """활동(태그)별 확정 학생 수와 학생 상태. 활동 순서 기본값은 태그 관리 순서, '태그 없음'(0)은 맨 뒤."""
+        self.slot(gid, item)
+        recs = self._bulk_rows(gid, item)
+        all_tags = self.tags()
+        used = {}
+        for r in recs:
+            for t in (r["tag_ids"] or {0}):
+                used.setdefault(t, set()).add(r["student_no"])
+        acts = [{"tag_id": t["id"], "name": t["name"], "students": len(used[t["id"]])} for t in all_tags if t["id"] in used]
+        if 0 in used:
+            acts.append({"tag_id": 0, "name": "(태그 없음)", "students": len(used[0])})
+        finals = {f["student_no"]: f for f in self.d.q("SELECT student_no, text, closed FROM finals WHERE group_id=? AND item=?", (int(gid), item))}
+        has = {r["student_no"] for r in recs}
+        studs = []
+        for m in self.d.members(gid):
+            f = finals.get(m["student_no"])
+            studs.append({"student_no": m["student_no"], "name": m["name"], "active": bool(m["active"]), "closed": bool(f and f["closed"]),
+                          "has_final": bool(f and (f["text"] or "").strip()), "has_confirmed": m["student_no"] in has})
+        return {"activities": acts, "students": studs}
+
+    def join_bulk_plan(self, gid, item, order):
+        """order: 태그 id 순서(0=태그 없음). 학생마다 확정 기록을 활동 순서대로(같은 활동 안에서는 카드 순서) 잇는다.
+        태그가 여럿인 기록은 순서상 가장 앞 태그 자리에 한 번만. 순서에 없는 태그만 붙은 기록은 '태그 없음' 자리."""
+        rank = {int(t): k for k, t in enumerate(order or [])}
+        last = len(rank) + 1
+        per = {}
+        for k, r in enumerate(self._bulk_rows(gid, item)):
+            ks = [rank[t] for t in r["tag_ids"] if t in rank]
+            pos = min(ks) if ks else rank.get(0, last)
+            per.setdefault(r["student_no"], []).append((pos, k, r["content"]))
+        return {sno: self.join_text(t for _, _, t in sorted(v)) for sno, v in per.items()}
+
+    def join_bulk(self, gid, item, order, overwrite=False):
+        """전체 학생 이어 붙이기. 마감·비활성·확정 기록 없음은 빼고, 최종안 있는 학생은 overwrite일 때만. 전부 하거나 전부 취소.
+        반환: (바꾼 학생 수, 되돌리기 목록, 뺀 학생 {이유: 수})"""
+        self.slot(gid, item)
+        plan = self.join_bulk_plan(gid, item, order)
+        undo, skipped = [], {}
+        skip = lambda why: skipped.__setitem__(why, skipped.get(why, 0) + 1)
+        with self.d.tx() as c:
+            for m in self.d.members(gid):
+                sno = m["student_no"]
+                if not m["active"]:
+                    skip("비활성"); continue
+                text = plan.get(sno)
+                if not text:
+                    skip("확정 기록 없음"); continue
+                prev = c.execute("SELECT text, source, meta, stale, closed FROM finals WHERE group_id=? AND item=? AND student_no=?", (int(gid), item, sno)).fetchone()
+                if prev and prev["closed"]:
+                    skip("마감"); continue
+                if prev and (prev["text"] or "").strip() and not overwrite:
+                    skip("최종안 있음"); continue
+                if prev and prev["text"] == text:
+                    skip("이미 같은 내용"); continue
+                undo.append({"student_no": sno, "prev": {k: prev[k] for k in ("text", "source", "meta", "stale")} if prev else None, "now": text})
+                self._upsert_final(c, gid, item, sno, text, "join", {"op": "join", "bulk": True})
+        return len(undo), undo, skipped
 
     def delete_record(self, rid):
         r = self.record(rid)
@@ -897,6 +1113,8 @@ class Records:
 
     def check_room(self, gid, item, sno, record_id=None):
         """AI를 부르기 전에: 후보 3개가 모두 잠겨 있으면 막는다."""
+        if record_id:  # 기록 한 건의 결과 묶음은 개수 제한 없음(v0.19)
+            return
         rows = self._scope_rows(gid, item, sno, record_id)
         if len(rows) >= MAX_RESULTS and all(r["locked"] for r in rows):
             raise DbError("결과 후보 3개가 모두 잠겨 있습니다. 잠금을 하나 풀어야 새로 만들 수 있습니다.")
@@ -912,7 +1130,7 @@ class Records:
                  "SELECT id, locked FROM results WHERE group_id=? AND item=? AND student_no=? AND record_id IS NULL ORDER BY id"),
                 (int(record_id),) if record_id else (int(gid), item, str(sno)))]
             dropped = None
-            if len(rows) >= MAX_RESULTS:
+            if len(rows) >= MAX_RESULTS and not record_id:
                 victim = next((r for r in rows if not r["locked"]), None)
                 if victim is None:
                     raise DbError("결과 후보 3개가 모두 잠겨 있습니다.")

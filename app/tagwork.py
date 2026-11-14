@@ -544,8 +544,9 @@ class TagWork:
                 if new == r["content"]:
                     skipped.append({"cand_id": x["id"], "record_id": r["id"], "why": "이미 같은 내용"})
                     continue
-                c.execute("UPDATE records SET content=?, original=COALESCE(original, content), updated_at=datetime('now','localtime') WHERE id=?",
-                          (new, r["id"]))
+                # 검토하며 체크해 반영 = 기록 확정(v13)
+                c.execute("UPDATE records SET content=?, original=COALESCE(original, content), confirmed=1, confirmed_at=datetime('now','localtime'), "
+                          "updated_at=datetime('now','localtime') WHERE id=?", (new, r["id"]))
                 after_ver = c.execute("SELECT content_ver FROM records WHERE id=?", (r["id"],)).fetchone()[0]
                 c.execute("INSERT INTO tag_applies(work_id, batch, record_id, cand_id, before_text, before_ver, after_text, after_ver) VALUES(?,?,?,?,?,?,?,?)",
                           (int(wid), batch, r["id"], x["id"], r["content"], r["content_ver"] or 0, new, after_ver))
@@ -583,7 +584,10 @@ class TagWork:
                 if not m or not m[0]:
                     skipped.append({"record_id": r["id"], "why": "비활성 학생"})
                     continue
-                c.execute("UPDATE records SET content=?, updated_at=datetime('now','localtime') WHERE id=?", (a["before_text"], r["id"]))
+                # 되돌리면 확정도 풀린다(바꾸기 전 글이 원문과 다르면 그 글이 확정본이었던 것으로 본다)
+                was = 1 if r["original"] is not None and a["before_text"] != r["original"] else 0
+                c.execute("UPDATE records SET content=?, confirmed=?, confirmed_at=CASE WHEN ?=1 THEN confirmed_at END, updated_at=datetime('now','localtime') WHERE id=?",
+                          (a["before_text"], was, was, r["id"]))
                 c.execute("UPDATE tag_applies SET undone_at=datetime('now','localtime') WHERE id=?", (a["id"],))
                 self.rec._stale(c, r["group_id"], r["item"], r["student_no"])
                 done.append({"record_id": r["id"], "group_id": r["group_id"], "item": r["item"], "student_no": r["student_no"]})

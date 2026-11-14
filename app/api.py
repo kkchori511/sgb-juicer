@@ -1146,6 +1146,54 @@ class Api:
         self._rec().apply_candidate_to_record(res_id)
         return {}
 
+    # ---------- 기록 확정·직접 작성·이어 붙이기(v0.19) ----------
+    @safe
+    def confirm_record(self, rid, text):
+        self._editable()
+        self._rec().confirm_record(rid, text)
+        return {}
+
+    @safe
+    def unconfirm_record(self, rid):
+        self._editable()
+        self._rec().unconfirm_record(rid)
+        return {}
+
+    @safe
+    def save_draft(self, rid, text):
+        self._editable()
+        return {"id": self._rec().save_draft(rid, text)}
+
+    @safe
+    def new_record_from(self, rid, text):
+        self._editable()
+        return {"id": self._rec().new_record_from(rid, text)}
+
+    @safe
+    def join_confirmed(self, gid, item, sno, ids):
+        self._editable()
+        return {"prev": self._rec().join_confirmed(gid, item, sno, ids)}
+
+    @safe
+    def join_bulk_view(self, gid, item):
+        return self._rec().join_bulk_view(gid, item)
+
+    @safe
+    def join_bulk_preview(self, gid, item, order):
+        plan = self._rec().join_bulk_plan(gid, item, order)
+        return {"plan": {k: {"text": v, "bytes": count_bytes(v)} for k, v in plan.items()}}
+
+    @safe
+    def join_bulk(self, gid, item, order, overwrite=False, req_id=None):
+        """전체 학생 이어 붙이기. 되돌리기는 finals_bulk_undo(기존 완성문 일괄과 같은 자리)."""
+        self._editable()
+        done = self._req_done(req_id)
+        if done:
+            return done
+        n, undo, skipped = self._rec().join_bulk(gid, item, order, bool(overwrite))
+        self._finals_undo = {"year": config.load()["current_year"], "gid": gid, "item": item, "undo": undo}
+        return self._req_save(req_id, {"count": n, "skipped": skipped})
+
     @safe
     def lock_result(self, res_id, locked):
         self._editable()
@@ -1378,7 +1426,9 @@ class Api:
         key = ("record", r["id"])
         self._guard(key)
         try:
-            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, r["content"], cfg["privacy_block"])
+            # 결과 묶음은 원문에서 만든다(확정본이 있어도 원문 기준)
+            src = r["original"] if r["original"] is not None else r["content"]
+            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, src, cfg["privacy_block"])
             meta = {"model": model, "op": op, "prompt_name": pr["name"], "prompt": pr["prompt"], "example": pr["example"], "record_ids": [r["id"]]}
             nid, dropped = rec.add_result(r["group_id"], r["item"], r["student_no"], op, text, self._xm(meta), cost, record_id=r["id"])
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})

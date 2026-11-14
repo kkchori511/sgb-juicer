@@ -36,7 +36,7 @@ def test_v11_to_v12():
     olds = [p for p in backup_dir().iterdir() if p.name.endswith("_형식변경전")]
     assert len(olds) == 1 and (olds[0] / backup.DONE).exists()
     assert db.file_schema_version(olds[0] / "2026학년도.sqlite") == 11
-    assert d.get_meta("schema_version") == "12"
+    assert d.get_meta("schema_version") == str(db.SCHEMA_VERSION)
     d.checkpoint()
     after = snap(dst)
     assert after == before, "자료가 바뀜"

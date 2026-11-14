@@ -51,7 +51,7 @@ def test_migration():
     assert copy.exists() and (olds[0] / backup.DONE).exists()
     assert db.file_schema_version(copy) == 9  # 바꾸기 전 그대로
     assert counts(copy) == before
-    assert d.get_meta("schema_version") == str(db.SCHEMA_VERSION) == "12"
+    assert d.get_meta("schema_version") == str(db.SCHEMA_VERSION)
     d._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     assert counts(dst) == before, (counts(dst), before)  # 자료 건수가 줄지 않음
     assert d.q("SELECT COUNT(*) n FROM outlines")[0]["n"] == 0

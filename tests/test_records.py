@@ -41,12 +41,10 @@ def test_all():
     ok(api.tag_records([r1, r2], [t2]))
     assert ok(api.tags())["tags"][1]["used"] == 2
 
-    # 기록 정제: 후보 3개 순환, 잠금
-    ids = [ok(api.ai_record(r1))["id"] for _ in range(3)]
-    ok(api.lock_result(ids[0], True))
-    out = ok(api.ai_record(r1)); assert out["dropped"] == ids[1] and out["balance"] == 1.5
-    ok(api.lock_result(ids[2], True)); ok(api.lock_result(out["id"], True))
-    n = len(SENT); assert not api.ai_record(r1)["ok"]; assert len(SENT) == n  # 3개 모두 잠김 → AI 호출 전에 막음
+    # 기록 정제: 기록 한 건의 결과 묶음은 개수 제한 없음(v0.19, 지워지지 않음)
+    ids = [ok(api.ai_record(r1))["id"] for _ in range(4)]
+    out = ok(api.ai_record(r1)); assert out["dropped"] is None and out["balance"] == 1.5
+    assert len([r for r in ok(api.student_view(hr, "career", "20301"))["records"] if r["id"] == r1][0]["candidates"]) == 5
     ok(api.apply_candidate(out["id"]))
     rec = [r for r in ok(api.student_view(hr, "career", "20301"))["records"] if r["id"] == r1][0]
     assert rec["content"].startswith("결과") and rec["original"].startswith("진로 독서")
