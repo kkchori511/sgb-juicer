@@ -2148,9 +2148,11 @@
     const locked = closedNow();
     const nConf = v.records.filter((r) => r.confirmed).length;
     const head = el('div', { class: 'sec-title' }, [foldBtn('records', box, `${v.student.name} 기록 ${v.records.length}건 · 확정 ${nConf}건`), el('span', { class: 'spacer' }),
-      el('button', { type: 'button', class: 'primary', disabled: locked, text: '+ 학생관찰기록', onclick: () => recordForm(null, 'record') }),
-      el('button', { type: 'button', disabled: locked, text: '이미 쓴 생기부 넣기', onclick: () => recordForm(null, 'existing') }),
-      BASIS_ITEMS.includes(R.slot.item) ? el('button', { type: 'button', disabled: locked, class: 'ai-btn', title: `학생관찰기록 없이 ${basisWord(R.slot.item)}만으로 이 학생의 후보를 만듭니다`, text: `${basisWord(R.slot.item)}만으로 생성`, onclick: () => openBasisGen(R.sno) }) : null,
+      (() => { const m = menuBox('+ 기록 ▾', [
+        el('button', { type: 'button', class: 'primary', disabled: locked, text: '+ 학생관찰기록', onclick: () => recordForm(null, 'record') }),
+        el('button', { type: 'button', disabled: locked, text: '이미 쓴 생기부 넣기', onclick: () => recordForm(null, 'existing') }),
+        BASIS_ITEMS.includes(R.slot.item) ? el('button', { type: 'button', disabled: locked, class: 'ai-btn', title: `학생관찰기록 없이 ${basisWord(R.slot.item)}만으로 이 학생의 후보를 만듭니다`, text: `${basisWord(R.slot.item)}만으로 생성`, onclick: () => openBasisGen(R.sno) }) : null,
+      ], '학생관찰기록·이미 쓴 생기부·기준 자료로 생성'); m.classList.add('add-menu'); return m; })(),
     ]);
     box.appendChild(head);
     if (locked && !ys.archived) box.appendChild(el('div', { class: 'stale', text: '● 마감된 항목입니다. 고치려면 오른쪽 [마감 해제]를 누르세요.' }));
@@ -2158,11 +2160,13 @@
     R.selected = new Set(sel);
     box.appendChild(el('div', { class: 'toolbar' }, [
       el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'checkbox', checked: sel.length && sel.length === v.records.length, onchange: (e) => { R.selected = new Set(e.target.checked ? v.records.map((r) => r.id) : []); renderRecords(); } }), '전체 선택']),
-      (() => { const yet = v.records.filter((r) => !r.confirmed && !r.bundle.length); return el('button', { type: 'button', class: 'small', disabled: !yet.length, title: '확정 전이고 변환 결과도 없는 기록만 고릅니다', text: `변환 안 한 기록만 선택 (${yet.length})`, onclick: () => { R.selected = new Set(yet.map((r) => r.id)); renderRecords(); } }); })(),
       el('span', { class: 'muted', text: `선택 ${sel.length}건` }),
       (() => { const recs = v.records.filter((r) => R.selected.has(r.id) && r.kind !== 'existing'); return el('button', { type: 'button', class: 'ai-btn', disabled: locked || !recs.length, title: '고른 학생관찰기록의 원문을 한꺼번에 AI로 변환해 각 기록의 결과 묶음에 더합니다(기존 완성문은 카드에서 한 건씩)', text: `선택 기록 AI 변환 (${recs.length})`, onclick: (e) => aiRecords(recs, e.currentTarget) }); })(),
-      el('button', { type: 'button', disabled: locked || !sel.length, text: '태그 일괄 지정', onclick: bulkTag }),
-      el('button', { type: 'button', disabled: locked || !sel.length, text: '다른 항목으로 이동', onclick: () => openMove(v.records.filter((r) => R.selected.has(r.id))) }),
+      (() => { const yet = v.records.filter((r) => !r.confirmed && !r.bundle.length); return menuBox('일괄 작업 ▾', [
+        el('button', { type: 'button', class: 'small', disabled: !yet.length, title: '확정 전이고 변환 결과도 없는 기록만 고릅니다', text: `변환 안 한 기록만 고르기 (${yet.length})`, onclick: () => { R.selected = new Set(yet.map((r) => r.id)); renderRecords(); } }),
+        el('button', { type: 'button', class: 'small', disabled: locked || !sel.length, text: '태그 일괄 지정', onclick: bulkTag }),
+        el('button', { type: 'button', class: 'small', disabled: locked || !sel.length, text: '다른 항목으로 이동', onclick: () => openMove(v.records.filter((r) => R.selected.has(r.id))) }),
+      ], '고르기·태그·이동'); })(),
     ]));
     if (!v.records.length) {
       box.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '아직 기록이 없습니다.' }), BASIS_ITEMS.includes(R.slot.item) ? el('button', { type: 'button', class: 'primary ai-btn', disabled: locked, text: `기록 없이 ${basisWord(R.slot.item)}만으로 생성`, onclick: () => openBasisGen(R.sno) }) : null, el('p', { class: 'hint', text: '[+ 학생관찰기록]으로 활동을 하나씩 쌓거나, 이미 쓴 생기부를 넣어 다듬을 수 있습니다. 여러 학생의 엑셀 자료는 자료 인박스에서 학생별로 나눠 한 번에 보낼 수 있습니다.' })]));
@@ -2182,6 +2186,12 @@
   }
   function candInfo(cd) {
     alertBox(`작업: ${OP_LABEL[cd.op]}\n모델: ${cd.meta.model || '-'}${cd.meta.prompt_name ? `\n프롬프트: ${cd.meta.prompt_name}` : ''}${cd.meta.extra ? `\n추가 요구 사항: ${cd.meta.extra}` : ''}\n만든 때: ${cd.created_at}\n비용: ${fmtCredit(cd.cost)} 크레딧${cd.meta.ratios ? `\n비율: ${cd.meta.ratios.join(' / ')}%` : ''}${cd.meta.record_ids ? `\n근거 기록: ${cd.meta.record_ids.length}건` : ''}${cd.meta.level ? `\n성취수준: ${cd.meta.level}` : ''}\n\n[지침]\n${cd.meta.prompt || '-'}${cd.meta.example ? `\n\n[예시]\n${cd.meta.example}` : ''}${cd.meta.standards_text ? `\n\n[쓴 성취기준]\n${cd.meta.standards_text}` : ''}`);
+  }
+  // 버튼 묶음 메뉴(▾·⋯): 펼치면 아래로. 안의 버튼을 누르거나 바깥을 누르면 닫힌다(bind의 문서 클릭)
+  function menuBox(label, items, title) {
+    const list = items.filter(Boolean);
+    if (!list.length) return null;
+    return el('details', { class: 'opt-menu menu-down' }, [el('summary', { text: label, title: title || '' }), el('div', { class: 'opt-list' }, list)]);
   }
   // ---------- v0.19: 기록 = 원문 + 결과 묶음(항목별·태그 변환 공유), 기록 확정 ----------
   // BO.open: 결과 묶음을 펼친 기록, BO.more: '이전 n개 더 보기'를 연 기록, BO.drafts: [직접 작성] 칸
@@ -2213,9 +2223,11 @@
       el('div', { class: 'rcard-foot' }, [
         el('button', { type: 'button', class: 'small primary', disabled: locked || (r.confirmed && b.text === r.content), text: '✔ 이걸로 확정', onclick: () => confirmText(r, b.text) }),
         el('button', { type: 'button', class: 'small', disabled: locked, text: '고쳐서 확정', title: '이 글을 [직접 작성] 칸에 불러와 고친 뒤 확정합니다', onclick: () => openDraft(r, b.text) }),
-        cd && cd.meta && cd.meta.model ? el('button', { type: 'button', class: 'small', text: '정보', onclick: () => candInfo(cd) }) : null,
         el('span', { class: 'spacer' }),
-        b.src === 'rec' ? el('button', { type: 'button', class: 'small link danger-text', disabled: locked, text: '삭제', onclick: async () => { if (await mutate('delete_result', b.id)) loadStudent(true); } }) : null,
+        menuBox('⋯', [
+          cd && cd.meta && cd.meta.model ? el('button', { type: 'button', class: 'small', text: '정보', onclick: () => candInfo(cd) }) : null,
+          b.src === 'rec' ? el('button', { type: 'button', class: 'small danger-text', disabled: locked, text: '삭제', onclick: async () => { if (await mutate('delete_result', b.id)) loadStudent(true); } }) : null,
+        ], '정보·삭제'),
       ]),
     ]);
   }
@@ -2286,21 +2298,23 @@
       el('span', { class: 'badge src', text: sourceLabel(r.source) }),
       el('span', { class: 'rcard-acts' }, [
         el('button', { type: 'button', class: 'small', disabled: locked, title: r.confirmed ? '확정본·활동명·날짜·태그를 고칩니다(확정은 그대로)' : '원문·활동명·날짜·태그를 고칩니다', text: '수정', onclick: () => recordForm(r, r.kind) }),
-        el('button', { type: 'button', class: 'small', disabled: locked, title: '이 기록(또는 문단)을 다른 항목으로', text: '이동', onclick: () => openMove([r]) }),
-        ...hrQuickMoves(r, locked),
-        el('button', { type: 'button', class: 'small link danger-text', disabled: locked, text: '삭제', onclick: async () => {
-          if (!(await confirmBox(`이 기록을 지웁니다.${r.candidates.length ? ` 항목별 결과 ${r.candidates.length}개도 함께 지워집니다.` : ''}`, '삭제'))) return;
-          if (await mutate('delete_record', r.id)) loadStudent(true);
-        } })]),
+        menuBox('⋯', [
+          el('button', { type: 'button', class: 'small', disabled: locked, title: '확정과 관계없이 이 기록 글을 그대로 최종안으로 넣습니다(완성된 자료일 때)', text: '그대로 최종안으로', onclick: () => adoptRecordFinal(r) }),
+          el('button', { type: 'button', class: 'small', disabled: locked, title: '이 기록(또는 문단)을 다른 항목으로', text: '이동', onclick: () => openMove([r]) }),
+          ...hrQuickMoves(r, locked),
+          r.confirmed ? null : recWizBtn(r.kind === 'existing' ? 'polish' : 'refine', r.orig, locked),
+          el('button', { type: 'button', class: 'small danger-text', disabled: locked, text: '삭제', onclick: async () => {
+            if (!(await confirmBox(`이 기록을 지웁니다.${r.candidates.length ? ` 항목별 결과 ${r.candidates.length}개도 함께 지워집니다.` : ''}`, '삭제'))) return;
+            if (await mutate('delete_record', r.id)) loadStudent(true);
+          } })], '그대로 최종안으로·이동·마법사·삭제')]),
     ]));
-    const adoptBtn = el('button', { type: 'button', disabled: locked, title: '확정과 관계없이 이 기록 글을 그대로 최종안으로 넣습니다(완성된 자료일 때)', text: '그대로 최종안으로', onclick: () => adoptRecordFinal(r) });
     if (r.confirmed) {
       card.appendChild(el('div', { class: 'rcard-label conf', text: '✔ 확정본' }));
       card.appendChild(el('div', { class: 'rcard-body', text: r.content }));
       card.appendChild(el('div', { class: 'rcard-foot' }, [
         el('button', { type: 'button', disabled: locked, title: '확정을 풀고 원문·결과 묶음으로 돌아갑니다(확정본은 결과로 남습니다)', text: '확정 풀기', onclick: async () => { if (await mutate('unconfirm_record', r.id)) { toast('확정을 풀었습니다. 확정본은 결과 묶음에 남겨 두었습니다.'); loadStudent(true); } } }),
         el('button', { type: 'button', disabled: locked, text: '✍ 직접 작성', title: '원문·결과에서 문장을 골라 새로 쓴 뒤 다시 확정합니다', onclick: () => openDraft(r, '') }),
-        adoptBtn, el('span', { class: 'spacer' }), bytesEl(r.bytes, r.kind === 'existing' ? R.target : 0),
+        el('span', { class: 'spacer' }), bytesEl(r.bytes, r.kind === 'existing' ? R.target : 0),
       ]));
       const hidden = (r.orig !== r.content ? [{ src: 'orig', id: 0, op: 'orig', text: r.orig, bytes: bytesOf(r.orig), created_at: '', meta: {}, label: '' }] : []).concat(r.bundle);
       const bx = bundleBox(r, hidden, '원문·변환 결과 보기', locked);
@@ -2312,10 +2326,10 @@
       const aiBtn = el('button', { type: 'button', class: 'ai-btn', disabled: locked || blocked, title: blocked ? PAIR_FULL_TIP : '원문을 AI로 변환해 아래 결과 묶음 맨 위에 더합니다(확정은 따로)', text: 'AI 변환' });
       aiBtn.addEventListener('click', () => aiRecord(r, aiBtn));
       card.appendChild(el('div', { class: 'rcard-foot' }, [
-        aiPair(aiBtn, recWizBtn(r.kind === 'existing' ? 'polish' : 'refine', r.orig, locked)),
+        aiBtn,
         el('button', { type: 'button', disabled: locked, text: '원문 그대로 확정', onclick: () => confirmText(r, r.orig) }),
         el('button', { type: 'button', disabled: locked, text: '✍ 직접 작성', title: '원문·결과에서 쓸 문장을 모아 새 글을 만들고 확정합니다', onclick: () => openDraft(r, '') }),
-        adoptBtn, el('span', { class: 'spacer' }), bytesEl(bytesOf(r.orig), r.kind === 'existing' ? R.target : 0),
+        el('span', { class: 'spacer' }), bytesEl(bytesOf(r.orig), r.kind === 'existing' ? R.target : 0),
       ]));
       const bx = bundleBox(r, r.bundle, '변환 결과', locked);
       if (bx) card.appendChild(bx);
@@ -6939,6 +6953,9 @@
     $('recBulkExisting').addEventListener('click', () => openExistingBulk('existing'));
     $('recBulkFinal').addEventListener('click', openFinalBulk);
     $('recJoinBulk').addEventListener('click', openJoinBulk);
+    document.addEventListener('click', (e) => {
+      document.querySelectorAll('details.opt-menu[open]').forEach((d) => { if (!d.contains(e.target) || e.target.closest('.opt-list button')) d.open = false; });
+    });
     $('recBasisGen').addEventListener('click', () => openBasisGen(null));
     $('recBulkClose').addEventListener('click', async () => { if (await leaveOk()) openCloseBulk(); });
     $('recNext').addEventListener('click', () => moveStudent(1));

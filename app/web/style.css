@@ -1083,3 +1083,9 @@ label.inline[hidden] { display: none; }
 .join-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
 .join-preview { max-height: 180px; overflow: auto; }
 .tv-bundle-bar { display: flex; align-items: center; gap: 6px; } .tv-rec.confirmed { border-color: #86efac; background: #f7fdf9; }
+.opt-menu.menu-down { display: inline-block; }
+.opt-menu.menu-down .opt-list { bottom: auto; top: calc(100% + 4px); }
+.opt-menu.menu-down > summary { padding: 4px 10px; }
+.rec-tools .opt-menu.menu-down > summary, .add-menu > summary { padding: 7px 12px; }
+.rec-tools .opt-menu .opt-list { left: 0; right: auto; }
+.opt-list button { text-align: left; white-space: nowrap; }
