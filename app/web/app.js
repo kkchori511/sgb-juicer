@@ -2655,10 +2655,9 @@
       }
     };
     upd();
-    // [옵션 ▾]: 비중으로 분량 맞추기(AI) · 최종안 다듬기(AI) · 🪄 마법사
+    // [옵션 ▾]: 최종안 다듬기(AI) · 🪄 마법사
     const conf = v.records.filter((r) => r.confirmed);
-    const synthBtn = el('button', { type: 'button', class: 'ai-btn', disabled: ro || !conf.length || pairFull(), title: pairFull() ? PAIR_FULL_TIP : '확정 기록을 비중대로 AI가 목표 분량에 맞춰 한 글로(후보로) 씁니다', text: '비중으로 분량 맞추기', onclick: () => { optMenu.open = false; openSynth(conf); } });
-    const optMenu = el('details', { class: 'opt-menu' }, [el('summary', { text: '옵션 ▾' }), el('div', { class: 'opt-list' }, [synthBtn, polishBtn, polishWiz])]);
+    const optMenu = el('details', { class: 'opt-menu' }, [el('summary', { text: '옵션 ▾' }), el('div', { class: 'opt-list' }, [polishBtn, polishWiz])]);
     fb.append(ta, el('div', { class: 'final-actions' }, [bc, saveState, el('span', { class: 'spacer' }), saveBtn, optMenu, closeBtn]));
     if (closed) fb.appendChild(el('div', { class: 'hint', text: `● ${f.closed_at || ''} 마감 — 기록·AI·최종안 편집이 잠겼습니다. 조회·복사·내보내기는 됩니다.` }));
     finSec.appendChild(fb);
@@ -2668,7 +2667,8 @@
     box.appendChild(confSec);
     const unc = v.records.filter((r) => !r.confirmed);
     confSec.appendChild(el('div', { class: 'sec-title' }, [foldBtn('confirmed', confSec, `확정 기록 ${conf.length}건`), el('span', { class: 'spacer' }),
-      el('button', { type: 'button', class: 'primary small', disabled: ro || !conf.length, title: '확정 기록을 이 순서대로 내용 그대로 이어 최종안에 넣습니다', text: '이어 붙이기 → 최종안', onclick: () => openJoin() })]));
+      el('button', { type: 'button', class: 'primary small', disabled: ro || !conf.length, title: '확정 기록을 이 순서대로 내용 그대로 이어 최종안에 넣습니다', text: '이어 붙이기 → 최종안', onclick: () => openJoin() }),
+      el('button', { type: 'button', class: 'small ai-btn', disabled: ro || !conf.length || pairFull(), title: pairFull() ? PAIR_FULL_TIP : '확정 기록을 비중대로 AI가 목표 분량에 맞춰 한 글로 씁니다(결과는 아래 후보로)', text: '비중으로 분량 맞추기', onclick: () => openSynth(conf) })]));
     if (!conf.length) confSec.appendChild(el('p', { class: 'hint', text: '왼쪽 기록에서 [원문 그대로 확정]·[✔ 이걸로 확정]·[✍ 직접 작성]으로 확정하면 여기에 쌓입니다.' }));
     const rows = conf.map((r, i) => ({ id: r.id, el: confRow(r, i, ro) }));
     const handle = sortable(rows, async (ids) => {
@@ -2683,7 +2683,7 @@
     const resSec = el('div', { class: 'res-sec' });
     box.appendChild(resSec);
     resSec.appendChild(el('div', { class: 'sec-title' }, [foldBtn('results', resSec, `AI 분량 맞춤 후보 ${v.results.length}/3`), el('span', { class: 'muted', text: '잠금 포함 최근 3개 보관' })]));
-    if (!v.results.length) resSec.appendChild(el('p', { class: 'hint', text: '최종안 [옵션 ▾ › 비중으로 분량 맞추기]나 [다듬기]를 하면 여기에 후보가 생깁니다.' }));
+    if (!v.results.length) resSec.appendChild(el('p', { class: 'hint', text: '확정 기록의 [비중으로 분량 맞추기]나 최종안 [옵션 ▾ › 다듬기(AI)]를 하면 여기에 후보가 생깁니다.' }));
     v.results.slice().reverse().forEach((cd) => resSec.appendChild(candEl(cd, ro, [
       el('button', { type: 'button', class: 'small primary', disabled: ro, text: '✔ 최종안으로', onclick: async () => {
         if (!(await flushFinal())) return;
