@@ -1089,3 +1089,14 @@ label.inline[hidden] { display: none; }
 .rec-tools .opt-menu.menu-down > summary, .add-menu > summary { padding: 7px 12px; }
 .rec-tools .opt-menu .opt-list { left: 0; right: auto; }
 .opt-list button { text-align: left; white-space: nowrap; }
+/* 태그 색 칩 메뉴 */
+.tag-menu > summary { padding: 0 !important; border: none !important; background: none !important; }
+.tag-face { cursor: pointer; padding: 2px 10px; font-size: 13px; }
+.tag-list { flex-direction: row !important; flex-wrap: wrap; max-width: 360px; min-width: 0 !important; }
+.tag-pick { cursor: pointer; padding: 3px 10px; font-size: 13px; }
+.tag-pick.cur { outline: 2px solid var(--tc, #64748b); outline-offset: 1px; }
+.tag-pick:hover { filter: brightness(0.96); }
+/* 아래 고정 선택 줄(태그별 기록): 메뉴는 위로 열고 글씨는 어둡게 */
+#tvBulk .opt-menu > summary { color: var(--text, #1e293b); background: #fff; }
+#tvBulk .opt-menu .opt-list { top: auto; bottom: calc(100% + 6px); color: var(--text, #1e293b); }
+#tvBulk .tag-face:not(.tc) { background: #fff; color: var(--text, #1e293b); }

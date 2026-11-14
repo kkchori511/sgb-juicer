@@ -2193,6 +2193,18 @@
     if (!list.length) return null;
     return el('details', { class: 'opt-menu menu-down' }, [el('summary', { text: label, title: title || '' }), el('div', { class: 'opt-list' }, list)]);
   }
+  // 태그 색 칩 메뉴: 지금 태그를 색 칩으로 보여 주고, 누르면 색 칩 목록에서 하나를 고른다(태그 = 한 묶음)
+  function tagChipMenu(cur, tags, onPick, opt) {
+    opt = opt || {};
+    const names = new Map((tags || []).map((t) => [t.id, t.name]));
+    const face = opt.label ? el('span', { class: 'tag tag-face', text: opt.label })
+      : cur ? el('span', { class: 'tag tag-face' + tagC(cur), text: `● ${names.get(cur) || '(지운 태그)'} ▾` }) : el('span', { class: 'tag tag-face', text: '태그 없음 ▾' });
+    const list = (tags || []).map((t) => el('button', { type: 'button', class: 'tag tag-pick' + tagC(t.id) + (t.id === cur ? ' cur' : ''), text: `● ${t.name}${t.id === cur ? ' ✔' : ''}`, onclick: () => onPick(t.id, t.name) }));
+    if (opt.none) list.push(el('button', { type: 'button', class: 'tag tag-pick' + (!cur ? ' cur' : ''), text: `태그 없음${!cur ? ' ✔' : ''}`, onclick: () => onPick(0, '태그 없음') }));
+    const d = el('details', { class: 'opt-menu menu-down tag-menu' }, [el('summary', { title: opt.title || '눌러서 태그 고르기' }, [face]), el('div', { class: 'opt-list tag-list' }, list)]);
+    if (opt.disabled) d.addEventListener('toggle', () => { d.open = false; });
+    return d;
+  }
   // ---------- v0.19: 기록 = 원문 + 결과 묶음(항목별·태그 변환 공유), 기록 확정 ----------
   // BO.open: 결과 묶음을 펼친 기록, BO.more: '이전 n개 더 보기'를 연 기록, BO.drafts: [직접 작성] 칸
   const BO = { open: new Set(), more: new Set(), drafts: {} };
@@ -3837,10 +3849,8 @@
       const names = new Map((TV.data.tags || []).map((t) => [t.id, t.name]));
       const cur = st.draft.tag_ids[0] || 0;
       if (!can || st.busy) { chips.appendChild(cur ? el('span', { class: 'tag' + tagC(cur) + (cur === TV.tag ? ' cur' : ''), text: names.get(cur) || '(지운 태그)' }) : el('span', { class: 'muted', text: '태그 없음' })); return; }
-      const sel = el('select', { class: 'tv-addtag', 'aria-label': `${who} 태그`, title: '태그를 바꾸면 그 묶음으로 옮겨 갑니다' },
-        [el('option', { value: '0', text: '(태그 없음)', selected: !cur }), ...(TV.data.tags || []).map((t) => el('option', { value: t.id, text: `태그: ${t.name}`, selected: t.id === cur }))]);
-      sel.addEventListener('change', () => { const v = +sel.value; st.draft.tag_ids = v ? [v] : []; drawChips(); tvSave(r.id); });
-      chips.appendChild(sel);
+      chips.appendChild(tagChipMenu(cur, TV.data.tags || [], (v) => { if (v === cur) return; st.draft.tag_ids = v ? [v] : []; drawChips(); tvSave(r.id); },
+        { none: true, title: `${who} 태그 바꾸기(바꾸면 그 묶음으로 옮겨 갑니다)` }));
     };
     drawChips();
     const state = el('span', { class: 'tv-state', 'aria-live': 'polite' });
@@ -3905,10 +3915,8 @@
     bar.hidden = false;
     const recs = TV.data.records.filter((r) => TV.sel.has(r.id));
     const n = new Set(recs.map((r) => r.student_no)).size;
-    const tagSel = (ph) => el('select', { 'aria-label': ph }, [el('option', { value: '', text: ph }), ...TV.data.tags.map((t) => el('option', { value: t.id, text: t.name }))]);
-    const addSel = tagSel('태그 바꾸기…'), rmSel = tagSel('태그 빼기…');
-    addSel.addEventListener('change', () => tvBulkRun(addSel, 'add', n));
-    rmSel.addEventListener('change', () => tvBulkRun(rmSel, 'remove', n));
+    const addSel = tagChipMenu(0, TV.data.tags || [], (tid, tname) => tvBulkRun([tid], tname, 'add', n), { label: '태그 바꾸기 ▾', title: '고른 기록을 그 태그 하나로 바꿉니다' });
+    const rmSel = el('button', { type: 'button', title: '고른 기록의 태그를 떼어 태그 없음으로', text: '태그 빼기', onclick: () => tvBulkRun((TV.data.tags || []).map((t) => t.id), '태그', 'remove', n) });
     const titleIn = el('input', { type: 'text', class: 'tv-bulk-in', placeholder: '활동명', 'aria-label': '고른 기록에 넣을 활동명' });
     const dateIn = el('input', { type: 'date', class: 'tv-bulk-in', 'aria-label': '고른 기록에 넣을 날짜' });
     const setTitle = el('button', { type: 'button', text: '활동명 바꾸기', onclick: () => tvBulkField('title', titleIn.value, n) });
@@ -3969,13 +3977,11 @@
     tvSaveSummary();
     try { return await p; } finally { TV.ops.delete(p); tvSaveSummary(); }
   }
-  async function tvBulkRun(sel, mode, n) {
-    if (!sel.value) return;
-    const tid = +sel.value, tname = sel.selectedOptions[0].textContent;
-    sel.value = '';
+  async function tvBulkRun(tids, tname, mode, n) {
+    if (!tids.length) return;
     if (!(await leaveOk())) return;
     const ids = [...TV.sel];
-    const r = await tvOp(() => mutate('tag_records_undoable', ids, [tid], mode, TV.year));
+    const r = await tvOp(() => mutate('tag_records_undoable', ids, tids, mode, TV.year));
     if (!r) return;
     tvApplyStates(r.states);
     TV.bulk = { text: `${n}명 ${ids.length}건 중 ${r.pairs.length}건 '${tname}' 태그${mode === 'add' ? '로 바꿈' : ' 뺌'}`, pairs: r.pairs, mode };
