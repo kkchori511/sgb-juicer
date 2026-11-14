@@ -281,11 +281,28 @@
     flushCfg();
     showPanelNow(name, fromHistory);
   }
+  // 메뉴 강조: 항목별 기록의 하위 항목은 지금 고른 항목만
+  function markNav() {
+    const it = panel === 'records' && R.slot ? R.slot.item : null;
+    document.querySelectorAll('.nav').forEach((b) => b.classList.toggle('active', b.dataset.item ? b.dataset.item === it : (!!b.dataset.panel && b.dataset.panel === panel)));
+    $('navRecFold').classList.toggle('open-parent', panel === 'records');
+  }
+  // 하위 항목을 누르면: 그 항목의 담당 중 마지막에 본 것(없으면 첫 담당)으로 연다
+  function openRecItem(item) {
+    const pick = async () => {
+      if (panel === 'records' && !(R.slot && R.slot.item === item) && !(await leaveOk())) return;
+      const list = R.slots.filter((s) => s.item === item);
+      if (!list.length) { toast('이 항목의 담당이 없습니다. 명렬·담당 관리에서 먼저 추가하세요.'); return; }
+      if (!(R.slot && R.slot.item === item)) { R.slot = list[0]; R.sno = null; R.selected.clear(); }
+      if (panel === 'records') { renderRecordsPanel(); markNav(); } else showPanel('records');
+    };
+    if (R.slots.length) pick(); else loadSlots().then((ok) => ok && pick());
+  }
   function showPanelNow(name, fromHistory) {
     $('actionToast').hidden = true;
     if (!fromHistory && name !== panel) history.pushState({ panel: name }, '');
     panel = name;
-    document.querySelectorAll('.nav').forEach((b) => b.classList.toggle('active', b.dataset.panel === name));
+    markNav();
     document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.dataset.panelContent === name));
     $('crumb').textContent = `${ys.year ? ys.year + '학년도 › ' : ''}${PANEL_TITLES[name] || ''}`;
     $('main').scrollTop = 0;
@@ -1872,10 +1889,10 @@
     R.slots = r.slots;
     return true;
   }
-  function fillSlotSelect(sel, current) {
+  function fillSlotSelect(sel, current, item) {
     sel.innerHTML = '';
     let lastSem = null;
-    R.slots.forEach((s) => sel.appendChild(el('option', { value: slotKey(s), text: s.label + (s.total ? '' : ' (명렬 없음)'), selected: current && slotKey(s) === current })));
+    R.slots.filter((s) => !item || s.item === item).forEach((s) => sel.appendChild(el('option', { value: slotKey(s), text: s.label + (s.total ? '' : ' (명렬 없음)'), selected: current && slotKey(s) === current })));
     return lastSem;
   }
 
@@ -1894,7 +1911,10 @@
     if (!R.slots.length && !(await loadSlots())) return;
     if (!R.slot) { const k = localStorage.getItem(recSlotKey()); R.slot = R.slots.find((s) => slotKey(s) === k) || R.slots[0] || null; }
     if (R.slot) localStorage.setItem(recSlotKey(), slotKey(R.slot));
-    fillSlotSelect($('recSlot'), R.slot && slotKey(R.slot));
+    // 항목 콤보박스: 메뉴에서 고른 항목(세특·동아리)의 담당만. 담임 항목은 고를 것이 없어 숨김
+    fillSlotSelect($('recSlot'), R.slot && slotKey(R.slot), R.slot && R.slot.item);
+    $('recSlot').parentElement.hidden = !R.slot || !['subject', 'club'].includes(R.slot.item);
+    markNav();
     fillModelSelect($('recModel'));
     if (!R.slot) {
       $('recList').innerHTML = ''; $('recFinal').innerHTML = '';
@@ -2183,6 +2203,7 @@
       el('span', { class: 'rcard-acts' }, [
         el('button', { type: 'button', class: 'small', disabled: locked, text: '수정', onclick: () => recordForm(r, r.kind) }),
         el('button', { type: 'button', class: 'small', disabled: locked, title: '이 기록(또는 문단)을 다른 항목으로', text: '이동', onclick: () => openMove([r]) }),
+        ...hrQuickMoves(r, locked),
         el('button', { type: 'button', class: 'small link danger-text', disabled: locked, text: '삭제', onclick: async () => {
           if (!(await confirmBox(`이 기록을 지웁니다.${r.candidates.length ? ` 정제 후보 ${r.candidates.length}개도 함께 지워집니다.` : ''}`, '삭제'))) return;
           if (await mutate('delete_record', r.id)) loadStudent(true);
@@ -6427,6 +6448,28 @@
     clearTimeout(actionToast._t);
     actionToast._t = setTimeout(() => { $('actionToast').hidden = true; }, ms || 9000);
   }
+  // 담임 항목(자율·진로·행특)끼리 기록 1건을 같은 학생의 다른 담임 항목으로 바로 옮김(확인 후)
+  const HR_SHORT = { autonomy: '자율', career: '진로', behavior: '행특' };
+  function hrQuickMoves(r, locked) {
+    if (!R.slot || R.slot.kind !== 'homeroom') return [];
+    return Object.keys(HR_SHORT).filter((it) => it !== R.slot.item).map((it) => el('button', {
+      type: 'button', class: 'small hr-move', disabled: locked, title: `이 기록 1건을 이 학생의 ${ITEM_FULL[it]}(으)로 옮깁니다`, text: `→ ${HR_SHORT[it]}`,
+      onclick: () => quickMove(r, it) }));
+  }
+  async function quickMove(r, item) {
+    const gid = R.slot.group_id, name = ITEM_FULL[item];
+    const t = await call('move_targets', gid, R.slot.item, R.sno);
+    if (!t) return;
+    const dest = t.targets.find((x) => x.group_id === gid && x.item === item);
+    if (!dest) { alertBox(`이 학생은 ${name} 항목이 없습니다.`); return; }
+    if (dest.closed) { alertBox(`${R.view.student.name} 학생의 ${name}은(는) 마감되어 옮길 수 없습니다. 마감을 풀고 다시 하세요.`); return; }
+    const what = `${r.kind === 'existing' ? '기존 완성문' : r.seq + '회'}${r.title ? ' ' + r.title : ''}`;
+    if (!(await confirmBox(`${R.view.student.name} 학생의 기록 [${what}]을(를) ${ITEM_FULL[R.slot.item]}에서 ${name}(으)로 옮깁니다.\n날짜·활동명·태그·정제 후보도 함께 옮겨집니다.`, `${HR_SHORT[item]}(으)로 옮기기`))) return;
+    if (!(await mutate('move_records', [{ record_id: r.id, paras: null }], gid, item))) return;
+    R.selected.delete(r.id);
+    loadStudent(true);
+    actionToast(`${name}(으)로 옮겼습니다. 두 항목의 최종안은 다시 확인하세요.`, '되돌리기', async () => { if (await mutate('undo_move')) { toast('되돌렸습니다.'); loadStudent(true); } });
+  }
   async function openMove(recs) {
     if (!recs.length) return;
     const t = await call('move_targets', R.slot.group_id, R.slot.item, R.sno);
@@ -6514,7 +6557,14 @@
 
   // ---------- 묶기 ----------
   function bind() {
-    document.querySelectorAll('.nav').forEach((b) => b.addEventListener('click', () => showPanel(b.dataset.panel)));
+    document.querySelectorAll('.nav[data-panel]:not([data-item])').forEach((b) => b.addEventListener('click', () => showPanel(b.dataset.panel)));
+    document.querySelectorAll('.nav[data-item]').forEach((b) => b.addEventListener('click', () => openRecItem(b.dataset.item)));
+    $('navRecFold').addEventListener('click', () => {
+      if ($('app').classList.contains('collapsed')) { showPanel('records'); return; }
+      const open = $('navRecFold').getAttribute('aria-expanded') !== 'true';
+      $('navRecFold').setAttribute('aria-expanded', open);
+      $('navRecSub').hidden = !open;
+    });
     $('menuToggle').addEventListener('click', () => {
       const v = !$('app').classList.contains('collapsed');
       setCollapsed(v);
@@ -6589,7 +6639,7 @@
     $('recSlot').addEventListener('change', async (e) => {
       const want = e.target.value;
       if (!(await leaveOk())) { e.target.value = R.slot ? slotKey(R.slot) : ''; return; }
-      R.slot = R.slots.find((s) => slotKey(s) === want); R.sno = null; R.selected.clear(); R.filter = ''; loadSlotStudents();
+      R.slot = R.slots.find((s) => slotKey(s) === want); R.sno = null; R.selected.clear(); R.filter = ''; loadSlotStudents(); markNav();
       if (R.slot) localStorage.setItem(recSlotKey(), slotKey(R.slot));
     });
     $('recPrev').addEventListener('click', () => moveStudent(-1));

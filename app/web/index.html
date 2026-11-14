@@ -35,7 +35,16 @@
       <button type="button" class="nav" data-panel="dashboard"><i>📊</i><span>현황판</span></button>
       <button type="button" class="nav" data-panel="inbox"><i>📥</i><span>자료 인박스 <b class="nav-badge" id="ibBadge" hidden></b></span></button>
       <button type="button" class="nav" data-panel="tagrec" title="같은 태그(같은 계열 활동) 기록을 모아 고치고 AI로 한꺼번에 변환합니다"><i>🔖</i><span>태그별 기록</span></button>
-      <button type="button" class="nav" data-panel="records"><i>📝</i><span>항목별 기록</span></button>
+      <button type="button" class="nav nav-fold" id="navRecFold" aria-expanded="true" title="항목별 기록 묶음 펼치기/접기"><i>📝</i><span>항목별 기록 <b class="fold-caret">▾</b></span></button>
+      <div class="nav-sub" id="navRecSub">
+        <div class="nav-cat">공통</div>
+        <button type="button" class="nav nav-item" data-panel="records" data-item="subject"><span>과목별 세특</span></button>
+        <button type="button" class="nav nav-item" data-panel="records" data-item="club"><span>동아리 활동</span></button>
+        <div class="nav-cat">담임</div>
+        <button type="button" class="nav nav-item" data-panel="records" data-item="autonomy"><span>자율 활동</span></button>
+        <button type="button" class="nav nav-item" data-panel="records" data-item="career"><span>진로 활동</span></button>
+        <button type="button" class="nav nav-item" data-panel="records" data-item="behavior"><span>행동특성 및 종합의견</span></button>
+      </div>
       <button type="button" class="nav" data-panel="export"><i>📤</i><span>검토·내보내기</span></button>
       <div class="nav-sep"></div>
       <button type="button" class="nav" data-panel="roster"><i>👥</i><span>명렬·담당 관리</span></button>
@@ -463,11 +472,13 @@
 
             <h2 id="g-records">5. 항목별 기록 (학생 편집)</h2>
             <ul>
+              <li>메뉴의 <b>📝 항목별 기록 ▾</b>을 누르면 묶음이 펼쳐집니다. <b>공통</b>: 과목별 세특·동아리 활동, <b>담임</b>: 자율 활동·진로 활동·행동특성 및 종합의견. 세특·동아리는 위쪽 '항목' 칸에 그 항목의 내 담당(과목·동아리)만 나오고, 담임 항목은 고를 것이 없어 칸이 없습니다.</li>
+              <li><b>담임 항목끼리 옮기기</b>: 자율·진로·행특 기록 카드의 <b>[→ 진로]·[→ 행특]</b> 같은 버튼으로 그 학생의 기록 1건을 다른 담임 항목으로 옮깁니다(확인 후, 날짜·활동명·태그·정제 후보 함께, [되돌리기] 가능). 도착 항목이 마감이면 옮기지 않습니다. 문단 일부나 세특·동아리로 옮길 때는 [이동]을 씁니다.</li>
               <li>왼쪽 학생 목록 → 가운데 학생관찰기록 → 오른쪽 최종안·후보. [이전/다음 학생](Alt+↑/↓)으로 넘깁니다. 상태 필터로 '입력 중만' 같이 볼 수 있습니다.</li>
               <li><b>+ 학생관찰기록</b>: 날짜·활동명·태그·내용. 회차는 자동으로 붙습니다.</li>
               <li><b>[그대로 최종안으로]</b>: 학생관찰기록·기존 완성문 모두 AI를 거치지 않고 그 기록 내용을 바로 최종안으로 넣습니다(태그 AI 변환으로 이미 다듬은 기록 등). 최종안이 있으면 한 번 묻고, 넣은 직후 [되돌리기]로 원래 최종안을 돌려놓을 수 있습니다.</li>
               <li><b>🪄 마법사</b>: 기록 카드의 AI 버튼 옆, [선택 기록 종합하기] 옆, 최종안 [다듬기(AI)] 옆에 있습니다. 💬 대화는 그 글을 붙여넣은 채 시작하고, 마음에 드는 결과는 [이 결과를 최종안으로] 넣을 수 있습니다. [🧩 프롬프트 제작]·📋 양식으로 만든 프롬프트는 '이 항목 정제(다듬기·종합)의 기본 프롬프트로 바로 쓰기'를 고를 수 있습니다.</li>
-              <li>위 화면 맨 위의 담당·항목은 마지막에 고른 것이 다음에도 그대로 열립니다(학년도별).</li>
+              <li>마지막에 본 담당·항목이 다음에도 그대로 열립니다(학년도별).</li>
               <li><b>이미 쓴 생기부 넣기</b>: 작성해 둔 문장을 '기존 완성문'으로 넣어 [다듬기(AI)] 하거나 [그대로 최종안으로]. 여러 학생은 위 줄의 [📥 이미 쓴 생기부 일괄 입력](이름·내용 열 복사), 학생관찰기록은 [📥 학생관찰기록 일괄 입력], 기존 완성문을 한꺼번에 최종안으로 보내려면 [✔ 기존 완성문 → 최종안 일괄]. 학생관찰기록 날짜는 [날짜 넣기]를 켤 때만 들어갑니다. ▾를 누르면 칸을 접습니다.</li>
               <li><b>정제(AI)</b>: 기록 한 건을 다듬은 후보를 만듭니다. [이 내용으로 기록 바꾸기]를 눌러야 기록이 바뀌고, 원문은 남습니다.</li>
               <li><b>여러 기록 한꺼번에</b>: [정제 안 한 기록만 선택]으로 고른 뒤 [선택 기록 정제]를 누르면 동시에 정제합니다(기존 완성문은 빠짐). 인박스 정제·태그별 기록·기존 완성문 일괄에도 결과가 아직 없는 것만 고르는 버튼이 있습니다.</li>
