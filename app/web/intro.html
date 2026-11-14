@@ -8,31 +8,46 @@
 <style>
 
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;}body{min-height:100vh;display:grid;place-items:center;background:#eaf0f5;color:#263b4b;font-family:"Segoe UI","Malgun Gothic",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-.splash{position:relative;width:min(420px,100vw);height:420px;overflow:hidden;border:1px solid #dce5eb;border-radius:28px;background:#fff;box-shadow:0 16px 48px #31495c12;text-align:center;padding:24px 30px}
-.art{display:block;width:100%;height:250px;overflow:visible}h1{margin:9px 0 8px;font-size:26px;letter-spacing:-1.1px;font-weight:700;line-height:1.4}.loading{margin:0;color:#617583;font-size:13px;line-height:22px}.version{display:block;color:#85939d;font-size:11px;letter-spacing:.8px;margin-top:14px;font-variant-numeric:tabular-nums}.dots{display:inline-flex;gap:3px;margin-left:4px;vertical-align:middle}.dots i{display:block;width:3px;height:3px;background:currentColor;border-radius:50%;animation:dot 2.1s infinite}.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
-.orange{transform-box:fill-box;transform-origin:50% 35%;animation:squeeze var(--cycle) ease-in-out infinite}.thumb{transform-box:fill-box;transform-origin:85% 20%;animation:thumb var(--cycle) ease-in-out infinite}.finger{animation:finger var(--cycle) ease-in-out infinite}.f2{animation-delay:.035s}.f3{animation-delay:.07s}.f4{animation-delay:.1s}.bead{transform-box:fill-box;transform-origin:50% 0;animation:bead var(--cycle) ease-in-out infinite}.drop{opacity:0;animation:fall var(--cycle) cubic-bezier(.35,0,.75,.55) infinite}.d2{animation-delay:var(--delay2)}.d3{animation-delay:var(--delay3)}
-@keyframes squeeze{0%,12%,87%,100%{transform:scale(1)}30%,66%{transform:scale(.89,1.045)}}@keyframes thumb{0%,12%,87%,100%{transform:rotate(0)}30%,66%{transform:translate(-3px,5px) rotate(-5deg)}}@keyframes finger{0%,12%,87%,100%{transform:translateX(0)}30%,66%{transform:translateX(6px)}}@keyframes bead{0%,12%,87%,100%{transform:scale(.65)}30%,66%{transform:scale(1.15)}}@keyframes fall{0%,26%{opacity:0;transform:translateY(-4px) scale(.55)}29%{opacity:1}48%{opacity:1;transform:translateY(45px) scale(.85)}54%,100%{opacity:0;transform:translateY(55px) scale(.85)}}@keyframes dot{0%,65%,100%{opacity:.3}30%{opacity:1}}
+.splash{position:relative;width:min(420px,100vw);height:420px;overflow:hidden;border:1px solid #dce5eb;border-radius:28px;background:#fff;box-shadow:0 16px 48px #31495c12;text-align:center;padding:20px 30px;display:flex;flex-direction:column;justify-content:center}
+.art{display:block;width:100%;height:230px;min-height:0;flex:0 1 230px;overflow:visible}h1{flex:none;margin:9px 0 8px;font-size:26px;letter-spacing:-1.1px;font-weight:700;line-height:1.4}.loading{flex:none;margin:0;color:#617583;font-size:13px;line-height:22px}.version{display:block;flex:none;line-height:16px;color:#85939d;font-size:11px;letter-spacing:.8px;margin-top:14px;font-variant-numeric:tabular-nums}.dots{display:inline-flex;gap:3px;margin-left:4px;vertical-align:middle}.dots i{display:block;width:3px;height:3px;background:currentColor;border-radius:50%;animation:dot 2.1s infinite}.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+.orange{transform-box:fill-box;transform-origin:50% 35%;animation:squeeze var(--cycle) ease-in-out infinite}.hand-motion{transform-box:view-box;transform-origin:238px 49px;animation:grip var(--cycle) ease-in-out infinite}.bead{transform-box:fill-box;transform-origin:50% 0;animation:bead var(--cycle) ease-in-out infinite}.drop{opacity:0;animation:fall var(--cycle) cubic-bezier(.35,0,.75,.55) infinite}.d2{animation-delay:var(--delay2)}.d3{animation-delay:var(--delay3)}
+@keyframes squeeze{0%,5%,37%,42%,78%,100%{transform:scale(1)}12%,25%,50%,63%{transform:scale(.89,1.045)}}@keyframes grip{0%,5%,37%,42%,78%,100%{transform:translate(0,0) rotate(0) scale(1,1)}12%,25%,50%,63%{transform:translate(-1px,2px) rotate(-1deg) scale(.955,1.015)}}@keyframes bead{0%,5%,37%,42%,78%,100%{transform:scale(.65)}12%,25%,50%,63%{transform:scale(1.15)}}@keyframes fall{0%,11%,37%,49%,75%,100%{opacity:0;transform:translateY(-4px) scale(.55)}14%,52%{opacity:1;transform:translateY(0) scale(.55)}29%,67%{opacity:1;transform:translateY(45px) scale(.85)}33%,71%{opacity:0;transform:translateY(55px) scale(.85)}}@keyframes dot{0%,65%,100%{opacity:.3}30%{opacity:1}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.drop{opacity:0}.drop.d1{opacity:1;transform:translateY(20px) scale(.8)}.dots i{opacity:.65}.pool{transform:scaleY(.65)!important}.ripple{opacity:0!important}}
 @media(max-width:359px){.splash{padding-left:18px;padding-right:18px}h1{font-size:24px}}
 
-.splash{--cycle:2.1s;--delay2:.27s;--delay3:.54s}
-.splash{background:#f6f9fc}.art{height:250px}h1{color:#2c455a}
+.splash{--cycle:3.2s;--delay2:.12s;--delay3:.24s}
+.splash{background:#f6f9fc}.art{height:230px}h1{color:#2c455a}
 
-/* 앱 인트로 창: 창을 꽉 채움 */
+/* 420×420 창 안에서 그림과 글자를 세로 중앙 정렬한다. 그림만 줄어들 수 있다. */
 body{background:#f6f9fc;overflow:hidden}.splash{width:100vw;height:100vh;border:0;border-radius:0;box-shadow:none}
 </style>
 </head>
 <body>
-<!-- 실행 인트로(시안 A · docs/design/intro). 버전은 main.py가 채운다. 앱 준비가 끝나면 닫힌다. -->
+<!-- 인트로 손 다듬기 시안 1. 원본과 같은 420×420 창에서 확인. -->
 <main class="splash" aria-labelledby="app-name" aria-busy="true">
 <svg class="art" viewBox="0 0 300 270" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
-<rect x="39" y="10" width="222" height="242" rx="36" fill="#fff" stroke="#cbdce7" stroke-width="1.5"/><g stroke="#b4d6ed" stroke-width="1.5"><path d="M42 47H258"/><path d="M42 80H258"/><path d="M42 113H258"/><path d="M42 146H258"/><path d="M42 179H258"/><path d="M42 212H258"/></g><path d="M107 82 C96 63 115 48 140 48 C168 50 190 52 217 31 L247 53 L224 109 C213 129 206 149 193 158 L175 120 L117 100Z" fill="#edc19b" stroke="#bd8c69" stroke-width="2.6" stroke-linejoin="round"/><g class="orange"><circle cx="148" cy="135" r="57" fill="#f39b36" stroke="#dc842c" stroke-width="3"/><circle cx="148" cy="135" r="50" fill="#fff6df"/><g fill="#f6a444" stroke="#fff6df" stroke-width="3" stroke-linejoin="round"><path d="M148 135 L192.83 138.92 A45 45 0 0 1 182.47 163.93 Z"/><path d="M148 135 L176.93 169.47 A45 45 0 0 1 151.92 179.83 Z"/><path d="M148 135 L144.08 179.83 A45 45 0 0 1 119.07 169.47 Z"/><path d="M148 135 L113.53 163.93 A45 45 0 0 1 103.17 138.92 Z"/><path d="M148 135 L103.17 131.08 A45 45 0 0 1 113.53 106.07 Z"/><path d="M148 135 L119.07 100.53 A45 45 0 0 1 144.08 90.17 Z"/><path d="M148 135 L151.92 90.17 A45 45 0 0 1 176.93 100.53 Z"/><path d="M148 135 L182.47 106.07 A45 45 0 0 1 192.83 131.08 Z"/></g></g>
-<g fill="#f3cfac" stroke="#bd8c69" stroke-width="2.6" stroke-linejoin="round">
-<path class="finger f1" d="M105 85 C88 72 76 81 79 94 C81 106 100 114 108 105 C113 99 111 91 105 85Z"/>
-<path class="finger f2" d="M98 110 C81 99 70 109 76 122 C80 133 100 137 105 126 C108 120 104 114 98 110Z"/>
-<path class="finger f3" d="M96 136 C80 126 72 136 79 148 C85 158 103 161 107 150 C108 145 102 140 96 136Z"/>
-<path class="finger f4" d="M106 160 C92 152 85 160 93 171 C100 181 115 182 119 173 C120 167 112 163 106 160Z"/>
-<path class="thumb" d="M226 53 C206 60 192 68 177 76 C163 83 150 90 143 100 C136 112 147 122 160 117 L184 105 C195 102 201 110 205 114"/>
+<rect x="39" y="10" width="222" height="242" rx="36" fill="#fff" stroke="#cbdce7" stroke-width="1.5"/><g stroke="#b4d6ed" stroke-width="1.5"><path d="M42 47H258"/><path d="M42 80H258"/><path d="M42 113H258"/><path d="M42 146H258"/><path d="M42 179H258"/><path d="M42 212H258"/></g><!-- 손바닥은 과일 뒤까지 이어진다. 앞·뒤 손은 같은 좌표계와 동작을 공유한다. -->
+<g class="hand-motion" fill="#f3cfac" stroke="#bd8c69" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+<path stroke="none" d="M217 31 C192 51 178 55 147 51 C123 47 106 50 96 61 C84 74 80 94 78 115 C76 139 81 160 96 173 C104 180 114 179 121 171 L175 121 L193 158 C207 146 213 125 224 105 L247 53 C242 43 230 34 217 31Z"/>
+<path fill="none" d="M193 158 C207 146 213 125 224 105 L247 53"/>
+</g>
+<g class="orange"><circle cx="148" cy="135" r="57" fill="#f39b36" stroke="#dc842c" stroke-width="3"/><circle cx="148" cy="135" r="50" fill="#fff6df"/><g fill="#f6a444" stroke="#fff6df" stroke-width="3" stroke-linejoin="round"><path d="M148 135 L192.83 138.92 A45 45 0 0 1 182.47 163.93 Z"/><path d="M148 135 L176.93 169.47 A45 45 0 0 1 151.92 179.83 Z"/><path d="M148 135 L144.08 179.83 A45 45 0 0 1 119.07 169.47 Z"/><path d="M148 135 L113.53 163.93 A45 45 0 0 1 103.17 138.92 Z"/><path d="M148 135 L103.17 131.08 A45 45 0 0 1 113.53 106.07 Z"/><path d="M148 135 L119.07 100.53 A45 45 0 0 1 144.08 90.17 Z"/><path d="M148 135 L151.92 90.17 A45 45 0 0 1 176.93 100.53 Z"/><path d="M148 135 L182.47 106.07 A45 45 0 0 1 192.83 131.08 Z"/></g></g>
+<!-- 손가락 뿌리는 손바닥에 겹치며, 뿌리의 경계선은 그리지 않는다. -->
+<g class="hand-motion" fill="#f3cfac" stroke="#bd8c69" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+<!-- 왼쪽에서 둥글게 감싸는 중지·약지·소지. 채움을 겹쳐 틈을 막는다. -->
+<path class="finger f2" stroke="none" d="M91 98 C80 96 72 104 74 115 C76 126 90 134 101 130 C112 125 108 114 101 108 L98 98Z"/>
+<path fill="none" d="M85 99 C76 100 72 107 75 117 C78 127 91 133 101 130 C110 127 109 117 102 111"/>
+<path class="finger f3" stroke="none" d="M85 125 C75 129 74 139 80 148 C87 158 102 162 108 153 C113 145 103 135 96 132Z"/>
+<path fill="none" d="M81 127 C74 132 77 143 83 150 C90 158 103 161 108 153 C112 147 107 140 102 137"/>
+<path class="finger f4" stroke="none" d="M89 151 C83 160 89 171 99 177 C109 183 119 179 119 171 C119 163 108 157 101 155Z"/>
+<path fill="none" d="M88 153 C84 161 91 172 101 177 C110 182 119 178 119 171 C119 165 112 160 108 158"/>
+<!-- 손등·검지·엄지는 하나의 면. 엄지 끝을 둥글게 닫는다. -->
+<path class="thumb" stroke="none" d="M217 31 C192 51 178 55 147 51 C123 47 106 50 96 61 C88 70 86 79 91 87 C96 98 109 102 116 94 C122 87 117 78 112 74 C123 77 132 76 143 75 C154 74 166 71 177 69 C163 76 149 84 144 94 C138 106 147 115 159 112 C169 110 178 102 188 101 C198 100 202 105 208 109 C223 94 235 76 247 53 C242 43 230 34 217 31Z"/>
+<!-- 드러나는 외곽만 그려 손목과 엄지 뿌리에 내부 경계가 생기지 않게 한다. -->
+<path fill="none" d="M247 53 C242 43 230 34 217 31 C192 51 178 55 147 51 C123 47 106 50 96 61 C88 70 86 79 91 87 C96 98 109 102 116 94 C122 87 117 78 112 74"/>
+<path fill="none" d="M177 69 C163 76 149 84 144 94 C138 106 147 115 159 112 C169 110 178 102 188 101 C198 100 202 105 208 109"/>
+<!-- 짧은 곡선으로 관절을 표시하고 손목에는 사선 이음매를 만들지 않는다. -->
+<path d="M104 76 Q111 81 110 88 M93 113 Q88 117 90 123 M96 139 Q92 143 94 149 M105 163 Q101 168 104 173" fill="none" stroke="#d9a77e" stroke-width="1.8"/>
 </g><path d="M145 192 C139 200 142 207 148 207 C155 207 158 200 150 192Z" class="bead" fill="#edb942" stroke="#d79a32" stroke-width="1.5"/><g transform="translate(148 199)"><g class="drop d1"><path d="M0 0 C-3 6-7 11-7 15 A7 7 0 0 0 7 15 C7 11 3 6 0 0Z" fill="#edb942" stroke="#d69a2e" stroke-width="1.5"/><path d="M-2 9 Q-5 13-4 15" fill="none" stroke="#fff4cf" stroke-width="2.5" stroke-linecap="round"/></g><g class="drop d2"><path d="M0 0 C-3 6-7 11-7 15 A7 7 0 0 0 7 15 C7 11 3 6 0 0Z" fill="#edb942" stroke="#d69a2e" stroke-width="1.5"/><path d="M-2 9 Q-5 13-4 15" fill="none" stroke="#fff4cf" stroke-width="2.5" stroke-linecap="round"/></g><g class="drop d3"><path d="M0 0 C-3 6-7 11-7 15 A7 7 0 0 0 7 15 C7 11 3 6 0 0Z" fill="#edb942" stroke="#d69a2e" stroke-width="1.5"/><path d="M-2 9 Q-5 13-4 15" fill="none" stroke="#fff4cf" stroke-width="2.5" stroke-linecap="round"/></g></g>
 </svg>
 <h1 id="app-name">생기부 착즙기</h1>

@@ -118,7 +118,7 @@ class Api:
         self._window = window
 
     # ---------- 실행 인트로 ----------
-    INTRO_MIN = 2.1  # 짜는 동작 한 번은 보여 준다(너무 빨리 사라져 깜빡이지 않게)
+    INTRO_MIN = 2.6  # 두 번 짜는 동작을 다 보여 준다(너무 빨리 사라져 깜빡이지 않게)
 
     def attach_splash(self, splash, maximize=False):
         """인트로 창을 기억한다. 화면이 끝내 신호를 못 보내도 본 창은 뜨게 20초 뒤 대비책."""

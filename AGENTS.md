@@ -11,3 +11,7 @@
 ## 릴리스 전 확인
 
 - push·태그 전에 `.venv/bin/python scripts/demo_mac.py`로 더미 자료가 든 Mac 창을 띄워 사용자 확인을 받는다. 새 기능을 넣으면 `scripts/demo_mac.py`의 더미 자료에도 그 기능용 자료를 더한다.
+
+## 그림·디자인
+
+- 아이콘·인트로 그림·일러스트·SVG 그림 같은 **그림 작업은 Claude가 직접 그리거나 고치지 않고 무조건 Codex에 맡긴다**(herdr 같은 작업공간의 Codex 창). Claude는 요청서(`docs/design/<주제>/REQUEST.md`)를 쓰고, 결과를 앱에 옮겨 넣고, 화면으로 확인하는 일만 한다.
