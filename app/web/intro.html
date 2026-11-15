@@ -23,31 +23,37 @@ body{background:#f6f9fc;overflow:hidden}.splash{width:100vw;height:100vh;border:
 </style>
 </head>
 <body>
-<!-- 인트로 손 다듬기 시안 1. 원본과 같은 420×420 창에서 확인. -->
+<!-- 인트로 손 다듬기 시안 2. 원본과 같은 420×420 창에서 확인. -->
 <main class="splash" aria-labelledby="app-name" aria-busy="true">
 <svg class="art" viewBox="0 0 300 270" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
-<rect x="39" y="10" width="222" height="242" rx="36" fill="#fff" stroke="#cbdce7" stroke-width="1.5"/><g stroke="#b4d6ed" stroke-width="1.5"><path d="M42 47H258"/><path d="M42 80H258"/><path d="M42 113H258"/><path d="M42 146H258"/><path d="M42 179H258"/><path d="M42 212H258"/></g><!-- 손바닥은 과일 뒤까지 이어진다. 앞·뒤 손은 같은 좌표계와 동작을 공유한다. -->
+<rect x="39" y="10" width="222" height="242" rx="36" fill="#fff" stroke="#cbdce7" stroke-width="1.5"/><g stroke="#b4d6ed" stroke-width="1.5"><path d="M42 47H258"/><path d="M42 80H258"/><path d="M42 113H258"/><path d="M42 146H258"/><path d="M42 179H258"/><path d="M42 212H258"/></g><!-- 손바닥은 위쪽 손등과 과일 오른쪽 뒤에만 둔다. 손가락 사이를 잇던 왼쪽 살색 면은 제거한다. -->
 <g class="hand-motion" fill="#f3cfac" stroke="#bd8c69" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-<path stroke="none" d="M217 31 C192 51 178 55 147 51 C123 47 106 50 96 61 C84 74 80 94 78 115 C76 139 81 160 96 173 C104 180 114 179 121 171 L175 121 L193 158 C207 146 213 125 224 105 L247 53 C242 43 230 34 217 31Z"/>
+<path stroke="none" d="M217 31 C192 51 178 55 147 51 C123 47 106 50 96 61 C88 70 86 79 91 87 C96 98 109 102 116 94 L175 121 L193 158 C207 146 213 125 224 105 L247 53 C242 43 230 34 217 31Z"/>
 <path fill="none" d="M193 158 C207 146 213 125 224 105 L247 53"/>
 </g>
 <g class="orange"><circle cx="148" cy="135" r="57" fill="#f39b36" stroke="#dc842c" stroke-width="3"/><circle cx="148" cy="135" r="50" fill="#fff6df"/><g fill="#f6a444" stroke="#fff6df" stroke-width="3" stroke-linejoin="round"><path d="M148 135 L192.83 138.92 A45 45 0 0 1 182.47 163.93 Z"/><path d="M148 135 L176.93 169.47 A45 45 0 0 1 151.92 179.83 Z"/><path d="M148 135 L144.08 179.83 A45 45 0 0 1 119.07 169.47 Z"/><path d="M148 135 L113.53 163.93 A45 45 0 0 1 103.17 138.92 Z"/><path d="M148 135 L103.17 131.08 A45 45 0 0 1 113.53 106.07 Z"/><path d="M148 135 L119.07 100.53 A45 45 0 0 1 144.08 90.17 Z"/><path d="M148 135 L151.92 90.17 A45 45 0 0 1 176.93 100.53 Z"/><path d="M148 135 L182.47 106.07 A45 45 0 0 1 192.83 131.08 Z"/></g></g>
-<!-- 손가락 뿌리는 손바닥에 겹치며, 뿌리의 경계선은 그리지 않는다. -->
+<!-- 말린 손가락의 연결은 과일 뒤로 숨기고, 보이는 살색 면의 외곽은 모두 닫는다. -->
 <g class="hand-motion" fill="#f3cfac" stroke="#bd8c69" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-<!-- 왼쪽에서 둥글게 감싸는 중지·약지·소지. 채움을 겹쳐 틈을 막는다. -->
-<path class="finger f2" stroke="none" d="M91 98 C80 96 72 104 74 115 C76 126 90 134 101 130 C112 125 108 114 101 108 L98 98Z"/>
-<path fill="none" d="M85 99 C76 100 72 107 75 117 C78 127 91 133 101 130 C110 127 109 117 102 111"/>
-<path class="finger f3" stroke="none" d="M85 125 C75 129 74 139 80 148 C87 158 102 162 108 153 C113 145 103 135 96 132Z"/>
-<path fill="none" d="M81 127 C74 132 77 143 83 150 C90 158 103 161 108 153 C112 147 107 140 102 137"/>
-<path class="finger f4" stroke="none" d="M89 151 C83 160 89 171 99 177 C109 183 119 179 119 171 C119 163 108 157 101 155Z"/>
-<path fill="none" d="M88 153 C84 161 91 172 101 177 C110 182 119 178 119 171 C119 165 112 160 108 158"/>
+<!-- 손가락마다 닫힌 외곽선을 사용한다. 사이의 빈 곳에는 별도의 살색 연결 면을 두지 않는다. -->
+<path class="finger f2" d="M84 100 C75 100 72 108 75 117 C78 127 91 133 101 130 C110 127 109 117 102 111 C95 105 89 100 84 100Z"/>
+<path class="finger f3" d="M81 130 C75 134 78 143 84 150 C91 158 103 160 108 153 C112 147 106 141 100 138 C94 134 87 129 81 130Z"/>
+<path class="finger f4" d="M90 156 C84 162 91 172 101 177 C110 182 119 178 119 171 C119 165 112 160 108 158 C101 155 95 154 90 156Z"/>
 <!-- 손등·검지·엄지는 하나의 면. 엄지 끝을 둥글게 닫는다. -->
 <path class="thumb" stroke="none" d="M217 31 C192 51 178 55 147 51 C123 47 106 50 96 61 C88 70 86 79 91 87 C96 98 109 102 116 94 C122 87 117 78 112 74 C123 77 132 76 143 75 C154 74 166 71 177 69 C163 76 149 84 144 94 C138 106 147 115 159 112 C169 110 178 102 188 101 C198 100 202 105 208 109 C223 94 235 76 247 53 C242 43 230 34 217 31Z"/>
 <!-- 드러나는 외곽만 그려 손목과 엄지 뿌리에 내부 경계가 생기지 않게 한다. -->
 <path fill="none" d="M247 53 C242 43 230 34 217 31 C192 51 178 55 147 51 C123 47 106 50 96 61 C88 70 86 79 91 87 C96 98 109 102 116 94 C122 87 117 78 112 74"/>
 <path fill="none" d="M177 69 C163 76 149 84 144 94 C138 106 147 115 159 112 C169 110 178 102 188 101 C198 100 202 105 208 109"/>
-<!-- 짧은 곡선으로 관절을 표시하고 손목에는 사선 이음매를 만들지 않는다. -->
-<path d="M104 76 Q111 81 110 88 M93 113 Q88 117 90 123 M96 139 Q92 143 94 149 M105 163 Q101 168 104 173" fill="none" stroke="#d9a77e" stroke-width="1.8"/>
+<!-- 엄지 끝의 짧고 둥근 손톱. 엄지와 같은 hand-motion 안에서 함께 움직인다. -->
+<path class="thumb-nail" d="M148 97 C150 92 155 88 160 87 C164 87 167 90 167 94 C166 99 162 103 157 105 C152 107 148 105 147 102 C147 100 147 99 148 97Z" fill="#fff6df" stroke="#d9a77e" stroke-width="1.5"/>
+<!-- 말려 들어간 네 손끝의 손톱은 정면 타원이 아니라 방향에 맞춘 짧은 곡면으로 표현한다. -->
+<g class="finger-nails" fill="#fff6df" stroke="#d9a77e" stroke-width="1.3">
+<path class="index-nail" d="M105 81 C108 79 113 82 115 86 C117 90 114 94 110 94 C106 93 103 89 103 86 C103 84 104 82 105 81Z"/>
+<path class="middle-nail" d="M96 115 C99 113 104 116 105 120 C106 124 102 128 98 127 C95 126 93 122 93 119 C93 117 94 116 96 115Z"/>
+<path class="ring-nail" d="M100 141 C103 140 107 144 107 147 C108 151 104 155 101 154 C98 153 96 150 97 147 C97 145 98 143 100 141Z"/>
+<path class="little-nail" d="M110 163 C114 164 117 168 116 172 C115 175 112 177 109 175 C106 174 104 170 105 167 C106 164 108 163 110 163Z"/>
+</g>
+<!-- 손톱과 겹치던 끝마디 선은 덜고, 접힌 쪽에 짧은 굽힘 선만 남긴다. -->
+<path d="M103 74 Q107 76 109 79 M85 110 Q82 114 84 117 M85 140 Q83 143 85 146 M96 164 Q94 167 97 170" fill="none" stroke="#d9a77e" stroke-width="1.5"/>
 </g><path d="M145 192 C139 200 142 207 148 207 C155 207 158 200 150 192Z" class="bead" fill="#edb942" stroke="#d79a32" stroke-width="1.5"/><g transform="translate(148 199)"><g class="drop d1"><path d="M0 0 C-3 6-7 11-7 15 A7 7 0 0 0 7 15 C7 11 3 6 0 0Z" fill="#edb942" stroke="#d69a2e" stroke-width="1.5"/><path d="M-2 9 Q-5 13-4 15" fill="none" stroke="#fff4cf" stroke-width="2.5" stroke-linecap="round"/></g><g class="drop d2"><path d="M0 0 C-3 6-7 11-7 15 A7 7 0 0 0 7 15 C7 11 3 6 0 0Z" fill="#edb942" stroke="#d69a2e" stroke-width="1.5"/><path d="M-2 9 Q-5 13-4 15" fill="none" stroke="#fff4cf" stroke-width="2.5" stroke-linecap="round"/></g><g class="drop d3"><path d="M0 0 C-3 6-7 11-7 15 A7 7 0 0 0 7 15 C7 11 3 6 0 0Z" fill="#edb942" stroke="#d69a2e" stroke-width="1.5"/><path d="M-2 9 Q-5 13-4 15" fill="none" stroke="#fff4cf" stroke-width="2.5" stroke-linecap="round"/></g></g>
 </svg>
 <h1 id="app-name">생기부 착즙기</h1>
