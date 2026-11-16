@@ -1,0 +1,200 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1000" width="100%" role="img" aria-labelledby="detail-title detail-desc" style="font-family: inherit">
+<title id="detail-title">전체 워크플로우 상세</title>
+<desc id="detail-desc">윗줄 1~3단계, 아랫줄 4~7단계를 각각 왼쪽에서 오른쪽으로 읽습니다. 자료 입력 경로, 학생별 기록과 태그, 태그별 일괄 변환과 개별 변환, 결과 확정, 최종안 분량 조정, 마감 해제, 내보내기를 담았습니다. 기록이 없는 학생은 기준 자료로 생성하여 5단계 최종안 후보로 합류합니다.</desc>
+<style>text{font-family:inherit}path{stroke-linecap:round;stroke-linejoin:round}</style>
+<text x="19" y="25" text-anchor="start" font-size="12" font-weight="400" fill="var(--text-2, #445264)">시작 전 · 명렬·담당 관리에서 반·과목·동아리와 명렬 등록</text>
+<path d="M 340 49 H 362" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 357.61 51.40 L 362.0 49.0 L 357.61 46.60" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<text x="370" y="53" text-anchor="start" font-size="12" font-weight="400" fill="var(--text-2, #445264)">진행</text>
+<path d="M 424 49 H 446" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5" stroke-dasharray="4 4"/>
+<path d="M 441.61 51.40 L 446.0 49.0 L 441.61 46.60" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5"/>
+<text x="454" y="53" text-anchor="start" font-size="12" font-weight="400" fill="var(--text-2, #445264)">반복·되돌리기</text>
+<text x="881" y="53" text-anchor="end" font-size="12" font-weight="600" fill="var(--text-2, #445264)">각 줄은 왼쪽 → 오른쪽</text>
+<rect x="19" y="80" width="266" height="520" rx="10" fill="var(--surface, #f4f7fa)" stroke="var(--border, #c9d3de)"/>
+<circle cx="42" cy="104" r="13" fill="var(--accent, #2563eb)"/>
+<text x="42" y="109" text-anchor="middle" font-size="16" font-weight="750" fill="#fff">1</text>
+<text x="64" y="110" text-anchor="start" font-size="16" font-weight="750" fill="var(--text, #17202b)">자료 넣기</text>
+<rect x="317" y="80" width="266" height="520" rx="10" fill="var(--surface, #f4f7fa)" stroke="var(--border, #c9d3de)"/>
+<circle cx="340" cy="104" r="13" fill="var(--accent, #2563eb)"/>
+<text x="340" y="109" text-anchor="middle" font-size="16" font-weight="750" fill="#fff">2</text>
+<text x="362" y="110" text-anchor="start" font-size="16" font-weight="750" fill="var(--text, #17202b)">학생별 기록이 쌓임</text>
+<rect x="615" y="80" width="266" height="520" rx="10" fill="var(--surface, #f4f7fa)" stroke="var(--border, #c9d3de)"/>
+<circle cx="638" cy="104" r="13" fill="var(--accent, #2563eb)"/>
+<text x="638" y="109" text-anchor="middle" font-size="16" font-weight="750" fill="#fff">3</text>
+<text x="660" y="110" text-anchor="start" font-size="16" font-weight="750" fill="var(--text, #17202b)">AI 변환</text>
+<path d="M 286 104 H 316" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 311.61 106.40 L 316.0 104.0 L 311.61 101.60" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 584 104 H 614" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 609.61 106.40 L 614.0 104.0 L 609.61 101.60" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 152 142.0 L 239.0 171 L 152 200.0 L 65.0 171 L 152 142.0 Z" fill="var(--warn-bg, #fff7d6)" stroke="var(--warn-border, #f0cf5a)"/>
+<text x="152" y="167" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">여러 학생</text>
+<text x="152" y="183" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">자료인가?</text>
+<path d="M 152 200 V 224" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 149.60 219.61 L 152.0 224.0 L 154.40 219.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<text x="171" y="216" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent, #2563eb)">예</text>
+<rect x="48" y="224" width="208" height="50" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="152.0" y="252.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">📥 자료 인박스 · ① 가져오기</text>
+<text x="152" y="293" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">엑셀 붙여넣기 · xlsx · 스캔 PDF</text>
+<path d="M 152 298 V 308" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 149.60 303.61 L 152.0 308.0 L 154.40 303.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<rect x="48" y="308" width="208" height="37" rx="10" fill="var(--input, #ffffff)" stroke="var(--border, #c9d3de)"/>
+<text x="152.0" y="330.34" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">② 학생 매칭 · 확인 / 제외</text>
+<path d="M 152 345 V 362" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 149.60 357.61 L 152.0 362.0 L 154.40 357.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<rect x="48" y="362" width="208" height="37" rx="10" fill="var(--input, #ffffff)" stroke="var(--border, #c9d3de)"/>
+<text x="152.0" y="384.34" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">③ AI 정제 (선택·건너뛰기)</text>
+<path d="M 152 399 V 416" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 149.60 411.61 L 152.0 416.0 L 154.40 411.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<rect x="48" y="416" width="208" height="50" rx="10" fill="var(--input, #ffffff)" stroke="var(--border, #c9d3de)"/>
+<text x="152.0" y="435.84" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">④ 보내기 검토 → 보내기</text>
+<text x="152.0" y="453.84" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">태그 붙여 보내기</text>
+<path d="M 48 442 H 30 V 250 H 47" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5" stroke-dasharray="4 4"/>
+<path d="M 42.61 252.40 L 47.0 250.0 L 42.61 247.60" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5"/>
+<text x="152" y="497" text-anchor="middle" font-size="12" font-weight="600" fill="var(--flow-return-text, #995000)">같은 묶음 · 자료 더 넣기</text>
+<path d="M 152 466 V 480 H 40 V 580 H 152" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 147.61 582.40 L 152.0 580.0 L 147.61 577.60" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 239 171 H 272 V 538 H 257" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 261.39 535.60 L 257.0 538.0 L 261.39 540.40" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<text x="268" y="214" text-anchor="end" font-size="12" font-weight="600" fill="var(--accent, #2563eb)">아니오</text>
+<rect x="48" y="514" width="208" height="48" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="152.0" y="532.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">📝 항목별 기록</text>
+<text x="152.0" y="550.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">＋ 학생관찰기록 · 한 학생 입력</text>
+<path d="M 152 562 V 580" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 149.60 575.61 L 152.0 580.0 L 154.40 575.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 152 580 V 593" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 149.60 588.61 L 152.0 593.0 L 154.40 588.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<rect x="339" y="157" width="222" height="38" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="450.0" y="179.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">📝 항목별 기록</text>
+<path d="M 450 195 V 226" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 447.60 221.61 L 450.0 226.0 L 452.40 221.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<rect x="339" y="226" width="222" height="100" rx="10" fill="var(--input, #ffffff)" stroke="var(--border, #c9d3de)"/>
+<text x="450.0" y="261.84" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">학생별 · 항목별 기록</text>
+<text x="450.0" y="279.84" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">자율 · 진로 · 행특</text>
+<text x="450.0" y="297.84" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">세특 · 동아리</text>
+<path d="M 450 326 V 366" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 447.60 361.61 L 450.0 366.0 L 452.40 361.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<rect x="339" y="366" width="222" height="76" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="450.0" y="398.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">기록 하나 → 태그 하나</text>
+<text x="450.0" y="416.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">태그 = 생기부에 넣을 한 묶음</text>
+<path d="M 748 136.0 L 843.0 171 L 748 206.0 L 653.0 171 L 748 136.0 Z" fill="var(--warn-bg, #fff7d6)" stroke="var(--warn-border, #f0cf5a)"/>
+<text x="748" y="167" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">같은 종류를</text>
+<text x="748" y="183" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">여러 학생 한 번에?</text>
+<path d="M 748 206 V 224" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 745.60 219.61 L 748.0 224.0 L 750.40 219.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<text x="768" y="216" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent, #2563eb)">예</text>
+<rect x="644" y="224" width="208" height="54" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="748.0" y="245.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">🏷 태그별 기록</text>
+<text x="748.0" y="263.84000000000003" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">① 프롬프트 적용 시험 (한 건)</text>
+<path d="M 748 278 V 291" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 745.60 286.61 L 748.0 291.0 L 750.40 286.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 748 291.0 L 823.0 321 L 748 351.0 L 673.0 321 L 748 291.0 Z" fill="var(--warn-bg, #fff7d6)" stroke="var(--warn-border, #f0cf5a)"/>
+<text x="748" y="317" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">결과 마음에</text>
+<text x="748" y="333" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">드나?</text>
+<path d="M 748 351 V 366" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 745.60 361.61 L 748.0 366.0 L 750.40 361.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<text x="775" y="361" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent, #2563eb)">예</text>
+<rect x="644" y="366" width="208" height="30" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="748.0" y="384.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">✔ 설정 확정</text>
+<path d="M 748 396 V 410" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 745.60 405.61 L 748.0 410.0 L 750.40 405.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<rect x="644" y="410" width="208" height="28" rx="10" fill="var(--input, #ffffff)" stroke="var(--border, #c9d3de)"/>
+<text x="748.0" y="427.84" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">② 나머지 변환</text>
+<path d="M 748 438 V 448" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 745.60 443.61 L 748.0 448.0 L 750.40 443.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<rect x="644" y="448" width="208" height="40" rx="10" fill="var(--input, #ffffff)" stroke="var(--border, #c9d3de)"/>
+<text x="748.0" y="462.84" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">③ 검토·반영</text>
+<text x="748.0" y="480.84" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">체크한 것 기록 확정</text>
+<path d="M 673 321 H 628 V 515 H 631 M 641 515 H 860 V 251 H 853" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5" stroke-dasharray="4 4"/>
+<path d="M 857.39 248.60 L 853.0 251.0 L 857.39 253.40" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5"/>
+<text x="748" y="507" text-anchor="middle" font-size="12" font-weight="600" fill="var(--flow-return-text, #995000)">아니오 · 고쳐 다시 시험</text>
+<path d="M 843 171 H 868 V 545 H 853" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 857.39 542.60 L 853.0 545.0 L 857.39 547.40" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<text x="862" y="214" text-anchor="end" font-size="12" font-weight="600" fill="var(--accent, #2563eb)">아니오</text>
+<rect x="644" y="528" width="208" height="34" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="748.0" y="548.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">📝 항목별 기록 · AI 변환</text>
+<path d="M 656 488 H 636 V 570 H 748" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 743.61 572.40 L 748.0 570.0 L 743.61 567.60" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 748 562 V 570" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 745.60 565.61 L 748.0 570.0 L 750.40 565.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 748 570 V 575" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 745.60 570.61 L 748.0 575.0 L 750.40 570.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<rect x="636" y="575" width="224" height="25" rx="10" fill="var(--input, #ffffff)" stroke="var(--border, #c9d3de)"/>
+<text x="748.0" y="591.34" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">결과 묶음 · 기록 아래 / 두 메뉴 공유</text>
+<path d="M 748 601 V 612 Q 748 620 740 620 H 15 Q 7 620 7 628 V 714 H 18" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 13.61 716.40 L 18.0 714.0 L 13.61 711.60" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<text x="410" y="641" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent, #2563eb)">4단계부터 계속 →</text>
+<rect x="19" y="690" width="196" height="260" rx="10" fill="var(--surface, #f4f7fa)" stroke="var(--border, #c9d3de)"/>
+<circle cx="42" cy="714" r="13" fill="var(--accent, #2563eb)"/>
+<text x="42" y="719" text-anchor="middle" font-size="16" font-weight="750" fill="#fff">4</text>
+<text x="64" y="720" text-anchor="start" font-size="16" font-weight="750" fill="var(--text, #17202b)">기록 확정</text>
+<rect x="241" y="690" width="196" height="260" rx="10" fill="var(--surface, #f4f7fa)" stroke="var(--border, #c9d3de)"/>
+<circle cx="264" cy="714" r="13" fill="var(--accent, #2563eb)"/>
+<text x="264" y="719" text-anchor="middle" font-size="16" font-weight="750" fill="#fff">5</text>
+<text x="286" y="720" text-anchor="start" font-size="16" font-weight="750" fill="var(--text, #17202b)">최종안 만들기</text>
+<rect x="463" y="690" width="196" height="260" rx="10" fill="var(--surface, #f4f7fa)" stroke="var(--border, #c9d3de)"/>
+<circle cx="486" cy="714" r="13" fill="var(--accent, #2563eb)"/>
+<text x="486" y="719" text-anchor="middle" font-size="16" font-weight="750" fill="#fff">6</text>
+<text x="508" y="720" text-anchor="start" font-size="16" font-weight="750" fill="var(--text, #17202b)">마감</text>
+<rect x="685" y="690" width="196" height="260" rx="10" fill="var(--surface, #f4f7fa)" stroke="var(--border, #c9d3de)"/>
+<circle cx="708" cy="714" r="13" fill="var(--accent, #2563eb)"/>
+<text x="708" y="719" text-anchor="middle" font-size="16" font-weight="750" fill="#fff">7</text>
+<text x="730" y="720" text-anchor="start" font-size="16" font-weight="750" fill="var(--text, #17202b)">검토·내보내기</text>
+<path d="M 216 714 H 240" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 235.61 716.40 L 240.0 714.0 L 235.61 711.60" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 438 714 H 462" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 457.61 716.40 L 462.0 714.0 L 457.61 711.60" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 660 714 H 684" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 679.61 716.40 L 684.0 714.0 L 679.61 711.60" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 117 765.0 L 197.0 795 L 117 825.0 L 37.0 795 L 117 765.0 Z" fill="var(--warn-bg, #fff7d6)" stroke="var(--warn-border, #f0cf5a)"/>
+<text x="117" y="791" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">결과 마음에</text>
+<text x="117" y="807" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">드나?</text>
+<path d="M 117 825 V 852" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 114.60 847.61 L 117.0 852.0 L 119.40 847.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<text x="139" y="845" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent, #2563eb)">예</text>
+<rect x="31" y="852" width="172" height="54" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="117.0" y="873.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">✔ 이걸로 확정</text>
+<text x="117.0" y="891.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">또는 원문 그대로 확정</text>
+<path d="M 197 795 H 229 V 662 H 893 V 560 H 882" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5" stroke-dasharray="4 4"/>
+<path d="M 886.39 557.60 L 882.0 560.0 L 886.39 562.40" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5"/>
+<text x="548" y="655" text-anchor="middle" font-size="12" font-weight="600" fill="var(--flow-return-text, #995000)">아니오 · 다시 변환 / ✍ 직접 작성 → 3</text>
+<rect x="253" y="754" width="172" height="40" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="339.0" y="768.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">이어 붙이기 → 최종안</text>
+<text x="339.0" y="786.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">학생별 / 전체 학생</text>
+<path d="M 339 794 V 802" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 336.60 797.61 L 339.0 802.0 L 341.40 797.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 339 802.0 L 431.0 829 L 339 856.0 L 247.0 829 L 339 802.0 Z" fill="var(--warn-bg, #fff7d6)" stroke="var(--warn-border, #f0cf5a)"/>
+<text x="339" y="825" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">분량(바이트)</text>
+<text x="339" y="841" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">안에 드나?</text>
+<path d="M 339 856 V 878" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 336.60 873.61 L 339.0 878.0 L 341.40 873.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<text x="365" y="873" text-anchor="middle" font-size="12" font-weight="600" fill="var(--flow-return-text, #995000)">아니오</text>
+<rect x="253" y="878" width="172" height="40" rx="10" fill="var(--input, #ffffff)" stroke="var(--border, #c9d3de)"/>
+<text x="339.0" y="892.84" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">비중으로 분량 맞추기 (AI)</text>
+<text x="339.0" y="910.84" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">다듬기 · 직접 고치기</text>
+<path d="M 253 895 H 246 V 774 H 252" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5" stroke-dasharray="4 4"/>
+<path d="M 247.61 776.40 L 252.0 774.0 L 247.61 771.60" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5"/>
+<path d="M 431 829 H 433 V 925 H 339" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 343.39 922.60 L 339.0 925.0 L 343.39 927.40" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<text x="339" y="943" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent, #2563eb)">예 → 6 마감</text>
+<rect x="475" y="770" width="172" height="52" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="561.0" y="790.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">● 마감</text>
+<text x="561.0" y="808.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">또는 마감 일괄</text>
+<path d="M 561 822 V 843 H 650 V 930 H 438" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5" stroke-dasharray="4 4"/>
+<path d="M 442.39 927.60 L 438.0 930.0 L 442.39 932.40" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5"/>
+<text x="552" y="921" text-anchor="middle" font-size="12" font-weight="600" fill="var(--flow-return-text, #995000)">마감 해제 → 5</text>
+<rect x="697" y="754" width="172" height="40" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="783.0" y="777.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">항목별 최종안 표 확인</text>
+<path d="M 783 794 V 816" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 780.60 811.61 L 783.0 816.0 L 785.40 811.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<rect x="697" y="816" width="172" height="44" rx="10" fill="var(--input, #ffffff)" stroke="var(--border, #c9d3de)"/>
+<text x="783.0" y="832.84" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">xlsx 저장</text>
+<text x="783.0" y="850.84" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">또는 클립보드 복사</text>
+<path d="M 783 860 V 884" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 780.60 879.61 L 783.0 884.0 L 785.40 879.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<rect x="697" y="884" width="172" height="42" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="783.0" y="908.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">NEIS에 붙여넣기 · 끝</text>
+<rect x="241" y="966" width="640" height="29" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="561" y="985" text-anchor="middle" font-size="12" font-weight="600" fill="var(--text, #17202b)">기록 없는 학생 → 기준 자료로 생성 (성취기준·활동 개요) → 최종안 후보</text>
+<path d="M 339 965 V 951" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 341.40 955.39 L 339.0 951.0 L 336.60 955.39" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+</svg>

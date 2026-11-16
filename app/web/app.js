@@ -307,6 +307,7 @@
     $('crumb').textContent = `${ys.year ? ys.year + '학년도 › ' : ''}${PANEL_TITLES[name] || ''}`;
     $('main').scrollTop = 0;
     $('helpBtn').hidden = name === 'guide';
+    if (name === 'guide') putSvg($('guideFlow'), 'guide_flow.svg');
     if (name === 'dashboard') loadDashboard();
     if (name === 'roster') renderRoster();
     if (name === 'settings') renderSettings();
@@ -5280,12 +5281,18 @@
   function renderInboxEmpty() {
     const m = $('ibMain');
     m.innerHTML = '';
-    m.appendChild(ibGuide(false));
-    m.appendChild(el('div', { class: 'empty-state' }, [
-      el('h2', { text: '자료 인박스' }),
-      el('p', { text: '어떤 활동 자료든 여기로 가져와 학생별로 나눈 뒤 항목에 보냅니다.' }),
-      el('p', { class: 'hint', text: '① 가져오기(엑셀 붙여넣기·xlsx·스캔 PDF) → ② 학생 매칭 → ③ AI 정제(선택) → ④ 보내기 검토. 스캔 PDF는 CLOVA OCR로 읽습니다. 한 학생씩 직접 쓰는 기록은 항목별 기록의 [+ 학생관찰기록]을 쓰세요.' }),
-    ]));
+    m.append(el('div', { class: 'ib-home-head' }, [el('h2', { text: '📥 자료 인박스' }),
+      el('p', { text: '어떤 활동 자료든 여기로 가져와 학생별로 나눈 뒤 항목에 보냅니다.' })]),
+      ibGuide(false),
+      el('div', { class: 'ib-flow', id: 'ibFlow' }, [el('h3', { text: '전체 흐름 — 자료 넣기부터 내보내기까지' })]));
+    putSvg($('ibFlow'), 'ib_flow.svg');
+  }
+  // 순서도(Codex 그림)는 글꼴·색 변수를 받도록 SVG를 그대로 붙인다(앱 안 파일이라 믿을 수 있음)
+  const svgCache = {};
+  function putSvg(box, file) {
+    if (!box || box.querySelector('svg')) return;
+    (svgCache[file] ? Promise.resolve(svgCache[file]) : fetch(file).then((r) => (r.ok ? r.text() : '')).catch(() => ''))
+      .then((t) => { svgCache[file] = t; if (t && box.isConnected && !box.querySelector('svg')) box.insertAdjacentHTML('beforeend', t); });
   }
   function slotSelect(current, onlyGroup) {
     const s = el('select', {});

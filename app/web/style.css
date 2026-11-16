@@ -1123,3 +1123,9 @@ label.inline[hidden] { display: none; }
 .ib-guide.folded { padding: 8px 12px; }
 .ib-guide.folded > summary { cursor: pointer; font-weight: 700; font-size: 13.5px; }
 .ib-guide.folded[open] > summary { margin-bottom: 10px; }
+.ib-home-head h2 { margin: 2px 0 4px; font-size: 22px; }
+.ib-home-head p { margin: 0 0 14px; font-size: 15px; color: var(--text); }
+.ib-flow { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 14px 16px; }
+.ib-flow h3 { margin: 0 0 10px; font-size: 17px; }
+.ib-flow svg, .flow-svg svg { display: block; width: 100%; height: auto; }
+.guide-flow { margin: 6px 0 14px; }
