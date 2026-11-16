@@ -2,7 +2,7 @@
 
 v0.17.6부터 프롬프트는 항목에 묶지 않고 '목록'으로 둔다(메뉴 › 프롬프트). 선생님이 만들고 고르며,
 AI 실행 확인 창에서 이번에 쓸 프롬프트를 고른다(작업 종류마다 마지막에 고른 것을 기억).
-- 기본 3개: 기본 프롬프트(종합·생성), 기록 정제(기본), 다듬기(기본). 지울 수 없고 기본값으로 되돌릴 수 있다.
+- 기본 3개: 종합·생성, 기록 정제, 다듬기. 지울 수 없고 기본값으로 되돌릴 수 있다.
 - 예전(v0.17.5까지) 항목×작업별로 고쳐 둔 프롬프트는 처음 열 때 목록에 '(예전 설정)'으로 옮긴다(설정의 원래 값도 그대로 둔다).
 결과 형식·분량·예시·성취기준 규칙은 코드에 고정하고, 지침과 예시만 사용자가 고친다.
 AI에는 학번·이름을 넣지 않는다(부르는 쪽에서 내용만 넘긴다).
@@ -137,9 +137,9 @@ def build_synth_user(parts: list[dict], target_bytes: int) -> str:
 KINDS = ("synth", "refine", "polish")  # 종합·생성 / 기록 정제 / 다듬기
 KIND_NAMES = {"synth": "종합·생성", "refine": "기록 정제", "polish": "다듬기"}
 BUILTIN = {
-    "default": {"name": "기본 프롬프트", "prompt": DEFAULT_TEXT, "example": ""},
-    "refine": {"name": "기록 정제(기본)", "prompt": REFINE_TEXT, "example": ""},
-    "polish": {"name": "다듬기(기본)", "prompt": POLISH_TEXT, "example": ""},
+    "default": {"name": "종합·생성", "prompt": DEFAULT_TEXT, "example": ""},
+    "refine": {"name": "기록 정제", "prompt": REFINE_TEXT, "example": ""},
+    "polish": {"name": "다듬기", "prompt": POLISH_TEXT, "example": ""},
     # v0.17.9: 기록 정제 작업에서 고를 수 있는 특수 정리(스캔 PDF 묶음은 처음 값이 스캔 내용 정리)
     "scan": {"name": "스캔 내용 정리", "prompt": SCAN_TEXT, "example": ""},
     "voice": {"name": "음성 스크립트 정리", "prompt": VOICE_TEXT, "example": ""},

@@ -124,7 +124,7 @@ def test_all():
     assert not api.prompt_delete("default")["ok"]
     ok(api.prompt_save({"id": "default", "name": "바꾼 이름", "prompt": "고친 기본", "example": ""}))
     d0 = [x for x in ok(api.prompt_list())["prompts"] if x["id"] == "default"][0]
-    assert d0["name"] == "기본 프롬프트" and d0["prompt"] == "고친 기본"
+    assert d0["name"] == "종합·생성" and d0["prompt"] == "고친 기본"
     ok(api.prompt_reset("default")); assert [x for x in ok(api.prompt_list())["prompts"] if x["id"] == "default"][0]["prompt"] == DEFAULT_TEXT
     ok(api.prompt_delete(nid)); pl = ok(api.prompt_list())
     assert pl["picks"]["synth"] == "default" and nid not in [x["id"] for x in pl["prompts"]]

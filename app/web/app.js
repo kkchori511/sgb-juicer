@@ -646,7 +646,7 @@
     if (g.pair_id) row.appendChild(el('button', { type: 'button', class: 'link', text: '연결 풀기', onclick: () => save({ pair_id: null }) }));
     const sug = !g.pair_id && g.pair_suggest && firsts.find((x) => x.id === g.pair_suggest);
     if (sug) row.appendChild(el('span', { class: 'pair-suggest' }, [`${sug.label}과 세특 바이트를 합산하나요? `,
-      el('button', { type: 'button', class: 'small primary', text: `${sug.name}와 합산 연결`, onclick: () => save({ pair_id: sug.id, pair_total: tot.value }) })]));
+      el('button', { type: 'button', class: 'small primary wrap-text', text: `${sug.name}와 합산 연결`, onclick: () => save({ pair_id: sug.id, pair_total: tot.value }) })]));
     row.appendChild(el('div', { class: 'hint', style: 'margin:4px 0 0;flex-basis:100%', text: g.pair_id
       ? '이 과목 목표 = 합산 − 1학기 최종안 바이트(학생별). 1학기 최종안이 아직 없으면 합산의 절반을 씁니다. AI 종합도 이 목표에 맞춰 씁니다.'
       : '1학기와 세특 바이트를 함께 쓰는 과목이면 1학기 과목과 합산 바이트를 골라 연결하세요.' }));
@@ -4855,7 +4855,7 @@
     const item = (x) => {
       const uses = usedBy(x.id);
       return el('button', { type: 'button', class: 'pr-item' + (x.id === P.id ? ' active' : ''), onclick: async () => { await flushPending(); P.id = x.id; P.openGroup = !!x.builtin; renderPrompts(); } },
-        [el('b', { text: x.name }), x.builtin ? el('span', { class: 'tag', text: '기본' }) : null, x.made ? el('span', { class: 'tag', text: x.made === '스킬화' ? '🧪 스킬화' : `마법사·${x.made}` }) : null,
+        [x.builtin ? el('span', { class: 'tag', text: '기본' }) : null, el('b', { text: x.name }), x.made ? el('span', { class: 'tag', text: x.made === '스킬화' ? '🧪 스킬화' : `마법사·${x.made}` }) : null,
           x.tags && x.tags.length ? el('div', { class: 'muted small-note', text: `🏷 ${x.tags.join('·')}에서 사용` }) : null,
           uses.length ? el('div', { class: 'muted small-note', text: `지금 선택: ${uses.join(', ')}` }) : null]);
     };

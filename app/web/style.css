@@ -1100,3 +1100,14 @@ label.inline[hidden] { display: none; }
 #tvBulk .opt-menu > summary { color: var(--text, #1e293b); background: #fff; }
 #tvBulk .opt-menu .opt-list { top: auto; bottom: calc(100% + 6px); color: var(--text, #1e293b); }
 #tvBulk .tag-face:not(.tc) { background: #fff; color: var(--text, #1e293b); }
+
+/* 사용자가 쓴 글(이름·제목)이 들어가는 버튼·칩은 칸 안에서 줄바꿈한다. 짧은 고정 글자 버튼은 한 줄 그대로 */
+.pr-item, .gcard, .gtab, .stu, .stu-group-head, .tv-tag, .ib-item, .role-card, .tag-pick, .tagpick button, .tw-applied-list button, button.wrap-text {
+  white-space: normal; overflow-wrap: anywhere; min-width: 0; max-width: 100%;
+}
+/* 프롬프트 목록: 칸 폭에 꽉 차게, 글이 길면 칸 안에서 줄바꿈 */
+.pr-group > .pr-item, .pr-items > .pr-item { display: block; width: 100%; box-sizing: border-box; }
+.pr-group > .pr-item + .pr-item { margin-top: 6px; }
+.pr-group { overflow: hidden; }
+.pr-item b { margin-right: 4px; }
+.pr-item .tag { margin-right: 4px; }

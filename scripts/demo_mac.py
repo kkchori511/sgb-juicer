@@ -130,6 +130,9 @@ def seed():
     # 보낸 묶음도 그대로 남아 [+ 자료 더 넣기]로 이어 보낼 수 있음(1회 보냄 상태)
     ok(api.inbox_stage(sb, "review"), "공동 문서")
     ok(api.inbox_send(sb), "공동 문서")
+    # 프롬프트 목록: 이름이 긴 프롬프트도 칸 안에서 줄바꿈되는지(마법사 태그가 밀려나지 않는지) 확인용
+    ok(api.prompt_save({"name": "2학년 3반 진로활동 세특 — 학생 관심 분야와 탐구 과정 중심으로 길게 정리하는 프롬프트", "prompt": "학생의 관심 분야와 탐구 과정을 중심으로 정리하세요.", "example": "", "made": "대화", "tags": ["탐구", "발표"]}), "프롬프트")
+    ok(api.prompt_save({"name": "동아리 짧게", "prompt": "동아리 활동을 짧게 정리하세요.", "example": "", "made": "양식"}), "프롬프트")
     _demo_xlsx(year, names)
     return year
 

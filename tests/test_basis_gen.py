@@ -137,7 +137,7 @@ def test_rules():
     # v0.17.6 프롬프트 목록: 처음 열 때 기본 3개 + 예전 항목별로 고친 것만 '(예전 설정)'으로 옮김
     lib, changed = prompts.build_library(None, {"career": {"synth": {"prompt": "내 진로 종합", "example": "예"}},
                                                  "club": {"refine": dict(prompts.DEFAULT_PROMPTS["club"]["refine"])}})
-    assert changed and [x["name"] for x in lib] == ["기본 프롬프트", "기록 정제(기본)", "다듬기(기본)", "스캔 내용 정리", "음성 스크립트 정리", "진로활동·종합 (예전 설정)"]
+    assert changed and [x["name"] for x in lib] == ["종합·생성", "기록 정제", "다듬기", "스캔 내용 정리", "음성 스크립트 정리", "진로활동·종합 (예전 설정)"]
     assert lib[5]["prompt"] == "내 진로 종합" and lib[5]["example"] == "예"
     lib2, ch2 = prompts.build_library([x for x in lib if x["id"] != "polish"], {})  # 기본은 늘 다시 채움
     assert ch2 and [x["id"] for x in lib2][:3] == ["default", "refine", "polish"]
