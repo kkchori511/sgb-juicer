@@ -5259,14 +5259,32 @@
     if (!IB.list.length) box.appendChild(el('p', { class: 'hint', text: '묶음이 없습니다. 학습지·엑셀 자료를 [+ 새 자료 묶음]으로 가져오세요.' }));
     IB.list.forEach((b) => box.appendChild(item(b)));
   }
+  // 어디서 하면 좋을까요? — 인박스·항목별 기록·태그별 기록의 역할 안내(메인은 펼침, 묶음 화면은 접힌 한 줄)
+  function ibGuide(folded) {
+    const goRec = () => { if (!R.slot && R.slots.length) R.slot = R.slots[0]; showPanel('records'); };
+    const card = (icon, title, desc, btn) => el('div', { class: 'ib-guide-card' }, [el('div', { class: 'ib-guide-t', text: `${icon} ${title}` }), el('p', { text: desc }), btn]);
+    const cards = el('div', { class: 'ib-guide-cards' }, [
+      card('📥', '여러 학생 자료 나눠 넣기', '지금 이 화면입니다. 여러 학생 자료를 받아 학생별·항목별로 나눠 보냅니다. 한 학생의 한 항목만 넣어도 됩니다.',
+        el('button', { type: 'button', class: 'primary edit-only', text: '+ 새 자료 묶음', onclick: newBatch })),
+      card('📝', '한 학생씩 기록', '한 학생의 기록을 넣고 다듬을 때는 항목별 기록에서 합니다.',
+        el('button', { type: 'button', text: '항목별 기록 ↗', onclick: goRec })),
+      card('🏷', '같은 종류 자료를 한 번에 AI 변환', '여러 학생의 같은 종류 자료에 태그를 달면, 태그별 기록에서 한 번에 AI로 변환합니다.',
+        el('button', { type: 'button', text: '태그별 기록 ↗', onclick: () => showPanel('tagrec') })),
+    ]);
+    if (!folded) return el('div', { class: 'ib-guide' }, [el('h3', { text: '어디서 하면 좋을까요?' }), cards]);
+    const d = el('details', { class: 'ib-guide folded', open: localStorage.getItem('sgb_ib_guide_open') === '1' },
+      [el('summary', { text: '💡 어디서 하면 좋을까요? — 인박스는 여러 학생 자료 나눠 넣기, 한 학생씩은 항목별 기록, 같은 종류 일괄 AI 변환은 태그별 기록' }), cards]);
+    d.addEventListener('toggle', () => { try { localStorage.setItem('sgb_ib_guide_open', d.open ? '1' : '0'); } catch (e) { /* 무시 */ } });
+    return d;
+  }
   function renderInboxEmpty() {
     const m = $('ibMain');
     m.innerHTML = '';
+    m.appendChild(ibGuide(false));
     m.appendChild(el('div', { class: 'empty-state' }, [
       el('h2', { text: '자료 인박스' }),
       el('p', { text: '어떤 활동 자료든 여기로 가져와 학생별로 나눈 뒤 항목에 보냅니다.' }),
       el('p', { class: 'hint', text: '① 가져오기(엑셀 붙여넣기·xlsx·스캔 PDF) → ② 학생 매칭 → ③ AI 정제(선택) → ④ 보내기 검토. 스캔 PDF는 CLOVA OCR로 읽습니다. 한 학생씩 직접 쓰는 기록은 항목별 기록의 [+ 학생관찰기록]을 쓰세요.' }),
-      el('div', { class: 'steps-btns' }, [el('button', { type: 'button', class: 'primary edit-only', text: '+ 새 자료 묶음', onclick: newBatch })]),
     ]));
   }
   function slotSelect(current, onlyGroup) {
@@ -5323,6 +5341,7 @@
   function renderBatch() {
     const m = $('ibMain');
     m.innerHTML = '';
+    m.appendChild(ibGuide(true));
     const b = IB.view.batch;
     const sent = b.stage === 'sent';
     const hasSent = IB.view.sentRows.length > 0;

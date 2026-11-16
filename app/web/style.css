@@ -1111,3 +1111,15 @@ label.inline[hidden] { display: none; }
 .pr-group { overflow: hidden; }
 .pr-item b { margin-right: 4px; }
 .pr-item .tag { margin-right: 4px; }
+
+/* 자료 인박스: 어디서 하면 좋을까요? 안내 */
+.ib-guide { border: 1.5px solid var(--accent); border-radius: var(--radius); background: var(--accent-soft); padding: 14px 16px; margin-bottom: 14px; }
+.ib-guide h3 { margin: 0 0 10px; font-size: 17px; }
+.ib-guide-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.ib-guide-card { display: flex; flex-direction: column; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; }
+.ib-guide-card p { margin: 0; flex: 1; font-size: 13.5px; color: var(--text-2); line-height: 1.55; }
+.ib-guide-card button { align-self: flex-start; }
+.ib-guide-t { font-weight: 800; font-size: 15px; }
+.ib-guide.folded { padding: 8px 12px; }
+.ib-guide.folded > summary { cursor: pointer; font-weight: 700; font-size: 13.5px; }
+.ib-guide.folded[open] > summary { margin-bottom: 10px; }
