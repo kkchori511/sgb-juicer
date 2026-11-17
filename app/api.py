@@ -1180,9 +1180,10 @@ class Api:
         return {"id": self._rec().new_record_from(rid, text)}
 
     @safe
-    def join_confirmed(self, gid, item, sno, ids):
+    def join_confirmed(self, gid, item, sno, ids, append=False):
+        """append: 지금 최종안 뒤에 띄어쓰기 한 칸으로 이어 붙인다(아니면 바꿈)."""
         self._editable()
-        return {"prev": self._rec().join_confirmed(gid, item, sno, ids)}
+        return {"prev": self._rec().join_confirmed(gid, item, sno, ids, bool(append))}
 
     @safe
     def join_bulk_view(self, gid, item):

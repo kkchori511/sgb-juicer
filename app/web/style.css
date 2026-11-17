@@ -1143,3 +1143,5 @@ label.inline[hidden] { display: none; }
 .sk-anal tr.k-제외 .sk-kind { color: #b45309; }
 .join-row.off { opacity: 0.5; background: var(--surface-2); }
 .join-row.off b { text-decoration: line-through; font-weight: 600; }
+.fin-mode-btns { margin: 12px 0 4px; }
+.fin-mode-btns .bytes.over { color: #fecaca; }

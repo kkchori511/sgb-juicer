@@ -818,8 +818,8 @@ class Records:
         """확정본들을 내용 그대로 띄어쓰기 한 칸으로 잇는다(NEIS는 줄바꿈 불가)."""
         return " ".join(" ".join(t.split()) for t in texts if (t or "").strip())
 
-    def join_confirmed(self, gid, item, sno, ids):
-        """확정 기록을 고른 순서대로 이어 최종안으로. 그 순서를 기록 순서에도 저장. 반환: 바꾸기 전 최종안 글."""
+    def join_confirmed(self, gid, item, sno, ids, append=False):
+        """확정 기록을 고른 순서대로 이어 최종안으로(append면 지금 최종안 뒤에 붙임). 그 순서를 기록 순서에도 저장. 반환: 바꾸기 전 최종안 글."""
         self.slot(gid, item)
         ids = [int(x) for x in ids or []]
         if not ids:
@@ -838,7 +838,10 @@ class Records:
             for k, x in enumerate(new):
                 c.execute("UPDATE records SET pos=? WHERE id=?", (k + 1, x["id"]))
             prev = c.execute("SELECT text FROM finals WHERE group_id=? AND item=? AND student_no=?", (int(gid), item, str(sno))).fetchone()
-            self._upsert_final(c, gid, item, sno, self.join_text(by[i]["content"] for i in ids), "join", {"op": "join", "record_ids": ids})
+            text = self.join_text(by[i]["content"] for i in ids)
+            if append and prev and (prev["text"] or "").strip():
+                text = prev["text"].rstrip() + " " + text
+            self._upsert_final(c, gid, item, sno, text, "join", {"op": "join", "record_ids": ids, **({"append": True} if append and prev else {})})
         return prev["text"] if prev else ""
 
     # ---------- 전체 학생 이어 붙이기 ----------

@@ -219,6 +219,23 @@
   }
   const alertBox = (m) => modal(m, false);
   const confirmBox = (m, okText) => modal(m, true, false, okText);
+  // 최종안에 글 넣기: 최종안이 있으면 '뒤에 이어 붙이기 / 지우고 넣기'를 묻는다. → 'append' | 'replace' | null(취소). 비어 있으면 'replace'
+  const appendFinal = (prev, add) => `${String(prev || '').trimEnd()} ${String(add || '').trim()}`.trim();
+  async function askFinalMode(prev, add, target, label) {
+    if (!String(prev || '').trim()) return 'replace';
+    if (String(prev).trim() === String(add || '').trim()) return 'replace';
+    const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const pb = bytesOf(String(prev).trim()), ab = bytesOf(String(add || '').trim()), sum = bytesOf(appendFinal(prev, add));
+    const over = target && sum > target;
+    const html = `<div class="fin-mode"><b>${label ? `${esc(label)}의 ` : ''}지금 최종안이 있습니다(${pb}B).</b> 새 글(${ab}B)을 어떻게 넣을까요?`
+      + `<div class="fin-mode-btns"><button type="button" class="primary" id="finAppend">뒤에 이어 붙이기 → 합계 <span class="${over ? 'bytes over' : ''}">${sum}B${target ? ` / ${target}B` : ''}</span></button></div>`
+      + `<p class="hint">이어 붙이기는 지금 최종안 뒤에 띄어쓰기 한 칸으로 붙입니다(줄바꿈 없음). 어느 쪽이든 넣은 직후 [되돌리기]로 원래 최종안을 돌려놓을 수 있습니다.</p></div>`;
+    let mode = 'replace';
+    const p = modal(html, true, true, '지우고 넣기', '취소');
+    const b = $('finAppend');
+    if (b) b.addEventListener('click', () => { mode = 'append'; $('modalOk').click(); });
+    return (await p) ? mode : null;
+  }
   // 되돌릴 수 없는(치명적인) 작업: 안내를 읽고 '확인했어요'를 직접 쳐야 [확인] 버튼이 눌린다.
   const TYPED_WORD = '확인했어요';
   function typedConfirm(msg, okText) {
@@ -2370,19 +2387,23 @@
   async function putFinalText(rc, text) {
     const v = await rawCall('student_view', rc.gid, rc.item, rc.sno);
     const prev = v && v.ok && v.final ? v.final.text || '' : null;
-    if (prev && prev.trim() && prev.trim() !== text.trim() && !(await confirmBox(`${rc.label}의 지금 최종안을 이 글로 바꿉니다. 바꾼 직후 [되돌리기]로 원래 최종안을 돌려놓을 수 있습니다.`, '바꾸기'))) return;
-    if (!(await mutate('edit_final', rc.gid, rc.item, rc.sno, text, rc.year))) return;
-    actionToast('최종안에 넣었습니다.', '되돌리기', async () => { if (await mutate('edit_final', rc.gid, rc.item, rc.sno, prev || '', rc.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === rc.sno) loadStudent(true); } }, 20000);
+    const mode = await askFinalMode(prev, text, v && v.ok ? v.target : 0, rc.label);
+    if (!mode) return;
+    if (!(await mutate('edit_final', rc.gid, rc.item, rc.sno, mode === 'append' ? appendFinal(prev, text) : text, rc.year))) return;
+    actionToast(mode === 'append' ? '최종안 뒤에 이어 붙였습니다.' : '최종안에 넣었습니다.', '되돌리기', async () => { if (await mutate('edit_final', rc.gid, rc.item, rc.sno, prev || '', rc.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === rc.sno) loadStudent(true); } }, 20000);
     if (R.sno === rc.sno && panel === 'records') loadStudent(true);
   }
   // 기록 그대로 최종안으로(학생관찰기록·기존 완성문): 덮어쓸 때 확인, [되돌리기]
   async function adoptRecordFinal(r) {
     const prev = R.view.final ? R.view.final.text || '' : '';
-    if (prev.trim() && prev.trim() !== (recText(r) || '').trim() && !(await confirmBox('지금 최종안을 이 기록 내용으로 바꿉니다. 바꾼 직후 [되돌리기]로 원래 최종안을 돌려놓을 수 있습니다.', '바꾸기'))) return;
+    const add = r.confirmed || r.content === r.orig ? r.content : r.orig;
+    const mode = await askFinalMode(prev, add, R.target);
+    if (!mode) return;
     const ctx = { gid: R.slot.group_id, item: R.slot.item, sno: R.sno, year: ys.year };
-    if (!(await afterFinalSaved(() => (r.confirmed || r.content === r.orig ? mutate('adopt_record', r.id) : mutate('edit_final', ctx.gid, ctx.item, ctx.sno, r.orig, ctx.year))))) return;
+    if (!(await afterFinalSaved(() => (mode === 'append' ? mutate('edit_final', ctx.gid, ctx.item, ctx.sno, appendFinal(prev, add), ctx.year)
+      : r.confirmed || r.content === r.orig ? mutate('adopt_record', r.id) : mutate('edit_final', ctx.gid, ctx.item, ctx.sno, r.orig, ctx.year))))) return;
     loadStudent(true);
-    actionToast('최종안으로 채택했습니다.', '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, prev, ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
+    actionToast(mode === 'append' ? '최종안 뒤에 이어 붙였습니다.' : '최종안으로 채택했습니다.', '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, prev, ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
   }
   // ---------- 후보 문장을 최종안에 넣기 ----------
   // 최종안의 커서 자리(없으면 맨 끝)에 넣는다. 브라우저 되돌리기(Ctrl+Z)가 되도록 insertText를 쓴다.
@@ -2717,10 +2738,11 @@
       el('button', { type: 'button', class: 'small primary', disabled: ro, text: '✔ 최종안으로', onclick: async () => {
         if (!(await flushFinal())) return;
         const prev = ta.value;
-        if (prev.trim() && prev.trim() !== cd.text.trim() && !(await confirmBox('지금 최종안을 이 후보로 바꿉니다. 바꾼 직후 [되돌리기]로 원래 최종안을 돌려놓을 수 있습니다.', '바꾸기'))) return;
-        if (await afterFinalSaved(() => mutate('adopt_result', cd.id))) {
+        const mode = await askFinalMode(prev, cd.text, R.target);
+        if (!mode) return;
+        if (await afterFinalSaved(() => (mode === 'append' ? mutate('edit_final', ctx.gid, ctx.item, ctx.sno, appendFinal(prev, cd.text), ctx.year) : mutate('adopt_result', cd.id)))) {
           loadStudent(true);
-          actionToast('최종안으로 넣었습니다.', '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, prev, ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
+          actionToast(mode === 'append' ? '최종안 뒤에 이어 붙였습니다.' : '최종안으로 넣었습니다.', '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, prev, ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
         }
       } }),
       el('button', { type: 'button', class: 'small', text: '정보', onclick: () => candInfo(cd) }),
@@ -2784,15 +2806,16 @@
       go.disabled = true;
       go.addEventListener('click', async () => {
         const prev = v.final ? v.final.text || '' : '';
-        if (prev.trim() && !(await confirmBox('지금 최종안을 이어 붙인 글로 바꿉니다. 넣은 직후 [되돌리기]로 원래 최종안을 돌려놓을 수 있습니다.', '바꾸기'))) return;
         const pick = use();
         if (!pick.length) return;
+        const mode = await askFinalMode(prev, joinText(pick.map((r) => r.content)), R.target);
+        if (!mode) return;
         // 서버는 넣을 기록만 받아, 그 기록들이 있던 자리 안에서 이 순서로 저장한다(뺀 기록 자리는 그대로)
-        const res = await afterFinalSaved(() => mutate('join_confirmed', ctx.gid, ctx.item, ctx.sno, pick.map((r) => r.id)));
+        const res = await afterFinalSaved(() => mutate('join_confirmed', ctx.gid, ctx.item, ctx.sno, pick.map((r) => r.id), mode === 'append'));
         if (!res) return;
         closeSheet();
         loadStudent(true);
-        actionToast(pick.length < order.length ? `확정 기록 ${order.length}건 중 ${pick.length}건을 이어 최종안에 넣었습니다.` : `확정 기록 ${order.length}건을 이어 최종안에 넣었습니다.`, '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, res.prev || '', ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
+        actionToast(`${pick.length < order.length ? `확정 기록 ${order.length}건 중 ${pick.length}건을` : `확정 기록 ${order.length}건을`} 이어 최종안${mode === 'append' ? ' 뒤에 붙였습니다' : '에 넣었습니다'}.`, '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, res.prev || '', ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
       });
       addTo(box,
         el('div', { class: 'sheet-head' }, [el('h2', { text: `확정 기록 이어 붙이기 · ${v.student.name}` }), el('span', { class: 'muted', text: `${R.slot.label} · 목표 ${R.target}B` })]),

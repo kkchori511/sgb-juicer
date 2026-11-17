@@ -79,6 +79,13 @@ def test_all():
     ok(api.update_record(a, {"content": "봉사 고친 확정본"}))
     assert ok(api.student_view(hr, "autonomy", "20301"))["final"]["stale"]
     assert not api.join_confirmed(hr, "autonomy", "20301", [nid, a, 999])["ok"]
+    # 일부만(뺀 기록 제외) + 뒤에 이어 붙이기
+    before = ok(api.student_view(hr, "autonomy", "20301"))["final"]["text"]
+    assert ok(api.join_confirmed(hr, "autonomy", "20301", [b], True))["prev"] == before
+    assert ok(api.student_view(hr, "autonomy", "20301"))["final"]["text"] == before + " 독서 원문"
+    ok(api.join_confirmed(hr, "autonomy", "20301", [b, a]))  # 지우고 넣기(기본)
+    assert ok(api.student_view(hr, "autonomy", "20301"))["final"]["text"] == "독서 원문 봉사 고친 확정본"
+    ok(api.edit_final(hr, "autonomy", "20301", before))  # 아래 시험이 기대하는 최종안으로 되돌림
     # 전체 학생: 20302는 독서만, 20303은 확정 없음
     c2 = ok(api.add_record(hr, "autonomy", "20302", {"content": "둘 독서", "tag_ids": [tags["독서"]]}))["id"]
     ok(api.confirm_record(c2, "둘 독서 확정"))
