@@ -105,6 +105,69 @@ def test_all():
     assert not r["ok"] and "맞지 않습니다" in r["error"], r
     assert dump(2026) == after
 
+    # ---- Codex 검토(X1~X6) ----
+    def bad_copy(name, edit):
+        wb = load_workbook(full)
+        edit(wb)
+        out = os.path.join(DATA, name)
+        wb.save(out)
+        api._xlsx_restore = out
+        r = api.xlsx_restore_run("확인했어요")
+        assert not r["ok"] and "복구를 멈췄습니다" in r["error"], (name, r)
+        assert dump(2026) == after, name
+    # X2: 열 이름 바꿈 / X4: 값 깨짐 / X3: 긴 글 조각 빠짐 / 복구 정보에서 표 빠짐
+    bad_copy("x2.xlsx", lambda wb: setattr(wb["_복구_records"].cell(row=1, column=9), "value", "content_typo"))
+    bad_copy("x4.xlsx", lambda wb: setattr(wb["_복구_records"].cell(row=2, column=10), "value", "BROKEN JSON"))
+    bad_copy("x3.xlsx", lambda wb: wb["_복구_긴글"].delete_rows(2))
+    def drop_table(wb):
+        ws = wb["_복구정보"]
+        info = json.loads("".join(str(r[0].value or "") for r in ws.iter_rows()))
+        del info["tables"]["records"]
+        for row in ws.iter_rows():
+            row[0].value = None
+        ws.cell(row=1, column=1, value=json.dumps(info, ensure_ascii=False))
+    bad_copy("x2b.xlsx", drop_table)
+
+    # X1: 가장 큰 번호의 기록을 지운 뒤 저장·복구해도, 새 기록이 그 번호를 다시 쓰지 않음
+    gone = ok(api.add_record(hr, "career", "20302", {"content": "곧 지울 기록"}))["id"]
+    ok(api.delete_record(gone))
+    seqfile = os.path.join(DATA, "seq.xlsx")
+    xlsx_backup.save(2026, seqfile)
+    api._xlsx_restore = seqfile
+    ok(api.xlsx_restore_run("확인했어요"))
+    new = ok(api.add_record(hr, "career", "20302", {"content": "복구 뒤 새 기록"}))["id"]
+    assert new > gone, (new, gone)
+
+    # X5: 같은 이름으로 다시 저장하다 실패해도 원래 파일은 그대로
+    import hashlib
+    from openpyxl import Workbook
+    h0 = hashlib.sha256(open(seqfile, "rb").read()).hexdigest()
+    real = Workbook.save
+    Workbook.save = lambda self, fn: (_ for _ in ()).throw(OSError("가짜 쓰기 실패"))
+    try:
+        try:
+            xlsx_backup.save(2026, seqfile)
+            raise AssertionError("실패해야 함")
+        except OSError:
+            pass
+    finally:
+        Workbook.save = real
+    assert hashlib.sha256(open(seqfile, "rb").read()).hexdigest() == h0
+    assert not [f for f in os.listdir(DATA) if "작성중" in f]
+
+    # X6: 최종안만 — 칸 한도를 넘는 최종안은 자르지 않고 다음 줄에 이어서
+    big = "나" * 70000
+    ok(api.set_closed(hr, "career", "20301", False))
+    ok(api.edit_final(hr, "career", "20301", big))
+    only2 = os.path.join(DATA, "최종안2.xlsx")
+    xlsx_backup.save(2026, only2, only_final=True)
+    wb = load_workbook(only2)
+    ws = wb["진로활동"]
+    got = "".join(r[2].value or "" for r in ws.iter_rows(min_row=2) if r[0].value == "20301")
+    assert got == big and ws.freeze_panes == "C2"
+    assert "잘림" not in got
+    wb.close()
+
 
 if __name__ == "__main__":
     test_all()

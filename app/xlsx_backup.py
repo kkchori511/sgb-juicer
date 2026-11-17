@@ -8,7 +8,9 @@
   실제 바꾸기는 api가 backup.restore로 한다(복원 전 자동 백업·실패 시 되돌리기 그대로).
 """
 import datetime as dt
+import hashlib
 import json
+import os
 import re
 import sqlite3
 import tempfile
@@ -39,7 +41,7 @@ def _put(ws, row, col, value):
     if isinstance(value, str):
         v = ILLEGAL.sub("", value)
         if len(v) > CELL_MAX:
-            v = v[:CELL_MAX] + " …(잘림 — 전체는 숨김 복구용 시트에 있음)"
+            v = v[:CELL_MAX] + " …(잘림 — 전체는 숨김 복구용 시트에 있음)"  # 전체 저장의 보는 시트에만 씀(최종안만은 줄을 나눠 자르지 않음)
         c.value = v
         c.data_type = "s"
     else:
@@ -47,7 +49,7 @@ def _put(ws, row, col, value):
     return c
 
 
-def _table(ws, head, rows, widths=None, wrap=()):
+def _table(ws, head, rows, widths=None, wrap=(), freeze="A2"):
     for j, h in enumerate(head, 1):
         c = _put(ws, 1, j, h)
         c.font = Font(bold=True)
@@ -57,7 +59,7 @@ def _table(ws, head, rows, widths=None, wrap=()):
             c = _put(ws, i, j, v)
             if j in wrap:
                 c.alignment = Alignment(wrap_text=True, vertical="top")
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = freeze  # 항목 시트는 C2(학번·이름 열과 첫 줄 고정)
     for j, w in enumerate(widths or [], 1):
         ws.column_dimensions[get_column_letter(j)].width = w
 
@@ -124,8 +126,10 @@ def save(year, path, only_final=False):
         if only_final:
             lines += [("복구", "이 파일은 최종안·마감 결과만 담아 엑셀로 복구할 수 없습니다. 복구하려면 '전체'로 저장하세요.")]
         else:
-            lines += [("복구", "설정 › 백업 › [📗 엑셀 파일로 복구]에서 이 파일로 이 학년도 자료를 되살릴 수 있습니다."),
-                      ("주의", "복구는 숨김 시트(_복구_…)만 읽습니다. 보이는 시트를 엑셀에서 고쳐도 복구에는 반영되지 않습니다. 숨김 시트는 고치거나 지우지 마세요.")]
+            lines += [("복구", "설정 › 백업 › [엑셀 파일로 복구]에서 이 파일로 이 학년도 자료를 되살릴 수 있습니다."),
+                      ("주의", "복구는 숨김 시트(_복구_…)만 읽습니다. 보이는 시트를 엑셀에서 고쳐도 복구에는 반영되지 않습니다. 숨김 시트가 조금이라도 바뀌면(지문 확인) 복구를 멈춥니다."),
+                      ("보기 시트 밖", "태그 AI 변환 작업·시험 후보·반영 이력, 인박스 정제 후보, 기록 순서·내부 번호 등은 보이는 시트에는 없고 숨김 시트에만 있습니다(복구하면 모두 돌아옴)."),
+                      ("들어 있지 않은 것", "스캔 PDF 원본과 설정(API 키·모델·프롬프트 목록 저장본)은 들어 있지 않습니다. 프롬프트 시트는 보기용입니다.")]
         lines += [("", ""), ("시트", "내용")]
         info_row = len(lines) + 1
         for i, (a, b) in enumerate(lines, 1):
@@ -154,8 +158,10 @@ def save(year, path, only_final=False):
                     for m in members:
                         f = finals.get((g["id"], item, m["student_no"]))
                         txt = f["text"] if f else ""
-                        rows.append([m["student_no"], m["name"], txt, _bytes(txt), _status(f), (f or {}).get("closed_at") or "", "" if m["active"] else "비활성"])
-                    _table(ws, ["학번", "이름", "최종안", "바이트", "상태", "마감 일시", "비고"], rows, [10, 10, 90, 8, 12, 18, 8], wrap=(3,))
+                        parts = [txt[k:k + CELL_MAX] for k in range(0, len(txt), CELL_MAX)] or [""]  # 칸 한도를 넘으면 다음 줄에 이어서(자르지 않음)
+                        rows.append([m["student_no"], m["name"], parts[0], _bytes(txt), _status(f), (f or {}).get("closed_at") or "", "" if m["active"] else "비활성"])
+                        rows += [[m["student_no"], m["name"], p, "", f"(앞 줄에 이어서 {k + 2})", "", ""] for k, p in enumerate(parts[1:])]
+                    _table(ws, ["학번", "이름", "최종안", "바이트", "상태", "마감 일시", "비고"], rows, [10, 10, 90, 8, 12, 18, 8], wrap=(3,), freeze="C2")
                     continue
                 recs = q("SELECT * FROM records WHERE group_id=? AND item=? ORDER BY student_no, pos IS NULL, pos, kind='record', COALESCE(seq,0), id", (g["id"], item))
                 by = {}
@@ -171,7 +177,7 @@ def save(year, path, only_final=False):
                                      r["title"] or "", "·".join(rtag.get(r["id"], [])), "확정" if r["confirmed"] else "미확정",
                                      orig, r["content"] if r["confirmed"] else "", _bytes(r["content"])])
                 _table(ws, ["학번", "이름", "구분", "회차", "날짜", "활동명", "태그", "상태", "원문", "확정본·최종안", "바이트"], rows,
-                       [10, 10, 10, 6, 11, 18, 12, 12, 60, 60, 8], wrap=(9, 10))
+                       [10, 10, 10, 6, 11, 18, 12, 12, 60, 60, 8], wrap=(9, 10), freeze="C2")
 
         if not only_final:
             # 명렬
@@ -229,7 +235,20 @@ def save(year, path, only_final=False):
         for i, (a, b) in enumerate(listing, info_row):
             _put(ws_info(wb), i, 1, a)
             _put(ws_info(wb), i, 2, b)
-        wb.save(path)
+        # 같은 폴더의 임시 파일에 다 쓴 뒤 바꿔 넣는다(실패해도 원래 있던 파일은 그대로)
+        dest = Path(path)
+        part = dest.with_name(f".{dest.stem}.작성중{os.getpid()}.xlsx")
+        try:
+            wb.save(part)
+            wb.close()
+            load_workbook(part, read_only=True).close()  # 다 쓴 파일이 열리는지 확인
+            os.replace(part, dest)
+        except BaseException:
+            try:
+                part.unlink()
+            except OSError:
+                pass
+            raise
     finally:
         con.close()
         try:
@@ -249,29 +268,33 @@ def _bytes(t):
 
 
 def _write_hidden(wb, con, year, made):
-    """복구용: 자료 표를 그대로(열 이름 + 값 JSON). 너무 긴 값은 '_복구_긴글'에 조각으로."""
+    """복구용: 자료 표를 그대로(열 이름 + 값 JSON). 너무 긴 값은 '_복구_긴글'에 조각으로.
+    표마다 행 수·지문(SHA-256), 긴 글마다 조각 수·길이·지문, 번호 자동 표의 '지금까지 쓴 가장 큰 번호'(sqlite_sequence)를 함께 남긴다."""
     tables = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
-    longs = []
-    counts = {}
+    longs, long_info = [], {}
+    tinfo = {}
     for t in tables:
         cols = [r[1] for r in con.execute(f"PRAGMA table_info({t})")]
         ws = wb.create_sheet((PREFIX + t)[:31])
         ws.sheet_state = "hidden"
         for j, c in enumerate(cols, 1):
             ws.cell(row=1, column=j, value=c).data_type = "s"
+        h = hashlib.sha256("\x1f".join(cols).encode())
         n = 0
         for i, row in enumerate(con.execute(f"SELECT * FROM {t}"), 2):
             n += 1
             for j, v in enumerate(row, 1):
                 s = json.dumps(v, ensure_ascii=False)  # 제어 문자는 \\uXXXX로, 문자열은 따옴표로 시작(수식 안 됨)
                 if len(s) > CELL_MAX:
-                    key = len(longs)
-                    for k in range(0, len(s), CELL_MAX):
-                        longs.append((key, k // CELL_MAX, s[k:k + CELL_MAX]))
+                    key = len(long_info)
+                    parts = [s[k:k + CELL_MAX] for k in range(0, len(s), CELL_MAX)]
+                    longs += [(key, k, p) for k, p in enumerate(parts)]
+                    long_info[str(key)] = {"parts": len(parts), "len": len(s), "sha": hashlib.sha256(s.encode()).hexdigest()}
                     s = json.dumps({"$long": key})
+                h.update(b"\x1e" + s.encode())  # 칸에 실제로 쓴 글로 지문(긴 글은 조각 지문을 따로)
                 cell = ws.cell(row=i, column=j, value=s)
                 cell.data_type = "s"
-        counts[t] = n
+        tinfo[t] = {"sheet": (PREFIX + t)[:31], "rows": n, "cols": cols, "sha": h.hexdigest()}
     if longs:
         ws = wb.create_sheet(LONG)
         ws.sheet_state = "hidden"
@@ -279,16 +302,37 @@ def _write_hidden(wb, con, year, made):
             ws.cell(row=i, column=1, value=key)
             ws.cell(row=i, column=2, value=part)
             ws.cell(row=i, column=3, value=chunk).data_type = "s"
+    seqs = {r[0]: r[1] for r in con.execute("SELECT name, seq FROM sqlite_sequence")} if con.execute(
+        "SELECT 1 FROM sqlite_master WHERE name='sqlite_sequence'").fetchone() else {}
     ws = wb.create_sheet(INFO)
     ws.sheet_state = "hidden"
     meta = {"format": FORMAT, "app_version": VERSION, "schema_version": db.SCHEMA_VERSION, "year": year, "created_at": made,
-            "tables": {t: {"sheet": (PREFIX + t)[:31], "rows": n} for t, n in counts.items()}}
-    ws.cell(row=1, column=1, value=json.dumps(meta, ensure_ascii=False)).data_type = "s"
+            "tables": tinfo, "longs": long_info, "sequences": seqs}
+    text = json.dumps(meta, ensure_ascii=False)
+    for k in range(0, len(text), CELL_MAX):  # 정보가 길면 여러 줄에
+        ws.cell(row=k // CELL_MAX + 1, column=1, value=text[k:k + CELL_MAX]).data_type = "s"
 
 
 # ---------- 복구 ----------
+class _Bad(DbError):
+    pass
+
+
+def _fresh_schema():
+    """지금 앱의 표·열(복구할 때 모르는 표·열이 있으면 멈추고, 빠진 필수 표·열도 멈춘다)."""
+    con = sqlite3.connect(":memory:")
+    try:
+        con.executescript(db.SCHEMA)
+        tables = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+        cols = {t: [r[1] for r in con.execute(f"PRAGMA table_info({t})")] for t in tables}
+        auto = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table' AND sql LIKE '%AUTOINCREMENT%'")}
+        return cols, auto
+    finally:
+        con.close()
+
+
 def read_info(path):
-    """복구용 파일인지 확인하고 정보(학년도·버전·표별 행 수)를 돌려준다."""
+    """복구용 파일인지 확인하고 정보(학년도·버전·표별 행 수·지문)를 돌려준다."""
     try:
         wb = load_workbook(path, read_only=True, data_only=True)
     except Exception as e:
@@ -296,64 +340,121 @@ def read_info(path):
     try:
         if INFO not in wb.sheetnames:
             raise DbError("착즙기가 만든 '전체' 엑셀 백업이 아닙니다(복구 정보가 없음). '최종안·마감 결과만' 파일로는 복구할 수 없습니다.")
-        v = next(wb[INFO].iter_rows(min_row=1, max_row=1, values_only=True))[0]
-        info = _j(v, None)
-        if not isinstance(info, dict) or info.get("format") != FORMAT:
+        text = "".join(str(r[0] or "") for r in wb[INFO].iter_rows(values_only=True))
+        try:
+            info = json.loads(text)
+        except ValueError:
+            info = None
+        if not isinstance(info, dict) or info.get("format") != FORMAT or not isinstance(info.get("tables"), dict):
             raise DbError("복구 정보를 읽지 못했습니다. 파일이 바뀌었을 수 있습니다.")
-        if int(info.get("schema_version") or 0) > db.SCHEMA_VERSION:
+        ver = int(info.get("schema_version") or 0)
+        if ver > db.SCHEMA_VERSION:
             raise DbError(f"더 새 버전(v{info.get('app_version')})에서 만든 파일입니다. 앱을 업데이트한 뒤 복구하세요.")
+        if ver < 14:
+            raise DbError("이 앱이 만든 엑셀 백업 형식이 아닙니다(자료 형식 번호가 맞지 않음).")
         return info
     finally:
         wb.close()
 
 
+def _decode(raw, where):
+    """복구용 칸 값: 반드시 JSON 글이어야 한다(빈 칸·깨진 값은 거절 — 조용히 빈 값으로 바꾸지 않음)."""
+    if not isinstance(raw, str):
+        raise _Bad(f"{where}: 값이 비었거나 형식이 다릅니다.")
+    try:
+        return json.loads(raw)
+    except ValueError:
+        raise _Bad(f"{where}: 값을 읽지 못했습니다.")
+
+
 def build_db(path, dest):
-    """엑셀의 숨김 복구용 시트로 새 자료 파일을 만든다. 표별 행 수가 맞지 않으면 멈춘다."""
+    """엑셀의 숨김 복구용 시트로 새 자료 파일을 만든다. 표·열·행 수·지문·긴 글 조각·참조를 모두 확인하고, 하나라도 다르면 멈춘다."""
     info = read_info(path)
+    known, auto = _fresh_schema()
+    tables = info["tables"]
     wb = load_workbook(path, read_only=True, data_only=True)
     try:
+        unknown = [t for t in tables if t not in known]
+        if unknown:
+            raise _Bad(f"이 앱이 모르는 자료 표가 있습니다: {', '.join(unknown[:3])}")
+        missing = [t for t in known if t not in tables]
+        if missing:  # 엑셀 백업은 v14부터 있어 그때의 표는 모두 있어야 한다(뒤 버전에서 새로 생긴 표만 없을 수 있음)
+            raise _Bad(f"복구용 자료 표가 빠졌습니다: {', '.join(missing[:3])}")
         longs = {}
         if LONG in wb.sheetnames:
             for key, part, chunk in wb[LONG].iter_rows(values_only=True):
-                longs.setdefault(int(key), {})[int(part)] = chunk or ""
+                if key is None:
+                    continue
+                d = longs.setdefault(int(key), {})
+                if int(part) in d:
+                    raise _Bad("긴 글 조각이 겹칩니다.")
+                d[int(part)] = chunk if isinstance(chunk, str) else ""
+        linfo = info.get("longs") or {}
+        if set(map(int, linfo)) != set(longs):
+            raise _Bad("긴 글 조각 목록이 맞지 않습니다.")
+        joined = {}
+        for k, li in linfo.items():
+            parts = longs[int(k)]
+            if sorted(parts) != list(range(int(li["parts"]))):
+                raise _Bad("긴 글 조각이 빠졌거나 순서가 맞지 않습니다.")
+            s = "".join(parts[p] for p in range(int(li["parts"])))
+            if len(s) != int(li["len"]) or hashlib.sha256(s.encode()).hexdigest() != li["sha"]:
+                raise _Bad("긴 글 조각 내용이 바뀌었습니다.")
+            joined[int(k)] = s
         con = sqlite3.connect(dest)
         try:
             con.executescript(db.SCHEMA)
             con.execute("PRAGMA foreign_keys = OFF")
             con.execute("BEGIN")
-            for t, ti in info["tables"].items():
-                if not re.fullmatch(r"[a-z_]+", t):
-                    raise DbError("복구 정보가 이상합니다(표 이름).")
-                have = {r[1] for r in con.execute(f"PRAGMA table_info({t})")}
-                if not have:
-                    continue  # 앱이 모르는 표(있을 수 없지만): 건너뜀
-                if ti["sheet"] not in wb.sheetnames:
-                    raise DbError(f"복구용 시트가 없습니다: {ti['sheet']}")
+            for t, ti in tables.items():
+                if ti.get("sheet") not in wb.sheetnames:
+                    raise _Bad(f"복구용 시트가 없습니다: {ti.get('sheet')}")
                 it = wb[ti["sheet"]].iter_rows(values_only=True)
-                head = [h for h in next(it, ()) if h is not None]
-                keep = [k for k, h in enumerate(head) if h in have]
-                cols = [head[k] for k in keep]
-                con.execute(f"DELETE FROM {t}")
+                head = list(next(it, ()))
+                while head and head[-1] is None:
+                    head.pop()
+                if head != ti.get("cols") or len(set(head)) != len(head) or any(not isinstance(h, str) or not h for h in head):
+                    raise _Bad(f"'{t}' 열 이름이 저장 때와 다릅니다.")
+                bad = [h for h in head if h not in known[t]]
+                if bad:
+                    raise _Bad(f"'{t}'에 이 앱이 모르는 열이 있습니다: {bad[0]}")
+                h = hashlib.sha256("\x1f".join(head).encode())
                 n = 0
-                for row in it:
+                sql = f"INSERT INTO {t}({','.join(head)}) VALUES({','.join('?' * len(head))})"
+                for ri, row in enumerate(it, 2):
                     if row is None or all(v is None for v in row):
                         continue
                     vals = []
-                    for k in keep:
+                    for k in range(len(head)):
                         raw = row[k] if k < len(row) else None
-                        v = _j(raw, None) if isinstance(raw, str) else raw
-                        if isinstance(v, dict) and "$long" in v:
-                            parts = longs.get(int(v["$long"]), {})
-                            v = json.loads("".join(parts[p] for p in sorted(parts)))
+                        h.update(b"\x1e" + (raw.encode() if isinstance(raw, str) else b"\x00"))
+                        v = _decode(raw, f"'{t}' {ri}행 {head[k]}")
+                        if isinstance(v, dict):
+                            if set(v) != {"$long"} or int(v["$long"]) not in joined:
+                                raise _Bad(f"'{t}' {ri}행 {head[k]}: 긴 글 참조가 이상합니다.")
+                            v = _decode(joined[int(v["$long"])], f"'{t}' {ri}행 {head[k]}")
                         vals.append(v)
-                    con.execute(f"INSERT INTO {t}({','.join(cols)}) VALUES({','.join('?' * len(cols))})", vals)
+                    con.execute(sql, vals)
                     n += 1
                 if n != int(ti["rows"]):
-                    raise DbError(f"'{t}' 자료 수가 맞지 않습니다(파일 {ti['rows']}건, 읽은 것 {n}건). 숨김 시트가 바뀌었을 수 있습니다.")
+                    raise _Bad(f"'{t}' 자료 수가 맞지 않습니다(파일 {ti['rows']}건, 읽은 것 {n}건).")
+                if h.hexdigest() != ti.get("sha"):
+                    raise _Bad(f"'{t}' 자료 내용이 저장 때와 다릅니다.")
+            # 번호 자동 표: 지금까지 쓴 가장 큰 번호를 되살린다(지운 번호를 새 기록이 다시 쓰지 않게)
+            for name, seq in (info.get("sequences") or {}).items():
+                if name in auto and isinstance(seq, int):
+                    cur = con.execute("SELECT seq FROM sqlite_sequence WHERE name=?", (name,)).fetchone()
+                    if cur is None:
+                        con.execute("INSERT INTO sqlite_sequence(name, seq) VALUES(?, ?)", (name, seq))
+                    elif cur[0] < seq:
+                        con.execute("UPDATE sqlite_sequence SET seq=? WHERE name=?", (seq, name))
             con.execute("COMMIT")
-            bad = con.execute("PRAGMA integrity_check").fetchone()[0]
-            if bad != "ok":
-                raise DbError(f"만든 자료 파일 점검에 실패했습니다: {bad}")
+            fk = con.execute("PRAGMA foreign_key_check").fetchall()
+            if fk:
+                raise _Bad(f"자료끼리 이어지는 번호가 맞지 않습니다({fk[0][0]} 표 등 {len(fk)}건).")
+            ok = con.execute("PRAGMA integrity_check").fetchone()[0]
+            if ok != "ok":
+                raise DbError(f"만든 자료 파일 점검에 실패했습니다: {ok}")
         except Exception:
             try:
                 con.execute("ROLLBACK")
@@ -362,6 +463,8 @@ def build_db(path, dest):
             raise
         finally:
             con.close()
+    except _Bad as e:
+        raise DbError(f"복구를 멈췄습니다 — 숨김 복구용 시트가 저장 때와 다릅니다. 지금 자료는 그대로입니다. ({e})") from None
     finally:
         wb.close()
     return info
