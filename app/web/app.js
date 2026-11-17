@@ -4177,7 +4177,7 @@
   function twChainText(chain) {
     if (!chain || !chain.steps) return '';
     const parts = [chain.src === 'current' ? '지금 기록 내용' : '처음 원문'];
-    chain.steps.forEach((s, i) => parts.push(i === 0 ? `지침 '${twShort(s.prompt, 24)}'${s.request ? ` + 요청 '${twShort(s.request, 20)}'` : ''}`
+    chain.steps.forEach((s, i) => parts.push(i === 0 ? `${s.prompt ? `지침 '${twShort(s.prompt, 24)}'` : '빈 지침'}${s.request ? ` + 요청 '${twShort(s.request, 20)}'` : ''}`
       : `요청 '${twShort(s.request || '(전체 프롬프트 고침)', 24)}'`));
     return parts.join(' → ');
   }
@@ -4970,11 +4970,11 @@
     AI_ASK_SKIP.delete('cw');
     const recCtx = ctx && ctx.rec ? ctx.rec : null; // 항목별 기록에서 연 경우: 그 기록 글을 붙여넣기로 시작
     Object.assign(CW, { ctx: ctx || null, mode: recCtx ? 'paste' : 'record', tag: ctx && !recCtx ? ctx.tag : null, tagName: ctx && !recCtx ? ctx.tagName : '', work: null, rid: ctx && !recCtx ? ctx.rid : null, recs: [], trials: [], cur: null, paste: recCtx ? recCtx.text || '' : '', local: [], year: ys.year,
-      firstPrompt: null, firstEx: '', useCurrent: false });
+      firstPrompt: null, firstMsg: '', firstEx: '', useCurrent: false });
     const [tags, lib] = await Promise.all([call('tags'), rawCall('prompt_list')]);
     CW.allTags = (tags && tags.tags) || [];
     CW.lib = lib && lib.ok ? lib.prompts : [];
-    if (!(ctx && ctx.tag && TW.work && TW.work.draft && TW.work.draft.prompt)) { const d = CW.lib.find((p) => p.id === 'default'); if (d) { CW.firstPrompt = d.prompt; CW.firstEx = d.example || ''; } }
+    // v0.20: 일반 AI 채팅처럼 빈 지침으로 시작(기본 프롬프트는 ⚙ 시작 지침에서 불러옴)
     if (!CW.tag && CW.allTags.length) { CW.tag = CW.allTags[0].id; CW.tagName = CW.allTags[0].name; }
     if (!CW.tag || recCtx) CW.mode = 'paste';
     openSheet((box) => {
@@ -5014,15 +5014,15 @@
     } else {
       const ta = el('textarea', { rows: 3, placeholder: '변환해 볼 학생 활동 글을 붙여넣으세요(저장하지 않음, 창을 닫으면 대화도 사라짐)', 'aria-label': '붙여넣을 글' });
       ta.value = CW.paste;
-      ta.addEventListener('input', () => { CW.paste = ta.value; });
+      ta.addEventListener('input', () => { CW.paste = ta.value; const b = CW.box && CW.box.querySelector('.cw-msg.src .cw-text'); if (b && !CW.cur) b.textContent = ta.value || '(아직 붙여 넣은 글이 없습니다)'; });
       src.appendChild(ta);
     }
     const rec = CW.mode === 'record' ? CW.recs.find((x) => x.id === CW.rid) : null;
     const original = rec ? (rec.original && rec.original !== rec.content ? rec.original : rec.content) : CW.paste;
     // 대화(지금 고른 후보까지의 흐름)
     const chat = el('div', { class: 'cw-chat', role: 'log', 'aria-live': 'polite' });
-    const bubble = (who, text, extra) => el('div', { class: `cw-msg ${who}` }, [el('div', { class: 'cw-who', text: who === 'me' ? '나' : who === 'ai' ? 'AI 결과' : '원문' }), el('div', { class: 'cw-text', text }), extra || null]);
-    chat.appendChild(bubble('src', original || '(원문 없음)'));
+    const bubble = (who, text, extra) => el('div', { class: `cw-msg ${who}` }, [el('div', { class: 'cw-who', text: who === 'me' ? '나' : who === 'ai' ? '🤖 AI' : '📄 보낸 자료(원문)' }), el('div', { class: 'cw-text', text }), extra || null]);
+    chat.appendChild(bubble('src', original || (CW.mode === 'paste' ? '(아직 붙여 넣은 글이 없습니다)' : '(원문 없음)')));
     const cur = CW.cur;
     if (cur) {
       const all = cwCands();
@@ -5031,34 +5031,44 @@
       for (let t = cur; t; t = t.parent_id ? byId.get(t.parent_id) : null) path.unshift(t);
       const steps = cur.chain.steps;
       steps.forEach((s, i) => {
-        const msg = i === 0 ? `지침: ${twShort(s.prompt, 140)}${s.example ? `\n예시: ${twShort(s.example, 80)}` : ''}${s.request ? `\n요청: ${s.request}` : ''}`
-          : `${s.request || '(요청 없음)'}${s.prompt ? `\n(지침 전체를 고침: ${twShort(s.prompt, 100)})` : ''}`;
-        chat.appendChild(bubble('me', msg));
+        const msg = i === 0 ? (s.request || '(시작 지침대로 써 줘)') : (s.request || '(지침을 고쳐 다시 써 줘)');
+        const note = i === 0 && s.prompt ? el('div', { class: 'cw-note', text: `⚙ 시작 지침 사용: ${twShort(s.prompt, 60)}${s.example ? ' · 예시 있음' : ''}` })
+          : i > 0 && s.prompt ? el('div', { class: 'cw-note', text: `⚙ 지침 전체를 고침: ${twShort(s.prompt, 60)}` }) : null;
+        chat.appendChild(bubble('me', msg, note));
         const t = path.find((x) => x.chain.steps.length === i + 1);
         const turns = (cur.meta && cur.meta.turns) || cur.turns || [];
         const old = i < steps.length - 1 && turns.length === steps.length - 1 ? turns[i] : null; // 후보마다 저장한 앞 대화
         chat.appendChild(bubble('ai', t ? t.text : old || '(이 단계 결과는 후보 3칸에서 밀려나 보이지 않습니다)'));
       });
     } else {
-      chat.appendChild(el('div', { class: 'cw-empty muted', text: '아래에 지침(프롬프트)을 쓰고 [보내기]를 누르면 대화가 시작됩니다. 결과를 보고 "더 짧게"처럼 요구를 이어서 보내세요.' }));
+      chat.appendChild(el('div', { class: 'cw-empty muted', text: '아래 칸에 하고 싶은 말을 쓰고 [보내기]를 누르면 대화가 시작됩니다. 결과를 보고 "더 짧게"처럼 이어서 말하면 됩니다. 정해 둔 프롬프트로 시작하려면 ⚙ 시작 지침에서 불러오세요.' }));
     }
     // 입력
     const model = el('select', { 'aria-label': '모델' }); fillModelSelect(model);
     const input = el('div', { class: 'cw-input' });
     const send = el('button', { type: 'button', class: 'primary ai-btn', text: '보내기' });
     if (!cur) {
+      // 일반 AI 채팅처럼: 첫 메시지만 써서 시작(지침은 비어 있음). 필요하면 ⚙ 시작 지침에 기본 프롬프트 등을 불러옴
       const lib = el('select', { 'aria-label': '프롬프트 불러오기' }, [el('option', { value: '', text: '시작 프롬프트 불러오기…' }), ...promptOpts(CW.lib, { tagName: CW.tagName })]);
-      const pr = el('textarea', { rows: 7, placeholder: '처음 지침(프롬프트)', 'aria-label': '처음 지침' });
-      const tagCtx = CW.ctx && CW.ctx.tag;
-      pr.value = CW.firstPrompt != null ? CW.firstPrompt : ((tagCtx && TW.work && TW.work.draft && TW.work.draft.prompt) || '');
-      if (CW.firstPrompt == null && tagCtx && TW.work && TW.work.draft) CW.firstEx = TW.work.draft.example || '';
-      pr.addEventListener('input', () => { CW.firstPrompt = pr.value; });
-      lib.addEventListener('change', () => { const p = (CW.lib || []).find((x) => x.id === lib.value); if (p) { pr.value = p.prompt; CW.firstPrompt = p.prompt; CW.firstEx = p.example || ''; } lib.value = ''; });
-      const rq = el('input', { type: 'text', placeholder: '(선택) 이번 추가 요청' });
+      const pr = el('textarea', { rows: 7, placeholder: '비워 두면 일반 대화처럼 시작합니다. 위에서 기본 프롬프트 등을 불러올 수 있습니다.', 'aria-label': '시작 지침' });
+      pr.value = CW.firstPrompt != null ? CW.firstPrompt : '';
+      pr.addEventListener('input', () => { CW.firstPrompt = pr.value; sysSum.textContent = sysLabel(); });
+      const sysLabel = () => (pr.value.trim() ? `⚙ 시작 지침 사용 중(${pr.value.trim().length}자)` : '⚙ 시작 지침(선택) — 지금은 비어 있음');
+      const sysSum = el('summary', { text: sysLabel() });
+      lib.addEventListener('change', () => { const p = (CW.lib || []).find((x) => x.id === lib.value); if (p) { pr.value = p.prompt; CW.firstPrompt = p.prompt; CW.firstEx = p.example || ''; sysSum.textContent = sysLabel(); sys.open = true; } lib.value = ''; });
+      const sys = el('details', { class: 'cw-sys', open: !!(CW.firstPrompt || '').trim() }, [sysSum, el('div', { class: 'tw-row' }, [el('span', { class: 'spacer' }), lib]), pr]);
+      const rq = el('textarea', { rows: 3, class: 'cw-compose', placeholder: CW.mode === 'record' ? '메시지를 입력하세요. 예) 이 기록을 과목 세특 문장으로 바꿔 줘' : '메시지를 입력하세요. 예) 위에 붙여넣은 글을 생기부 문장으로 바꿔 줘', 'aria-label': '첫 메시지' });
+      rq.value = CW.firstMsg || '';
+      rq.addEventListener('input', () => { CW.firstMsg = rq.value; });
+      rq.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) send.click(); });
       const srcPick = CW.mode === 'record' && rec && rec.original && rec.original !== rec.content
         ? el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'checkbox', checked: CW.useCurrent, onchange: (e) => { CW.useCurrent = e.target.checked; } }), '처음 원문 대신 지금 기록 내용 보내기']) : null;
-      addTo(input, el('div', { class: 'tw-row' }, [el('b', { text: '처음 지침' }), el('span', { class: 'spacer' }), lib]), pr, rq, srcPick);
-      send.addEventListener('click', () => cwSend({ src: CW.useCurrent ? 'current' : 'original', steps: [{ prompt: pr.value, example: CW.firstEx || '', request: rq.value.trim() }] }, null, model, send));
+      addTo(input, sys, rq, srcPick);
+      send.addEventListener('click', () => {
+        if (!pr.value.trim() && !rq.value.trim()) { toast('메시지를 입력하세요.'); rq.focus(); return; }
+        cwSend({ src: CW.useCurrent ? 'current' : 'original', steps: [{ prompt: pr.value, example: CW.firstEx || '', request: rq.value.trim() }] }, null, model, send);
+      });
+      setTimeout(() => rq.focus(), 30);
     } else {
       const rq = el('textarea', { rows: 2, placeholder: '결과를 보고 요구할 것을 쓰세요. 예) 더 짧게, 탐구 과정을 더 살리고 마지막 문장은 빼기', 'aria-label': '이어서 요구' });
       const eff = [...cur.chain.steps].reverse().find((x) => x.prompt) || cur.chain.steps[0];
@@ -5102,7 +5112,7 @@
     if (CW.ctx && CW.ctx.rec && R.sno) loadStudent(true);
   }
   async function cwSend(chain, parent, model, btn) {
-    if (!(chain.steps[0].prompt || '').trim()) { toast('처음 지침(프롬프트)을 입력해 주세요.'); return; }
+    if (!(chain.steps[0].prompt || '').trim() && !(chain.steps[0].request || '').trim()) { toast('메시지를 입력하세요.'); return; }
     if (!(await aiAsk(parent ? '이어서 고치기' : '대화 시작', [['자료', CW.mode === 'record' ? `'${CW.tagName}' 태그 기록` : '붙여넣은 글'], ['모델', modelName(model)], ['AI 호출', '1번'],
       ...(parent ? [['보내는 글', `처음부터 대화 ${chain.steps.length}단계 전체(길어질수록 토큰이 크게 늘어남)`]] : [])], 'cw'))) return;
     if (CW.mode === 'record') {

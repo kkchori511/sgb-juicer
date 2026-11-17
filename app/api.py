@@ -1797,7 +1797,7 @@ class Api:
     @staticmethod
     def _chain_material(chain):
         """단계(처음 지침 + 이어서 한 요청)를 프롬프트 종합 재료 글로. v0.20부터 대화를 빼지 않고 모두 넣는다(학생 특이 요구는 스킬화가 분석)."""
-        parts = ["[재료: 대화로 다듬은 과정]", "1) 처음 지침:", chain["steps"][0]["prompt"]]
+        parts = ["[재료: 대화로 다듬은 과정]", "1) 처음 지침:", chain["steps"][0]["prompt"] or "(없음 — 빈 지침으로 대화를 시작함. 기본 프롬프트의 틀을 참고해 새로 짭니다)"]
         if chain["steps"][0]["example"]:
             parts += ["처음 지침의 예시:", chain["steps"][0]["example"]]
         if chain["steps"][0]["request"]:
@@ -1816,11 +1816,11 @@ class Api:
         steps = chain["steps"]
         if not isinstance(turns, list) or len(turns) != len(steps) - 1 or len(steps) < 2:
             return None
-        parts = ["[재료: 실제 대화(처음부터 차례대로)]", "처음 지침:", steps[0]["prompt"]]
+        parts = ["[재료: 실제 대화(처음부터 차례대로)]", "처음 지침:", steps[0]["prompt"] or "(없음 — 빈 지침으로 대화를 시작함. 기본 프롬프트의 틀을 참고해 새로 짭니다)"]
         if steps[0]["example"]:
             parts += ["처음 지침의 예시:", steps[0]["example"]]
         if steps[0]["request"]:
-            parts += [f"처음 추가 요청: {steps[0]['request']}"]
+            parts += [f"[1] 교사 요청: {steps[0]['request']}"]
         parts += ["", "[1] 교사가 보낸 글: (아래 <원문>)", f"[1] AI 결과:\n{str(turns[0])[:20000]}"]
         for i, st in enumerate(steps[1:], 1):
             if st["prompt"]:

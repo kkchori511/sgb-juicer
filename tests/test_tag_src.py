@@ -81,6 +81,10 @@ def test_src():
     assert "<요청들>" in CALLS[-1][1]  # 가짜 AI가 분석을 빼먹어 분석만 다시 물음
     m = CALLS[-2][1]
     assert "[재료: 실제 대화" in m and "[1] AI 결과:\n결과1" in m and "[2] AI 결과:\n결과2" in m and '원문의 "토론함" 내용' in m and "(아래 <목표 결과>)" in m, m
+    # 빈 지침 + 첫 메시지로 시작(일반 채팅처럼): 짧은 기본 역할 + 대원칙, 요청은 첫 단계에
+    ok(api.prompt_chat_free({"src": "original", "steps": [{"prompt": "", "request": "생기부 문장으로 바꿔 줘"}]}, "붙여넣은 원문"))
+    assert "교사를 돕는 AI" in CALLS[-1][0] and "[대원칙" in CALLS[-1][0] and "생기부 문장으로 바꿔 줘" in CALLS[-1][0] and CALLS[-1][1] == "붙여넣은 원문"
+    assert not api.prompt_chat_free({"src": "original", "steps": [{"prompt": "", "request": ""}]}, "글")["ok"]
     # 붙여넣은 글 스킬화: 화면의 원문·결과로
     r = ok(api.skill_compose_free({"src": "original", "steps": [s1, s2]}, "붙여넣은 원문", "결과B"))
     assert "<원문>\n붙여넣은 원문" in CALLS[-2][1] and "결과B" in CALLS[-2][1]

@@ -46,8 +46,8 @@ def norm_chain(chain):
         s = s or {}
         step = {"prompt": str(s.get("prompt") or "").strip(), "example": str(s.get("example") or "").strip(),
                 "request": str(s.get("request") or "").strip()[:1000]}
-        if i == 0 and not step["prompt"]:
-            raise DbError("프롬프트(지침)를 입력해 주세요.")
+        if i == 0 and not (step["prompt"] or step["request"]):  # 대화 마법사는 빈 지침 + 첫 메시지로 시작할 수 있다
+            raise DbError("프롬프트(지침)나 첫 메시지를 입력해 주세요.")
         if i > 0 and not (step["request"] or step["prompt"]):
             raise DbError("이어서 고칠 요청을 입력해 주세요.")
         if i > 0 and (s.get("with_src") or s.get("only_here")):  # 켠 것만 넣는다(예전 단계와 서명이 같게)
@@ -71,10 +71,15 @@ def effective(chain, i):
     return steps[0]["prompt"], steps[0]["example"]
 
 
+CHAT_BASE = "당신은 고등학교 교사를 돕는 AI입니다. 교사가 준 학생 활동 자료를 바탕으로, 교사의 요청대로 생활기록부에 쓸 글을 씁니다."
+
+
 def step_system(chain, i):
-    """i번째 단계에 보낼 시스템 글. 이어 고치는 단계는 전체 프롬프트를 새로 주지 않았으면 앞 단계 지침을 그대로 쓴다."""
+    """i번째 단계에 보낼 시스템 글. 이어 고치는 단계는 전체 프롬프트를 새로 주지 않았으면 앞 단계 지침을 그대로 쓴다.
+    지침 없이(빈 프롬프트로) 시작한 대화는 짧은 기본 역할만 준다(대원칙·출력 규칙은 늘 붙음)."""
     s = chain["steps"][i]
     base, example = effective(chain, i)
+    base = base or CHAT_BASE
     system = prompts.build_system(base, example, 0)
     if i == 0:
         return system + (FIRST_REQ_RULE.format(req=s["request"]) if s["request"] else "")
@@ -109,7 +114,7 @@ def chat_messages(chain, src, outs):
     if last == 0:
         return step_system(chain, 0), [], src
     base, example = effective(chain, last)
-    system = prompts.build_system(base, example, 0) + (FIRST_REQ_RULE.format(req=steps[0]["request"]) if steps[0]["request"] else "") + CHAT_RULE
+    system = prompts.build_system(base or CHAT_BASE, example, 0) + (FIRST_REQ_RULE.format(req=steps[0]["request"]) if steps[0]["request"] else "") + CHAT_RULE
     outs = [str(x) for x in (outs or [])]
     if len(outs) == last:
         history = [(src, outs[0])] + [(_ask(steps[k]), outs[k]) for k in range(1, last)]

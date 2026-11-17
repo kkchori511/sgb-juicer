@@ -1145,3 +1145,19 @@ label.inline[hidden] { display: none; }
 .join-row.off b { text-decoration: line-through; font-weight: 600; }
 .fin-mode-btns { margin: 12px 0 4px; }
 .fin-mode-btns .bytes.over { color: #fecaca; }
+/* 대화 마법사: 일반 AI 채팅창처럼(v0.20) — 내 말은 오른쪽 파란 말풍선, AI 답은 왼쪽 흰 카드에 큰 글씨 */
+.cw-chat { background: #f4f6fa; padding: 14px; gap: 12px; }
+.cw-msg { font-size: 14px; border-radius: 16px; padding: 10px 14px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06); }
+.cw-msg.me { background: #2563eb; border: none; color: #fff; border-bottom-right-radius: 4px; max-width: 70%; }
+.cw-msg.me .cw-who { color: #dbeafe; text-align: right; }
+.cw-msg.me .cw-note { margin-top: 6px; font-size: 12px; color: #dbeafe; border-top: 1px solid rgba(255, 255, 255, 0.3); padding-top: 4px; }
+.cw-msg.ai { background: #fff; border: 1px solid #d6dde8; border-left: 4px solid #7c3aed; border-bottom-left-radius: 4px; max-width: 88%; }
+.cw-msg.ai .cw-who { color: #6d28d9; }
+.cw-msg.ai .cw-text { font-size: 15.5px; line-height: 1.75; color: #0f172a; }
+.cw-msg.src { background: #fff8e6; border: 1px dashed #e7c46a; max-width: 88%; font-size: 13px; color: var(--text-2); }
+.cw-msg.src .cw-who { color: #a16207; }
+.cw-sys { font-size: 13px; }
+.cw-sys > summary { cursor: pointer; color: var(--text-2); font-weight: 700; padding: 2px 0; }
+.cw-sys[open] > summary { margin-bottom: 4px; }
+.cw-compose { font-size: 15px; line-height: 1.6; border-radius: 12px; }
+.cw-input { background: #fff; border-color: #cbd5e1; border-radius: 14px; }
