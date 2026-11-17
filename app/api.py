@@ -721,13 +721,7 @@ class Api:
             todo.append({"kind": "inbox", "label": f"인박스 확인 필요 {len(need)}묶음", "batch_id": need[0]["id"]})
         if ready:
             todo.append({"kind": "inbox", "label": f"인박스 보내기 대기 {len(ready)}묶음", "batch_id": ready[0]["id"]})
-        for w in TagWork(d).summary()[:3]:  # 진행 중인 태그 AI 변환
-            if w["tag_id"] is None:
-                continue
-            what = " ".join(x for x in (f"검토 전 {w['pending']}건" if w["pending"] else "", f"실패 {w['failed']}건" if w["failed"] else "",
-                                        f"결과 없음 {w['notrun']}건" if w["notrun"] else "") if x) or "시험 중"
-            todo.append({"kind": "tagwork", "label": f"'{w['tag_name']}' 태그 변환 {what}", "tag_id": w["tag_id"],
-                         "step": "review" if (w["pending"] or w["failed"] or w["notrun"]) else "trial"})
+        # v0.21: 옛 태그 AI 변환(①②③) 진행 상황은 할 일에 넣지 않음(AI 변환은 결과 묶음 방식)
         for kind, n, label, flt in (("stale", todo_stale, "채택 후 기록 변경", "stale"), ("final", todo_final, "최종안 만들기", "progress"),
                                     ("close", todo_close, "마감 검토", "final")):
             if n:
@@ -1072,6 +1066,13 @@ class Api:
         return {"works": self._tw(year).orphans()}
 
     @safe
+    def tag_legacy(self, year=None):
+        """예전 [반영] 이력이 있는 태그 작업(되돌리기용)."""
+        if not ys_ok(self):
+            return {"works": []}
+        return {"works": self._tw(year).legacy()}
+
+    @safe
     def tag_batches(self, wid, year=None):
         """작업의 반영 기록(지운 태그 작업의 되돌리기용)."""
         tw = self._tw(year)
@@ -1173,11 +1174,32 @@ class Api:
         return {}
 
     @safe
+    def confirm_many(self, pairs, year=None):
+        """[최신 결과로 확정]: [[기록 id, 글], ...]. 되돌리기 표(token)는 이 실행 동안만 남는다."""
+        self._editable(year)
+        done, skipped = self._rec().confirm_many([(int(p[0]), str(p[1] or "")) for p in (pairs or [])])
+        import uuid
+        token = uuid.uuid4().hex
+        if not hasattr(self, "_confirm_undo"):
+            self._confirm_undo = {}
+        self._confirm_undo = {token: done}  # 바로 앞 한 번만
+        return {"token": token if done else "", "done": len(done), "skipped": skipped}
+
+    @safe
+    def undo_confirm_many(self, token, year=None):
+        self._editable(year)
+        snaps = getattr(self, "_confirm_undo", {}).pop(token, None)
+        if snaps is None:
+            raise db.DbError("되돌릴 수 있는 한꺼번에 확정이 없습니다(바로 앞 한 번만 됩니다).")
+        n, skip = self._rec().undo_confirm_many(snaps)
+        return {"done": n, "skipped": skip}
+
+    @safe
     def save_chat_result(self, rid, text, meta=None):
         """항목별 기록에서 연 대화 마법사의 답을 그 기록의 결과 묶음에 넣는다."""
         self._editable()
         m = meta if isinstance(meta, dict) else {}
-        keep = {k: m[k] for k in ("model",) if k in m}
+        keep = {k: str(m[k])[:200] for k in ("model", "prompt_name") if k in m}
         return {"id": self._rec().save_chat_result(rid, text, {**keep, "op": "chat"})}
 
     @safe

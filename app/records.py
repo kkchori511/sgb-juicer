@@ -766,6 +766,42 @@ class Records:
                       "updated_at=datetime('now','localtime') WHERE id=?", (text, original, r["id"]))
             self._stale(c, r["group_id"], r["item"], r["student_no"])
 
+    def confirm_many(self, pairs):
+        """여러 기록을 한꺼번에 확정(태그별 기록 [최신 결과로 확정]). 확정 전 기록만. 반환: (되돌리기용 스냅숏, 건너뛴 것)."""
+        done, skipped = [], []
+        for rid, text in pairs:
+            try:
+                r = self.record(rid)
+                if r["confirmed"]:
+                    skipped.append({"id": int(rid), "why": "이미 확정"}); continue
+                if not (text or "").strip():
+                    skipped.append({"id": int(rid), "why": "확정할 글 없음"}); continue
+                snap = {"id": r["id"], "content": r["content"], "original": r["original"], "confirmed_at": r["confirmed_at"]}
+                self.confirm_record(rid, text)
+                snap["after"] = self.record(rid)["content"]
+                done.append(snap)
+            except DbError as e:
+                skipped.append({"id": int(rid), "why": str(e)})
+        return done, skipped
+
+    def undo_confirm_many(self, snaps):
+        """confirm_many 되돌리기: 그 뒤 바뀌지 않은 기록만 확정 전 상태로. 반환: (되돌린 수, 건너뛴 수)"""
+        n = skip = 0
+        for sn in snaps:
+            try:
+                r = self.record(sn["id"])
+                self.require_open(r["group_id"], r["item"], r["student_no"])
+            except DbError:
+                skip += 1; continue
+            if not r["confirmed"] or r["content"] != sn["after"]:
+                skip += 1; continue
+            with self.d.tx() as c:
+                c.execute("UPDATE records SET content=?, original=?, confirmed=0, confirmed_at=?, updated_at=datetime('now','localtime') WHERE id=?",
+                          (sn["content"], sn["original"], sn["confirmed_at"], r["id"]))
+                self._stale(c, r["group_id"], r["item"], r["student_no"])
+            n += 1
+        return n, skip
+
     def unconfirm_record(self, rid):
         """확정 풀기: 확정본은 '이전 확정본' 결과로 남기고 원문으로 돌아간다."""
         with self.d.tx() as c:

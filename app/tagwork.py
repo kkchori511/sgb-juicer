@@ -664,6 +664,16 @@ class TagWork:
                 out.append({"work_id": w["id"], "tag_id": w["tag_id"], "tag_name": w["tag_name"], **p, "trying": trying})
         return out
 
+    def legacy(self):
+        """예전 태그 AI 변환 [반영] 이력이 있는 작업 전부(지운 태그 포함): 📜 예전 AI 반영 되돌리기용."""
+        tags = {x["id"] for x in self.d.q("SELECT id FROM tags")}
+        out = []
+        for w in self.d.q("SELECT * FROM tag_works ORDER BY updated_at DESC"):
+            n = self.d.q("SELECT COUNT(*) n, SUM(undone_at IS NULL) live FROM tag_applies WHERE work_id=?", (w["id"],))[0]
+            if n["n"]:
+                out.append({"work_id": w["id"], "tag_name": w["tag_name"], "gone": w["tag_id"] not in tags, "applies": n["n"], "live": n["live"] or 0})
+        return out
+
     def orphans(self):
         """지운 태그의 작업(반영 기록이 있는 것): 태그별 기록에서 이력 보기·되돌리기용."""
         tags = {x["id"] for x in self.d.q("SELECT id FROM tags")}

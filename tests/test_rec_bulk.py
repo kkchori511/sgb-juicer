@@ -75,6 +75,27 @@ def test_all():
     assert rb["content"] == "진로 탐색"  # 원문은 그대로
     assert e
 
+    # 4) 태그별 [최신 결과로 확정] + 되돌리기
+    v = ok(api.student_view(hr, "career", "20302"))
+    before = {r["id"]: (r["content"], r["original"], r["confirmed"]) for r in v["records"]}
+    out = ok(api.confirm_many([[b, "변환 글"], [d, "이미 확정"], [c, "마감"], [a, ""]]))
+    assert out["done"] == 1 and out["token"], out
+    whys = {x["id"]: x["why"] for x in out["skipped"]}
+    assert whys[d] == "이미 확정" and a in whys and c in whys, whys
+    rb = next(r for r in ok(api.student_view(hr, "career", "20302"))["records"] if r["id"] == b)
+    assert rb["confirmed"] and rb["content"] == "변환 글" and rb["orig"] == "진로 탐색"
+    u = ok(api.undo_confirm_many(out["token"]))
+    assert u["done"] == 1
+    after = {r["id"]: (r["content"], r["original"], r["confirmed"]) for r in ok(api.student_view(hr, "career", "20302"))["records"]}
+    assert after[b] == before[b], (after[b], before[b])
+    assert not api.undo_confirm_many(out["token"])["ok"]  # 한 번만
+    # 확정 뒤 다시 고쳤으면 되돌리지 않음
+    out = ok(api.confirm_many([[b, "변환 글"]]))
+    ok(api.confirm_record(b, "다시 고친 확정본"))
+    assert ok(api.undo_confirm_many(out["token"]))["skipped"] == 1
+    # 5) 예전 반영 이력 목록(없으면 빈 목록)
+    assert ok(api.tag_legacy())["works"] == []
+
 
 if __name__ == "__main__":
     test_all()

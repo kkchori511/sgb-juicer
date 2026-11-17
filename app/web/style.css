@@ -1183,3 +1183,11 @@ label.inline[hidden] { display: none; }
 .rb-row.me { background: rgba(124, 58, 237, 0.06); border-radius: 6px; }
 .rb-meta { flex: none; min-width: 72px; color: var(--muted); }
 .rb-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+/* AI 결과 아래: 쓴 모델·프롬프트 */
+.ai-src { font-size: 11.5px; color: var(--muted); margin: 4px 0 2px; overflow-wrap: anywhere; }
+/* 태그별 기록 AI 변환 안내·모델 */
+.tv-ai-tip { flex-basis: 100%; margin: 6px 0 0; font-size: 13px; }
+.tv-model { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 13px; }
+.tv-model select { max-width: 240px; padding: 3px 6px; font-size: 13px; }
+.rb-tip { margin: 0 0 8px; }
