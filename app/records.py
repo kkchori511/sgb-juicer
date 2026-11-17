@@ -818,7 +818,7 @@ class Records:
         """확정본들을 내용 그대로 띄어쓰기 한 칸으로 잇는다(NEIS는 줄바꿈 불가)."""
         return " ".join(" ".join(t.split()) for t in texts if (t or "").strip())
 
-    def join_confirmed(self, gid, item, sno, ids, append=False):
+    def join_confirmed(self, gid, item, sno, ids, append=False, order=None):
         """확정 기록을 고른 순서대로 이어 최종안으로(append면 지금 최종안 뒤에 붙임). 그 순서를 기록 순서에도 저장. 반환: 바꾸기 전 최종안 글."""
         self.slot(gid, item)
         ids = [int(x) for x in ids or []]
@@ -830,10 +830,13 @@ class Records:
             by = {x["id"]: x for x in rows}
             if any(i not in by or not by[i]["confirmed"] for i in ids) or len(set(ids)) != len(ids):
                 raise DbError("확정 기록이 바뀌었습니다. 화면을 다시 열어 주세요.")
-            # 순서 저장: 확정 기록 자리만 새 순서로 바꾼다
-            slots = [k for k, x in enumerate(rows) if x["id"] in set(ids)]
+            # 순서 저장: 화면에 보인 순서(order: 이번에 뺀 확정 기록 포함)대로, 그 기록들이 있던 자리만 바꾼다
+            seq = [int(x) for x in order or []] or ids
+            if len(set(seq)) != len(seq) or not set(ids) <= set(seq) or any(i not in by or not by[i]["confirmed"] for i in seq):
+                raise DbError("확정 기록이 바뀌었습니다. 화면을 다시 열어 주세요.")
+            slots = [k for k, x in enumerate(rows) if x["id"] in set(seq)]
             new = list(rows)
-            for k, rid in zip(slots, ids):
+            for k, rid in zip(slots, seq):
                 new[k] = by[rid]
             for k, x in enumerate(new):
                 c.execute("UPDATE records SET pos=? WHERE id=?", (k + 1, x["id"]))
@@ -1192,6 +1195,21 @@ class Records:
         with self.d.tx() as c:
             self._upsert_final(c, r["group_id"], r["item"], r["student_no"], r["content"], f"record:{r['id']}",
                                {"op": "record", "kind": r["kind"]})
+
+    def final_append(self, gid, item, sno, text):
+        """저장된 최종안 뒤에 이어 붙인다(없으면 그 글로). 반환: 바꾸기 전 글."""
+        self.slot(gid, item)
+        add = " ".join((text or "").split())
+        if not add:
+            raise DbError("붙일 글이 비어 있습니다.")
+        with self.d.tx() as c:
+            self.require_open(gid, item, sno)
+            prev = self.final(gid, item, sno)
+            old = (prev or {}).get("text") or ""
+            meta = json.loads(prev["meta"]) if prev else {}
+            meta["edited"] = True
+            self._upsert_final(c, gid, item, sno, (old.rstrip() + " " + add).strip(), (prev or {}).get("source") or "manual", meta)
+        return old
 
     def edit_final(self, gid, item, sno, text):
         self.slot(gid, item)

@@ -8,12 +8,17 @@ from app import config, openrouter
 
 CALLS = []
 JUDGE = {"v": '{"내용": 96, "문체": 92, "차이": ""}'}
+MODE = {"partial": False}
 
 
 def fake_chat(key, model, system, user, privacy_block=False, history=None):
     CALLS.append((system, user, getattr(openrouter._tl, "temp", None)))
     if "[유사도 채점]" in system:
         return "채점 결과: " + JUDGE["v"], 0.0001
+    if "<요청들>" in user:  # 분석만 다시 묻기: 이 가짜 AI는 형식 없이 답함(→ 미분석)
+        return "모르겠음", 0.0001
+    if "[목표]" in user and "<목표 결과>" in user and MODE["partial"]:
+        return "<요청 분석>\n- 요청: 더 짧게 | 분류: 반영 | 규칙: 약 20자\n</요청 분석>\n<프롬프트>\n# 역할\n종합 프롬프트\n</프롬프트>", 0.001
     if "[목표]" in user and "<목표 결과>" in user:
         return ("<요청 분석>\n- 요청: 더 짧게 | 분류: 반영 | 규칙: 약 20자\n- 요청: 원문의 \"토론함\"을 넣어 줘 | 분류: 제외 | 규칙: 이 학생 글에만 해당\n</요청 분석>\n"
                 "<프롬프트>\n# 역할\n종합 프롬프트\n</프롬프트>"), 0.001
@@ -71,7 +76,21 @@ def test_skill():
     v = ok(api.tag_skill_check(c3, "# 역할\n종합 프롬프트", "예시글", None, None, r["excluded"]))
     assert len(CALLS) == n + 2 and CALLS[n][1] == "원문1 책을 읽고 토론함" and CALLS[n][2] == TAG_TEMP and CALLS[n + 1][2] == 0
     assert "예시글" in CALLS[n][0] and "토론함" in CALLS[n + 1][0]  # 예시는 함께, 제외한 요청은 감점 빼기 안내
-    assert v["content"] == 96 and v["style"] == 92 and v["length"] == 100 and v["score"] == round(96 * .5 + 92 * .3 + 100 * .2)
+    assert v["content"] == 96 and v["style"] == 92 and v["length"] == 100
+    # R5: 제외 요청이 있으면 길이는 채점하지 않고 내용·문체로만(5:3)
+    assert v["length_scored"] is False and v["score"] == round(96 * .625 + 92 * .375)
+    v2 = ok(api.tag_skill_check(c3, "# 역할\n종합 프롬프트", "예시글"))  # 제외 없음: 내용 50 + 문체 30 + 길이 20
+    assert v2["length_scored"] is True and v2["score"] == round(96 * .5 + 92 * .3 + 100 * .2)
+    # R4: 분석이 일부만 오면 빠진 요청만 다시 묻고, 그래도 없으면 '미분석'
+    from app.api import Api as _Api
+    assert _Api._unanalyzed(["더 짧게", "세 번째 문장 빼"], [{"req": "더 짧게"}]) == ["세 번째 문장 빼"]
+    assert _Api._unanalyzed(["짧게. 그리고 끝 문장 바꿔"], [{"req": "짧게."}]) == []  # 한 요청을 나눠 적은 줄도 분석한 것으로
+    MODE["partial"] = True
+    n = len(CALLS)
+    r2 = ok(api.tag_skill_compose(c3))
+    MODE["partial"] = False
+    assert "<요청들>" in CALLS[-1][1] and '원문의 "토론함"을 넣어 줘' in CALLS[-1][1] and "- 더 짧게" not in CALLS[-1][1]
+    assert [x["kind"] for x in r2["analysis"]] == ["반영", "미분석"], r2["analysis"]
     JUDGE["v"] = "알 수 없음"
     assert not api.tag_skill_check(c3, "p", "")["ok"]
     JUDGE["v"] = '{"내용": 96, "문체": 92, "차이": ""}'

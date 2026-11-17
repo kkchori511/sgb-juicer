@@ -236,6 +236,13 @@
     if (b) b.addEventListener('click', () => { mode = 'append'; $('modalOk').click(); });
     return (await p) ? mode : null;
   }
+  // 최종안 칸에 쓰던 글을 먼저 저장한 뒤, 서버에 저장된 지금 최종안 글을 읽는다(선택 창·바이트·되돌리기가 같은 글을 쓰게). 실패하면 null
+  // noFlush: afterFinalSaved 안처럼 이미 저장을 끝낸 줄에서 부를 때(같은 줄에 또 저장을 세우면 서로 기다려 멈춤)
+  async function savedFinal(ctx, noFlush) {
+    if (!noFlush && !(await flushFinal())) return null;
+    const v = await rawCall('student_view', ctx.gid, ctx.item, ctx.sno);
+    return v && v.ok ? { text: v.final ? v.final.text || '' : '', target: v.target } : null;
+  }
   // 되돌릴 수 없는(치명적인) 작업: 안내를 읽고 '확인했어요'를 직접 쳐야 [확인] 버튼이 눌린다.
   const TYPED_WORD = '확인했어요';
   function typedConfirm(msg, okText) {
@@ -2385,23 +2392,39 @@
   }
   // 최종안에 글 전체 넣기(덮어쓸 때 확인, [되돌리기]로 원래 최종안)
   async function putFinalText(rc, text) {
-    const v = await rawCall('student_view', rc.gid, rc.item, rc.sno);
-    const prev = v && v.ok && v.final ? v.final.text || '' : null;
-    const mode = await askFinalMode(prev, text, v && v.ok ? v.target : 0, rc.label);
+    const fin = await savedFinal(rc);
+    if (!fin) return;
+    const mode = await askFinalMode(fin.text, text, fin.target, rc.label);
     if (!mode) return;
-    if (!(await mutate('edit_final', rc.gid, rc.item, rc.sno, mode === 'append' ? appendFinal(prev, text) : text, rc.year))) return;
+    let prev = fin.text;
+    const res = await afterFinalSaved(async () => {
+      if (mode === 'append') return mutate('final_append', rc.gid, rc.item, rc.sno, text, rc.year);
+      const now = await savedFinal(rc, true);
+      if (now) prev = now.text;
+      return mutate('edit_final', rc.gid, rc.item, rc.sno, text, rc.year);
+    });
+    if (!res) return;
+    if (mode === 'append') prev = res.prev || '';
     actionToast(mode === 'append' ? '최종안 뒤에 이어 붙였습니다.' : '최종안에 넣었습니다.', '되돌리기', async () => { if (await mutate('edit_final', rc.gid, rc.item, rc.sno, prev || '', rc.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === rc.sno) loadStudent(true); } }, 20000);
     if (R.sno === rc.sno && panel === 'records') loadStudent(true);
   }
   // 기록 그대로 최종안으로(학생관찰기록·기존 완성문): 덮어쓸 때 확인, [되돌리기]
   async function adoptRecordFinal(r) {
-    const prev = R.view.final ? R.view.final.text || '' : '';
-    const add = r.confirmed || r.content === r.orig ? r.content : r.orig;
-    const mode = await askFinalMode(prev, add, R.target);
-    if (!mode) return;
     const ctx = { gid: R.slot.group_id, item: R.slot.item, sno: R.sno, year: ys.year };
-    if (!(await afterFinalSaved(() => (mode === 'append' ? mutate('edit_final', ctx.gid, ctx.item, ctx.sno, appendFinal(prev, add), ctx.year)
-      : r.confirmed || r.content === r.orig ? mutate('adopt_record', r.id) : mutate('edit_final', ctx.gid, ctx.item, ctx.sno, r.orig, ctx.year))))) return;
+    const add = r.confirmed || r.content === r.orig ? r.content : r.orig;
+    const fin = await savedFinal(ctx);
+    if (!fin) return;
+    const mode = await askFinalMode(fin.text, add, fin.target);
+    if (!mode) return;
+    let prev = fin.text;
+    const res = await afterFinalSaved(async () => {
+      if (mode === 'append') return mutate('final_append', ctx.gid, ctx.item, ctx.sno, add, ctx.year);
+      const now = await savedFinal(ctx, true); // 창이 떠 있는 동안 고친 글까지(되돌리기 기준)
+      if (now) prev = now.text;
+      return r.confirmed || r.content === r.orig ? mutate('adopt_record', r.id) : mutate('edit_final', ctx.gid, ctx.item, ctx.sno, r.orig, ctx.year);
+    });
+    if (!res) return;
+    if (mode === 'append') prev = res.prev || '';
     loadStudent(true);
     actionToast(mode === 'append' ? '최종안 뒤에 이어 붙였습니다.' : '최종안으로 채택했습니다.', '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, prev, ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
   }
@@ -2736,11 +2759,19 @@
     if (!v.results.length) resSec.appendChild(el('p', { class: 'hint', text: '확정 기록의 [비중으로 분량 맞추기]나 최종안 [옵션 ▾ › 다듬기(AI)]를 하면 여기에 후보가 생깁니다.' }));
     v.results.slice().reverse().forEach((cd) => resSec.appendChild(candEl(cd, ro, [
       el('button', { type: 'button', class: 'small primary', disabled: ro, text: '✔ 최종안으로', onclick: async () => {
-        if (!(await flushFinal())) return;
-        const prev = ta.value;
-        const mode = await askFinalMode(prev, cd.text, R.target);
+        const fin = await savedFinal(ctx);
+        if (!fin) return;
+        const mode = await askFinalMode(fin.text, cd.text, fin.target);
         if (!mode) return;
-        if (await afterFinalSaved(() => (mode === 'append' ? mutate('edit_final', ctx.gid, ctx.item, ctx.sno, appendFinal(prev, cd.text), ctx.year) : mutate('adopt_result', cd.id)))) {
+        let prev = fin.text;
+        const res = await afterFinalSaved(async () => {
+          if (mode === 'append') return mutate('final_append', ctx.gid, ctx.item, ctx.sno, cd.text, ctx.year);
+          const now = await savedFinal(ctx, true);
+          if (now) prev = now.text;
+          return mutate('adopt_result', cd.id);
+        });
+        if (res) {
+          if (mode === 'append') prev = res.prev || '';
           loadStudent(true);
           actionToast(mode === 'append' ? '최종안 뒤에 이어 붙였습니다.' : '최종안으로 넣었습니다.', '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, prev, ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
         }
@@ -2805,13 +2836,14 @@
       const go = el('button', { type: 'button', class: 'primary', text: '최종안으로 넣기' });
       go.disabled = true;
       go.addEventListener('click', async () => {
-        const prev = v.final ? v.final.text || '' : '';
         const pick = use();
         if (!pick.length) return;
-        const mode = await askFinalMode(prev, joinText(pick.map((r) => r.content)), R.target);
+        const fin = await savedFinal(ctx);
+        if (!fin) return;
+        const mode = await askFinalMode(fin.text, joinText(pick.map((r) => r.content)), fin.target);
         if (!mode) return;
-        // 서버는 넣을 기록만 받아, 그 기록들이 있던 자리 안에서 이 순서로 저장한다(뺀 기록 자리는 그대로)
-        const res = await afterFinalSaved(() => mutate('join_confirmed', ctx.gid, ctx.item, ctx.sno, pick.map((r) => r.id), mode === 'append'));
+        // 넣을 기록과 함께 화면 순서 전체(뺀 기록 포함)를 보내 기록 순서로 저장한다
+        const res = await afterFinalSaved(() => mutate('join_confirmed', ctx.gid, ctx.item, ctx.sno, pick.map((r) => r.id), mode === 'append', order.map((r) => r.id)));
         if (!res) return;
         closeSheet();
         loadStudent(true);
@@ -4423,6 +4455,10 @@
       const exCb = el('input', { type: 'checkbox', onchange: () => draw() });
       const exOf = (a) => (exCb.checked ? (o.target || '') : a.example);
       const cur = () => SK.tries[SK.sel];
+      let editTa = null; // 지금 화면의 프롬프트 칸(고친 글 저장·확정 판단에 씀)
+      const edited = (a) => !!(editTa && a && editTa.value.trim() !== a.prompt.trim());
+      // 확정 가능: 실행 중 아님 + 검증함 + 검증한 예시 설정 그대로 + 프롬프트를 고치지 않음(고쳤으면 다시 검증)
+      const canConfirm = (a) => !SK.running && !!a && a.checks.length > 0 && !!a.exFinal === exCb.checked && !edited(a);
       const prevOf = (a) => {
         const w = a.checks.slice().sort((x, y) => x.score - y.score)[0];
         return w ? { prompt: a.prompt, out: w.text, diff: w.diff || `유사도 ${w.score}점(내용 ${w.content}·문체 ${w.style}·길이 ${w.length})` } : null;
@@ -4439,14 +4475,14 @@
           jobs: [1, 2].map((k) => ({ label: `검증 ${k}`, run: () => (o.free ? api.skill_check_free(o.free.chain, o.free.src, o.target, a.prompt, ex, model.value, a.excluded || [])
             : api.tag_skill_check(o.cid, a.prompt, ex, model.value, o.year, a.excluded || [])) })) });
         if (!out) return false;
-        a.checks = out.results.map((r) => ({ text: r.text, score: r.score, content: r.content, style: r.style, length: r.length, diff: r.diff }));
+        a.checks = out.results.map((r) => ({ text: r.text, score: r.score, content: r.content, style: r.style, length: r.length, lenOn: r.length_scored !== false, diff: r.diff }));
         a.min = a.checks.length ? Math.min(...a.checks.map((c) => c.score)) : 0;
         a.pass = a.checks.length === 2 && a.min >= SKILL_PASS;
         return out.done === 2;
       };
       const run = async () => {
         if (SK.running) return;
-        if (!(await aiAsk('스킬화', [['기록', o.label], ['모델', modelName(model)], ['AI 호출', `최대 ${SKILL_TRIES * 5}번(시도마다 5번, 통과하면 멈춤)`]]))) return;
+        if (!(await aiAsk('스킬화', [['기록', o.label], ['모델', modelName(model)], ['AI 호출', `최대 ${SKILL_TRIES * 6}번(시도마다 5번, 요청 분석이 빠지면 6번 · 통과하면 멈춤)`]]))) return;
         SK.running = true; draw();
         try {
           let prev = SK.tries.length ? prevOf(SK.tries[SK.tries.length - 1]) : null;
@@ -4474,7 +4510,7 @@
       };
       const draw = () => {
         body.innerHTML = '';
-        body.appendChild(el('p', { class: 'hint', text: `이어 고친 단계(${o.chainText || ''})를 AI가 한 프롬프트로 종합하고, 그 프롬프트로 같은 원문을 2번 변환해 아래 '확정할 결과'와 비교합니다. 두 번 모두 ${SKILL_PASS}점 이상이면 통과입니다(내용 50·문체 30·길이 20). 못 넘으면 차이를 알려 고치기를 ${SKILL_TRIES}번까지 합니다. 한 번 시도에 AI를 5번 부릅니다(프롬프트 1 + 변환 2 + 채점 2). ${o.free ? '저장한 프롬프트는 💬 프롬프트 목록에서 골라 다른 학생에게 적용하세요.' : '확정하면 ② 나머지 변환은 기록마다 이 프롬프트로 한 번만 변환합니다.'}` }));
+        body.appendChild(el('p', { class: 'hint', text: `이어 고친 단계(${o.chainText || ''})를 AI가 한 프롬프트로 종합하고, 그 프롬프트로 같은 원문을 2번 변환해 아래 '확정할 결과'와 비교합니다. 두 번 모두 ${SKILL_PASS}점 이상이면 통과입니다(내용 50·문체 30·길이 20). 못 넘으면 차이를 알려 고치기를 ${SKILL_TRIES}번까지 합니다. 한 번 시도에 AI를 5번 부릅니다(프롬프트 1 + 변환 2 + 채점 2, 요청 분석이 빠지면 1번 더). ${o.free ? '저장한 프롬프트는 💬 프롬프트 목록에서 골라 다른 학생에게 적용하세요.' : '확정하면 ② 나머지 변환은 기록마다 이 프롬프트로 한 번만 변환합니다.'}` }));
         const a = cur();
         if (SK.tries.length) {
           body.appendChild(el('div', { class: 'sk-tries' }, SK.tries.map((t, i) => el('button', { type: 'button', class: 'small' + (i === SK.sel ? ' primary' : ''),
@@ -4483,30 +4519,33 @@
         const cols = el('div', { class: 'sk-cols' });
         cols.appendChild(el('div', { class: 'sk-col' }, [el('div', { class: 'col-label', text: `확정할 결과(목표) · ${(o.target || '').length}자` }), el('div', { class: 'cmp-text sk-text', text: o.target || '' })]));
         if (a) a.checks.forEach((c, k) => cols.appendChild(el('div', { class: 'sk-col' }, [
-          el('div', { class: 'col-label' }, [el('b', { class: c.score >= SKILL_PASS ? 'sk-ok' : 'sk-no', text: `검증 ${k + 1} · ${c.score}점` }), ` (내용 ${c.content}·문체 ${c.style}·길이 ${c.length}) · ${c.text.length}자`]),
+          el('div', { class: 'col-label' }, [el('b', { class: c.score >= SKILL_PASS ? 'sk-ok' : 'sk-no', text: `검증 ${k + 1} · ${c.score}점` }), c.lenOn ? ` (내용 ${c.content}·문체 ${c.style}·길이 ${c.length}) · ${c.text.length}자` : ` (내용 ${c.content}·문체 ${c.style} · 제외 요청이 있어 길이는 채점 안 함) · ${c.text.length}자`]),
           c.diff ? el('div', { class: 'muted small-note', text: `차이: ${c.diff}` }) : null,
           el('div', { class: 'cmp-text sk-text', text: c.text })])));
         body.appendChild(cols);
         if (a && a.analysis && a.analysis.length) { // 요청 분석(보기만): 반영 / 일반화 / 제외
           const tbl = el('table', { class: 'sk-anal' }, [el('tr', {}, [el('th', { text: '대화 속 요청' }), el('th', { text: '분류' }), el('th', { text: '프롬프트에 넣은 규칙 · 제외한 이유' })])]);
           a.analysis.forEach((x) => tbl.appendChild(el('tr', { class: `k-${x.kind}` }, [el('td', { text: x.req }), el('td', { class: 'sk-kind', text: x.kind }), el('td', { text: x.rule })])));
-          body.appendChild(el('details', { class: 'sk-anal-box', open: true }, [el('summary', { text: `🔎 요청 분석 — 반영 ${a.analysis.filter((x) => x.kind === '반영').length} · 일반화 ${a.analysis.filter((x) => x.kind === '일반화').length} · 제외 ${a.excluded.length}` }), tbl,
-            a.excluded.length ? el('div', { class: 'muted small-note', text: '제외한 요청 때문에 생긴 차이는 검증 점수에서 깎지 않습니다.' }) : null]));
+          const nNo = a.analysis.filter((x) => x.kind === '미분석').length;
+          body.appendChild(el('details', { class: 'sk-anal-box', open: true }, [el('summary', { text: `🔎 요청 분석 — 반영 ${a.analysis.filter((x) => x.kind === '반영').length} · 일반화 ${a.analysis.filter((x) => x.kind === '일반화').length} · 제외 ${a.excluded.length}${nNo ? ` · ⚠ 미분석 ${nNo}` : ''}` }), tbl,
+            nNo ? el('div', { class: 'warn', text: `⚠ AI가 분석하지 못한 요청이 ${nNo}개 있습니다. 프롬프트에 반영됐는지 직접 확인하거나 [▶ 더 시도]하세요.` }) : null,
+            a.excluded.length ? el('div', { class: 'muted small-note', text: '제외한 요청 때문에 생긴 차이는 검증 점수에서 깎지 않습니다(길이는 채점하지 않고 내용·문체로만).' }) : null]));
         }
         if (a) {
           const ta = el('textarea', { class: 'sk-prompt', rows: 10, 'aria-label': '스킬화한 프롬프트' }); ta.value = a.prompt;
           const again = el('button', { type: 'button', class: 'small ai-btn', text: '고친 프롬프트로 다시 검증', disabled: true, onclick: () => reverify(ta.value.trim()) });
-          ta.addEventListener('input', () => { again.disabled = SK.running || !ta.value.trim() || ta.value.trim() === a.prompt.trim(); okBtn.disabled = !again.disabled; });
+          editTa = ta;
+          ta.addEventListener('input', () => { again.disabled = SK.running || !ta.value.trim() || ta.value.trim() === a.prompt.trim(); okBtn.disabled = !canConfirm(a); saveOnly.disabled = SK.running || !ta.value.trim(); });
           body.appendChild(el('div', { class: 'tw-row' }, [el('b', { text: '스킬화한 프롬프트' }), el('span', { class: 'muted', text: a.pass ? ` ✔ 통과(${a.min}점 이상)` : a.checks.length ? ` ✖ 90점 미만(가장 낮은 점수 ${a.min}점)` : ' 검증 전' }), el('span', { class: 'spacer' }), again]));
           if (a.checks.length && !!a.exFinal !== exCb.checked) body.appendChild(el('div', { class: 'warn' }, [`⚠ 예시 설정을 바꿨습니다(검증은 ${a.exFinal ? '최종 결과 예시 있음' : '예시 없음'}으로 했음). `,
             el('button', { type: 'button', class: 'small ai-btn', text: '이 예시 설정으로 다시 검증', disabled: SK.running, onclick: () => reverify(a.prompt) })]));
           if (a.copied && ta.value === a.prompt) body.appendChild(el('div', { class: 'warn', text: '⚠ 이 프롬프트에 이 학생의 원문·결과 문장이 그대로 들어 있습니다. 다른 학생 결과에 이 학생의 표현이 섞일 수 있으니, 그 부분(주로 예시)을 일반적인 문장으로 고친 뒤 [고친 프롬프트로 다시 검증]하세요.' }));
           body.appendChild(ta);
-        } else if (!SK.running) body.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '[▶ 스킬화 시작]을 누르세요.' })]));
+        } else { editTa = null; if (!SK.running) body.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '[▶ 스킬화 시작]을 누르세요.' })])); }
         startBtn.textContent = SK.tries.length ? `▶ ${SKILL_TRIES}번 더 시도` : '▶ 스킬화 시작';
         startBtn.disabled = SK.running || (a && a.pass);
         okBtn.textContent = a && !a.pass ? '그래도 이 프롬프트로 확정' : '이 프롬프트로 확정';
-        okBtn.disabled = SK.running || !a || !a.checks.length || !!a.exFinal !== exCb.checked;
+        okBtn.disabled = !canConfirm(a);
         okBtn.hidden = !!o.free; // 붙여넣은 글은 태그 설정이 없어 목록 저장만
         if (o.free) { saveOnly.classList.add('primary'); saveOnly.textContent = '프롬프트 목록에 저장'; saveCb.parentNode.hidden = true; }
         saveOnly.disabled = SK.running || !a;
@@ -4515,7 +4554,7 @@
       startBtn.addEventListener('click', run);
       okBtn.addEventListener('click', async () => {
         const a = cur();
-        if (!a) return;
+        if (!canConfirm(a)) { toast(edited(a) ? '프롬프트를 고쳤습니다. [고친 프롬프트로 다시 검증]한 뒤 확정하세요.' : '예시 설정을 바꿨습니다. 다시 검증한 뒤 확정하세요.'); return; }
         if (!a.pass && !(await confirmBox(`이 프롬프트의 검증 점수는 ${a.min}점으로 ${SKILL_PASS}점에 못 미칩니다. 나머지 기록의 결과가 이 기록과 다르게 나올 수 있습니다. 그래도 확정할까요?`, '그래도 확정'))) return;
         const name = saveCb.checked ? nameIn.value.trim() : '';
         if (saveCb.checked && !name) { toast('저장할 이름을 적어 주세요.'); nameIn.focus(); return; }
@@ -4530,7 +4569,11 @@
         const name = nameIn.value.trim();
         if (!a) return;
         if (!name) { toast('저장할 이름을 적어 주세요.'); nameIn.focus(); return; }
-        const r = await mutate('prompt_save', { name, prompt: a.prompt, example: exOf(a), made: '스킬화', tags: o.tagName ? [o.tagName] : [] });
+        // 저장은 지금 화면의 프롬프트 칸 글로(고친 글이면 검증 전임을 알리고 묻는다)
+        const text = editTa ? editTa.value.trim() : a.prompt;
+        if (!text) { toast('프롬프트가 비어 있습니다.'); return; }
+        if (edited(a) && !(await confirmBox('고친 프롬프트는 아직 검증하지 않았습니다. 그대로 목록에 저장할까요?', '검증 없이 저장'))) return;
+        const r = await mutate('prompt_save', { name, prompt: text, example: exOf(a), made: '스킬화', tags: o.tagName ? [o.tagName] : [] });
         if (r) { TW.lib = null; toast(o.free ? `프롬프트 목록에 '${name}'으로 저장했습니다. 다른 학생에게는 이 프롬프트를 골라 적용하세요.` : `프롬프트 목록에 '${name}'으로 저장했습니다(확정은 하지 않음).`); if (o.free) closeSheet(); }
       });
       if (plainBtn) plainBtn.addEventListener('click', () => { if (SK.running) return; closeSheet(); o.plain(); });
@@ -5013,12 +5056,16 @@
       if (!CW.recs.length) src.appendChild(el('span', { class: 'warn-text', text: '이 태그에 고칠 수 있는 기록이 없습니다.' }));
     } else {
       const ta = el('textarea', { rows: 3, placeholder: '변환해 볼 학생 활동 글을 붙여넣으세요(저장하지 않음, 창을 닫으면 대화도 사라짐)', 'aria-label': '붙여넣을 글' });
-      ta.value = CW.paste;
+      // 대화를 시작한 뒤에는 원문을 잠근다(보이는 원문 = AI에 가는 원문). 바꾸려면 [처음부터 새로]
+      ta.value = CW.cur ? (CW.cur.orig || CW.paste) : CW.paste;
+      ta.readOnly = !!CW.cur;
+      if (CW.cur) ta.title = '대화 중에는 원문을 바꿀 수 없습니다. 다른 글로 하려면 아래 [처음부터 새로]를 누르세요.';
       ta.addEventListener('input', () => { CW.paste = ta.value; const b = CW.box && CW.box.querySelector('.cw-msg.src .cw-text'); if (b && !CW.cur) b.textContent = ta.value || '(아직 붙여 넣은 글이 없습니다)'; });
       src.appendChild(ta);
+      if (CW.cur) src.appendChild(el('span', { class: 'muted small-note', text: '🔒 대화 중에는 원문을 바꿀 수 없습니다 — 다른 글로 하려면 [처음부터 새로]' }));
     }
     const rec = CW.mode === 'record' ? CW.recs.find((x) => x.id === CW.rid) : null;
-    const original = rec ? (rec.original && rec.original !== rec.content ? rec.original : rec.content) : CW.paste;
+    const original = rec ? (rec.original && rec.original !== rec.content ? rec.original : rec.content) : (CW.cur && CW.cur.orig) || CW.paste;
     // 대화(지금 고른 후보까지의 흐름)
     const chat = el('div', { class: 'cw-chat', role: 'log', 'aria-live': 'polite' });
     const bubble = (who, text, extra) => el('div', { class: `cw-msg ${who}` }, [el('div', { class: 'cw-who', text: who === 'me' ? '나' : who === 'ai' ? '🤖 AI' : '📄 보낸 자료(원문)' }), el('div', { class: 'cw-text', text }), extra || null]);

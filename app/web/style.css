@@ -7,7 +7,7 @@
   --input: #ffffff;
   --text: #17202b;
   --text-2: #445264;
-  --muted: #7d8a99;
+  --muted: #64748b; /* v0.20: 흰 바탕 대비 약 4.8:1(예전 #7d8a99는 3.5:1) */
   --border: #c9d3de;
   --border-strong: #a7b4c3;
   --accent: #2563eb;
@@ -1161,3 +1161,4 @@ label.inline[hidden] { display: none; }
 .cw-sys[open] > summary { margin-bottom: 4px; }
 .cw-compose { font-size: 15px; line-height: 1.6; border-radius: 12px; }
 .cw-input { background: #fff; border-color: #cbd5e1; border-radius: 14px; }
+.sk-anal tr.k-미분석 .sk-kind { color: #b91c1c; }

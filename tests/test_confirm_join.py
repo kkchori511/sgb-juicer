@@ -85,6 +85,17 @@ def test_all():
     assert ok(api.student_view(hr, "autonomy", "20301"))["final"]["text"] == before + " 독서 원문"
     ok(api.join_confirmed(hr, "autonomy", "20301", [b, a]))  # 지우고 넣기(기본)
     assert ok(api.student_view(hr, "autonomy", "20301"))["final"]["text"] == "독서 원문 봉사 고친 확정본"
+    # R6: 뺀 기록(a)도 화면 순서(order)대로 기록 순서에 저장 — 화면 b,a 에서 b만 넣음
+    ok(api.join_confirmed(hr, "autonomy", "20301", [a], False, [a, b]))
+    assert [x["id"] for x in ok(api.student_view(hr, "autonomy", "20301"))["records"]][:2] == [a, b]
+    ok(api.join_confirmed(hr, "autonomy", "20301", [b], False, [b, a]))
+    assert [x["id"] for x in ok(api.student_view(hr, "autonomy", "20301"))["records"]][:2] == [b, a]
+    assert not api.join_confirmed(hr, "autonomy", "20301", [b], False, [a])["ok"]  # 넣을 기록이 순서에 없으면 거절
+    # R1: 저장된 최종안 뒤에 붙이기(서버가 한 번에), 반환은 바꾸기 전 글
+    ok(api.edit_final(hr, "autonomy", "20301", "방금 고친 최종안"))
+    r = ok(api.final_append(hr, "autonomy", "20301", "  덧붙일   글 "))
+    assert r["prev"] == "방금 고친 최종안" and ok(api.student_view(hr, "autonomy", "20301"))["final"]["text"] == "방금 고친 최종안 덧붙일 글"
+    assert not api.final_append(hr, "autonomy", "20301", "  ")["ok"]
     ok(api.edit_final(hr, "autonomy", "20301", before))  # 아래 시험이 기대하는 최종안으로 되돌림
     # 전체 학생: 20302는 독서만, 20303은 확정 없음
     c2 = ok(api.add_record(hr, "autonomy", "20302", {"content": "둘 독서", "tag_ids": [tags["독서"]]}))["id"]

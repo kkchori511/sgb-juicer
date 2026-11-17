@@ -1180,10 +1180,10 @@ class Api:
         return {"id": self._rec().new_record_from(rid, text)}
 
     @safe
-    def join_confirmed(self, gid, item, sno, ids, append=False):
-        """append: 지금 최종안 뒤에 띄어쓰기 한 칸으로 이어 붙인다(아니면 바꿈)."""
+    def join_confirmed(self, gid, item, sno, ids, append=False, order=None):
+        """append: 지금 최종안 뒤에 띄어쓰기 한 칸으로 이어 붙인다(아니면 바꿈). order: 화면 순서(뺀 확정 기록 포함, 기록 순서로 저장)."""
         self._editable()
-        return {"prev": self._rec().join_confirmed(gid, item, sno, ids, bool(append))}
+        return {"prev": self._rec().join_confirmed(gid, item, sno, ids, bool(append), order)}
 
     @safe
     def join_bulk_view(self, gid, item):
@@ -1234,6 +1234,12 @@ class Api:
         self._editable(year)
         self._rec().edit_final(gid, item, sno, text)
         return {}
+
+    @safe
+    def final_append(self, gid, item, sno, text, year=None):
+        """지금 최종안 뒤에 띄어쓰기 한 칸으로 이어 붙인다(저장된 글 기준, 한 번에). 반환: 바꾸기 전 최종안 글(되돌리기용)."""
+        self._editable(year)
+        return {"prev": self._rec().final_append(gid, item, sno, text)}
 
     @safe
     def reorder_records(self, gid, item, sno, ids):
@@ -1919,12 +1925,16 @@ class Api:
         if not prompt:
             raise openrouter.LlmError("AI가 프롬프트를 쓰지 않았습니다. 다시 시도해 주세요.")
         reqs = [s["request"] for s in chain["steps"] if s["request"]]
-        if not analysis and reqs:  # 분석을 빼먹었으면 분석만 한 번 더(짧은 호출)
+        missing = self._unanalyzed(reqs, analysis)
+        if missing:  # 분석이 빠졌거나 일부만 왔으면 빠진 요청만 한 번 더(짧은 호출)
             try:
-                analysis, c2 = self._skill_analyze(reqs, prompt, model_index)
+                more, c2 = self._skill_analyze(missing, prompt, model_index)
                 cost += c2
+                analysis = analysis + more
             except (openrouter.LlmError, db.DbError):
-                analysis = []
+                pass
+            for r in self._unanalyzed(reqs, analysis):  # 그래도 빠진 요청은 '미분석'으로 남겨 알린다
+                analysis.append({"req": r[:300], "kind": "미분석", "rule": "AI가 분석하지 못했습니다. 프롬프트에 반영됐는지 직접 확인하세요."})
         excluded = [a["req"] for a in analysis if a["kind"] == "제외"]
         return self._ai_out({"prompt": prompt, "example": example, "analysis": analysis, "excluded": excluded,
                              "cost": cost, "model": model, "copied": _copied(prompt, [src, final])})
@@ -1942,6 +1952,13 @@ class Api:
 
     SKILL_COMPOSE_EXTRA = ("\n\n[이번 작업(스킬화)의 예외]\n- 재료의 [1단계 — 요청 분석]에서 '제외'로 나눈 요청은 규칙으로 만들지 않습니다(위의 '빠짐없이 규칙으로'보다 우선).\n"
                            "- 출력은 재료의 [출력 형식]대로 <요청 분석>과 <프롬프트> 두 부분을 씁니다(위의 '프롬프트 본문만'보다 우선).")
+
+    @staticmethod
+    def _unanalyzed(reqs, analysis):
+        """분석표에 없는 요청(한 요청을 여러 줄로 나눴거나 줄였을 수 있어 글이 서로 들어 있으면 분석한 것으로 본다)."""
+        norm = lambda t: "".join(str(t or "").split())  # noqa: E731
+        got = [norm(a["req"]) for a in analysis if a.get("req")]
+        return [r for r in reqs if not any(g and (g in norm(r) or norm(r) in g) for g in got)]
 
     @staticmethod
     def _skill_parse(text):
@@ -2009,8 +2026,11 @@ class Api:
         content, style, diff = self._judge_parse(jt)
         a, b = len(final.strip()), len(out.strip())
         length = round(100 * min(a, b) / max(a, b, 1))
-        score = round(content * 0.5 + style * 0.3 + length * 0.2)
-        return self._ai_out({"text": out, "score": score, "content": round(content), "style": round(style), "length": length,
+        if picks:  # 제외한 요청(문장 빼기 등)은 길이도 바꾸므로 길이는 채점하지 않고 내용·문체만(5:3 비율 그대로)
+            score = round(content * 0.625 + style * 0.375)
+        else:
+            score = round(content * 0.5 + style * 0.3 + length * 0.2)
+        return self._ai_out({"text": out, "score": score, "content": round(content), "style": round(style), "length": length, "length_scored": not picks,
                              "diff": diff, "cost": c1 + c2, "model": model})
 
     @safe
