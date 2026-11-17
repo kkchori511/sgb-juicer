@@ -1774,10 +1774,10 @@ class Api:
         "- 출력은 완성된 프롬프트 본문만 씁니다. 설명·머리말·코드 블록 표시(```)를 붙이지 않습니다."
     )
 
-    def _compose(self, material, model_index):
+    def _compose(self, material, model_index, extra_rule=""):
         from . import prompt_default
         cfg, model = self._model(model_index)
-        system = self.COMPOSE_RULE + "\n\n[참고: 기본 프롬프트]\n<기본>\n" + prompt_default.DEFAULT_TEXT + "\n</기본>"
+        system = self.COMPOSE_RULE + extra_rule + "\n\n[참고: 기본 프롬프트]\n<기본>\n" + prompt_default.DEFAULT_TEXT + "\n</기본>"
         text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, material, cfg["privacy_block"], extra=False)
         text = text.strip()
         if text.startswith("```"):
@@ -1795,15 +1795,13 @@ class Api:
 
     @staticmethod
     def _chain_material(chain):
-        """단계(처음 지침 + 이어서 한 요청)를 프롬프트 종합 재료 글로. 그 기록에만 맞는 요청(only_here)은 뺀다."""
+        """단계(처음 지침 + 이어서 한 요청)를 프롬프트 종합 재료 글로. v0.20부터 대화를 빼지 않고 모두 넣는다(학생 특이 요구는 스킬화가 분석)."""
         parts = ["[재료: 대화로 다듬은 과정]", "1) 처음 지침:", chain["steps"][0]["prompt"]]
         if chain["steps"][0]["example"]:
             parts += ["처음 지침의 예시:", chain["steps"][0]["example"]]
         if chain["steps"][0]["request"]:
             parts += [f"처음 추가 요청: {chain['steps'][0]['request']}"]
         for i, s in enumerate(chain["steps"][1:], 2):
-            if s.get("only_here"):  # 원문에서 고른 부분을 넣은 것처럼 그 학생에게만 맞는 요구는 규칙으로 만들지 않는다
-                continue
             if s["prompt"]:
                 parts += [f"{i}) 지침을 이렇게 바꿈:", s["prompt"]]
             if s["request"]:
@@ -1824,21 +1822,29 @@ class Api:
             parts += [f"처음 추가 요청: {steps[0]['request']}"]
         parts += ["", "[1] 교사가 보낸 글: (아래 <원문>)", f"[1] AI 결과:\n{str(turns[0])[:20000]}"]
         for i, st in enumerate(steps[1:], 1):
-            mark = " (이 학생에게만 맞는 요청 — 규칙으로 만들지 않음)" if st.get("only_here") else ""
             if st["prompt"]:
                 parts += [f"[{i + 1}] 교사가 지침을 이렇게 바꿈:", st["prompt"]]
             if st["request"]:
-                parts += [f"[{i + 1}] 교사 요청{mark}: {st['request']}"]
+                parts += [f"[{i + 1}] 교사 요청: {st['request']}"]
             parts += [f"[{i + 1}] AI 결과: (아래 <목표 결과>)" if i == len(steps) - 1 else f"[{i + 1}] AI 결과:\n{str(turns[i])[:20000]}"]
         return parts
 
     # ---------- 스킬화: 이어 고친 단계를 한 프롬프트로 종합하고, 같은 원문으로 다시 돌려 결과가 비슷한지 검증 ----------
     SKILL_RULE = (
-        "[목표] 아래 <원문>에 완성 프롬프트를 '한 번' 적용했을 때 <목표 결과>와 같은 결과(다루는 내용의 범위, 문체와 종결 방식, 문장 구성, 문단 구성, 길이)가 나오게 하는 완성 프롬프트를 쓰세요.\n"
-        "- 교사가 처음 지침에 이어 요청을 덧붙이며 결과를 다듬었습니다. 이 과정을 모두 한 프롬프트에 녹여, 단계를 거치지 않아도 같은 결과가 나오게 합니다.\n"
-        "- '더 짧게'처럼 앞 결과에 기대는 요청은 <목표 결과>를 기준으로 절대 기준(약 몇 자, 몇 문장, 문단 수)으로 바꿉니다.\n"
-        "- 이 프롬프트는 같은 태그의 다른 학생 기록에도 씁니다. 원문·목표 결과에 나온 이 학생만의 사실(활동 이름, 책 제목, 수치 등)을 규칙이나 예시로 넣지 말고 일반 규칙으로 씁니다.\n"
-        "- <목표 결과>나 <원문>의 문장·구절을 프롬프트에 옮겨 적지 않습니다(틀린/옳은 예시도 이 학생의 활동이 아닌 다른 일반 활동으로 새로 만듭니다).")
+        "[목표] 교사가 한 학생의 <원문>으로 AI와 대화하며 결과를 다듬어 <목표 결과>를 얻었습니다. 이 대화 전체를 분석해, <원문>에 '한 번' 적용하면 <목표 결과>와 같은 결과"
+        "(다루는 내용의 범위, 문체와 종결 방식, 문장 구성, 문단 구성, 길이)가 나오는 완성 프롬프트를 쓰세요. 이 프롬프트는 같은 태그의 다른 학생 기록에도 그대로 씁니다.\n\n"
+        "[1단계 — 요청 분석] 대화 속 교사 요청(처음 추가 요청 포함)을 빠짐없이 하나씩 보고 셋 중 하나로 나눕니다.\n"
+        "- 반영: 어느 학생에게나 통하는 요청(예: 더 짧게, 배운 점으로 끝내기, ~함 체로). 앞 결과에 기대는 말('더 짧게', '조금 더')은 <목표 결과>를 기준으로 절대 기준(약 몇 자, 몇 문장, 문단 수)으로 바꿉니다.\n"
+        "- 일반화: 이 학생의 특정 내용을 가리키지만 그 뜻을 다른 학생에게도 같은 방식으로 적용할 수 있는 요청. 비슷한 방식의 일반 규칙으로 바꿉니다"
+        "(예: '원문의 토론 내용도 넣어' → '원문에 토론·발표처럼 다른 사람과 주고받은 활동이 있으면 빠뜨리지 말고 넣는다').\n"
+        "- 제외: 이 학생의 글에만 해당해 다른 학생에게 옮길 수 없는 요청(예: '세 번째 문장 빼', 특정 책 이름·수치 고치기). 규칙으로 만들지 않습니다.\n"
+        "- 앞 요청을 뒤 요청이 뒤집었으면 마지막 요청을 따릅니다.\n\n"
+        "[2단계 — 프롬프트 쓰기] 처음 지침을 바탕으로, '반영'·'일반화' 규칙을 모두 녹여 단계를 거치지 않아도 같은 결과가 나오는 프롬프트 한 편을 씁니다.\n"
+        "- 원문·목표 결과에 나온 이 학생만의 사실(활동 이름, 책 제목, 수치 등)을 규칙이나 예시로 넣지 않습니다.\n"
+        "- <목표 결과>나 <원문>의 문장·구절을 프롬프트에 옮겨 적지 않습니다(틀린/옳은 예시도 이 학생의 활동이 아닌 다른 일반 활동으로 새로 만듭니다).\n\n"
+        "[출력 형식] 아래 두 부분만 이 순서로 씁니다(다른 설명 없이).\n"
+        "<요청 분석>\n- 요청: (교사 요청 그대로) | 분류: 반영 또는 일반화 또는 제외 | 규칙: (프롬프트에 넣은 규칙, 제외면 제외한 이유)\n(요청마다 한 줄)\n</요청 분석>\n"
+        "<프롬프트>\n(완성 프롬프트 전체)\n</프롬프트>")
     JUDGE_RULE = (
         "[유사도 채점] 당신은 생활기록부 문장 두 편이 얼마나 비슷한지 채점합니다. <목표>와 <결과>를 비교해 아래 JSON 한 줄만 출력합니다(설명·코드 블록 없이).\n"
         '{"내용": 0~100, "문체": 0~100, "차이": "점수를 깎은 이유를 짧게(여러 개면 ; 로 구분, 없으면 빈 글)"}\n'
@@ -1859,9 +1865,8 @@ class Api:
         if not src.strip():
             raise db.DbError("원문이 비어 있습니다.")
         final = x["edited"] if x["edited"] is not None else x["text"]
-        picks = [s["request"] for s in chain["steps"] if s.get("only_here")]
         example = effective(chain, len(chain["steps"]) - 1)[1]
-        return tw, x, chain, src, final, picks, example
+        return tw, x, chain, src, final, [], example
 
     @safe
     def tag_skill_compose(self, cid, prev=None, model_index=None, year=None):
@@ -1876,8 +1881,7 @@ class Api:
         src, final = str(src or "").strip()[:20000], str(final or "").strip()[:20000]
         if not src or not final:
             raise db.DbError("원문과 결과가 있어야 스킬화할 수 있습니다.")
-        picks = [s["request"] for s in chain["steps"] if s.get("only_here")]
-        return chain, src, final, picks, effective(chain, len(chain["steps"]) - 1)[1]
+        return chain, src, final, [], effective(chain, len(chain["steps"]) - 1)[1]
 
     @safe
     def skill_compose_free(self, chain, src, final, prev=None, model_index=None, turns=None):
@@ -1886,23 +1890,54 @@ class Api:
         return self._skill_compose(chain, src, final, picks, example, prev, model_index, turns)
 
     @safe
-    def skill_check_free(self, chain, src, final, prompt, example="", model_index=None):
-        chain, src, final, picks, _ex = self._free_ctx(chain, src, final)
-        return self._skill_check(chain, src, final, picks, prompt, example, model_index)
+    def skill_check_free(self, chain, src, final, prompt, example="", model_index=None, excluded=None):
+        chain, src, final, _p, _ex = self._free_ctx(chain, src, final)
+        return self._skill_check(chain, src, final, excluded, prompt, example, model_index)
 
     def _skill_compose(self, chain, src, final, picks, example, prev, model_index, turns=None):
         parts = [self.SKILL_RULE, ""] + (self._chat_material(chain, turns) or self._chain_material(chain))
         if example:
             parts += ["(예시는 프롬프트와 따로 함께 쓰이므로 프롬프트 안에 옮겨 적지 않습니다.)"]
-        if picks:
-            parts += ["(이 학생에게만 원문 일부를 넣으라고 한 요청이 있었습니다. 그 내용은 규칙으로 만들지 않습니다: " + " / ".join(picks) + ")"]
         parts += ["", f"<원문>\n{src}\n</원문>", "", f"<목표 결과>(약 {len(final)}자)\n{final}\n</목표 결과>"]
         if prev and str((prev or {}).get("prompt") or "").strip():
             parts += ["", "[지난 시도] 아래 프롬프트로 원문을 변환했더니 목표 결과와 달랐습니다. 차이가 없어지도록 프롬프트를 고쳐 처음부터 다시 쓰세요.",
                       f"<지난 프롬프트>\n{str(prev['prompt'])[:20000]}\n</지난 프롬프트>",
                       f"<지난 결과>\n{str(prev.get('out') or '')[:20000]}\n</지난 결과>", f"<차이>\n{str(prev.get('diff') or '')[:2000]}\n</차이>"]
-        text, cost, model = self._compose("\n".join(parts), model_index)
-        return self._ai_out({"prompt": text, "example": example, "cost": cost, "model": model, "copied": _copied(text, [src, final])})
+        text, cost, model = self._compose("\n".join(parts), model_index, self.SKILL_COMPOSE_EXTRA)
+        prompt, analysis = self._skill_parse(text)
+        if not prompt:
+            raise openrouter.LlmError("AI가 프롬프트를 쓰지 않았습니다. 다시 시도해 주세요.")
+        excluded = [a["req"] for a in analysis if a["kind"] == "제외"]
+        return self._ai_out({"prompt": prompt, "example": example, "analysis": analysis, "excluded": excluded,
+                             "cost": cost, "model": model, "copied": _copied(prompt, [src, final])})
+
+    SKILL_COMPOSE_EXTRA = ("\n\n[이번 작업(스킬화)의 예외]\n- 재료의 [1단계 — 요청 분석]에서 '제외'로 나눈 요청은 규칙으로 만들지 않습니다(위의 '빠짐없이 규칙으로'보다 우선).\n"
+                           "- 출력은 재료의 [출력 형식]대로 <요청 분석>과 <프롬프트> 두 부분을 씁니다(위의 '프롬프트 본문만'보다 우선).")
+
+    @staticmethod
+    def _skill_parse(text):
+        """스킬화 답 → (프롬프트, 요청 분석 [{req, kind, rule}]). 형식을 안 지켰으면 글 전체를 프롬프트로."""
+        import re as _re
+        t = text or ""
+        m = _re.search(r"<프롬프트>\s*(.*?)\s*(?:</프롬프트>|$)", t, _re.S)
+        prompt = (m.group(1) if m else _re.sub(r"<요청 분석>.*?</요청 분석>", "", t, flags=_re.S)).strip()
+        if prompt.startswith("```"):
+            prompt = prompt.strip("`").split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        rows = []
+        a = _re.search(r"<요청 분석>(.*?)</요청 분석>", t, _re.S)
+        for line in (a.group(1).splitlines() if a else []):
+            line = line.strip().lstrip("-•* ").strip()
+            if not line or "|" not in line:
+                continue
+            cells = {}
+            for part in line.split("|"):
+                k, _, v = part.partition(":")
+                cells[k.strip()] = v.strip()
+            kind = next((x for x in ("반영", "일반화", "제외") if x in cells.get("분류", "")), "")
+            req = cells.get("요청", "")
+            if req and kind:
+                rows.append({"req": req[:300], "kind": kind, "rule": cells.get("규칙", "")[:500]})
+        return prompt, rows[:30]
 
     @staticmethod
     def _judge_parse(text):
@@ -1926,10 +1961,10 @@ class Api:
         return num("내용", "content"), num("문체", "style"), str(d.get("차이") or d.get("diff") or "").strip()[:1000]
 
     @safe
-    def tag_skill_check(self, cid, prompt, example="", model_index=None, year=None):
+    def tag_skill_check(self, cid, prompt, example="", model_index=None, year=None, excluded=None):
         """검증 한 번: 스킬화한 프롬프트로 같은 원문을 한 번에 변환하고, 확정할 결과와 AI로 비교 채점한다(내용 50·문체 30·길이 20)."""
-        _, x, chain, src, final, picks, _ex = self._skill_ctx(cid, year)
-        return self._skill_check(chain, src, final, picks, prompt, example, model_index)
+        _, x, chain, src, final, _p, _ex = self._skill_ctx(cid, year)
+        return self._skill_check(chain, src, final, excluded, prompt, example, model_index)
 
     def _skill_check(self, chain, src, final, picks, prompt, example, model_index):
         prompt = str(prompt or "").strip()
@@ -1939,7 +1974,8 @@ class Api:
         key = cfg["openrouter_key"].strip()
         one = norm_chain({"src": chain["src"], "steps": [{"prompt": prompt, "example": str(example or "")}]})
         out, c1 = self._call_ai(key, model, step_system(one, 0), src, cfg["privacy_block"], extra=False, temperature=TAG_TEMP)
-        judge = self.JUDGE_RULE + (("\n- 다음 요청으로 이 학생에게만 넣은 내용은 결과에 없어도 깎지 않습니다: " + " / ".join(picks)) if picks else "")
+        picks = [str(x)[:300] for x in (picks or []) if str(x).strip()][:30]  # 스킬화가 '제외'로 나눈 이 학생만의 요청
+        judge = self.JUDGE_RULE + (("\n- 다음 요청은 이 학생에게만 맞아 프롬프트에서 뺐습니다. 이 요청 때문에 생긴 차이(빠지거나 남은 내용)는 깎지 않습니다: " + " / ".join(picks)) if picks else "")
         jt, c2 = self._call_ai(key, model, judge, f"<목표>\n{final}\n</목표>\n\n<결과>\n{out}\n</결과>", cfg["privacy_block"], extra=False, temperature=0)
         content, style, diff = self._judge_parse(jt)
         a, b = len(final.strip()), len(out.strip())

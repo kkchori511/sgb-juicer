@@ -5,7 +5,7 @@
 
 - 단계(chain): {"src": "original"|"current", "steps": [{"prompt", "example", "request"[, "with_src", "only_here"]}]}
   with_src: 이어 고칠 때 원문(첫 단계에 보낸 글)도 함께 보내 빠진 내용을 다시 가져올 수 있게 한다.
-  only_here: 원문에서 고른 부분처럼 그 기록에만 맞는 요청 — 나머지 변환(재현)에서는 뺀다.
+  only_here: (v0.19까지) 원문에서 고른 부분처럼 그 기록에만 맞는 요청 표시. v0.20부터는 빼지 않고 스킬화가 분석한다.
   첫 단계는 src 글(처음 원문=records.original 또는 지금 내용)에 prompt를 적용, 다음 단계는 앞 결과에 request(짧은 요청)를 적용한다.
 - 기록 내용 버전(records.content_ver)으로 '만든 뒤 원문이 바뀌었는지'를 확인한다. AI를 기다리는 동안 DB를 잡고 있지 않는다.
 - 기록·태그가 지워져도 이력은 남긴다(외래 키 없음).
@@ -119,8 +119,8 @@ def chat_messages(chain, src, outs):
 
 
 def replay_chain(chain):
-    """나머지 변환에 쓸 단계: 그 기록에만 맞는 단계(only_here)는 뺀다."""
-    return {**chain, "steps": [s for i, s in enumerate(chain.get("steps") or []) if i == 0 or not s.get("only_here")]}
+    """나머지 변환에 쓸 단계. v0.20부터 대화는 빼지 않고 모두 쓴다(학생 특이 요구는 스킬화에서 분석·제외)."""
+    return {**chain, "steps": list(chain.get("steps") or [])}
 
 
 def signature(chain):

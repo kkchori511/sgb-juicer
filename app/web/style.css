@@ -1132,3 +1132,12 @@ label.inline[hidden] { display: none; }
 /* 대화 마법사: 스킬화 안내 */
 .cw-tip { margin: 0 0 8px; padding: 8px 12px; border: 1px solid #fcd34d; background: #fffbeb; border-radius: var(--radius-sm); font-size: 13.5px; line-height: 1.55; }
 .cw-tip-warn { margin-top: 4px; color: #b45309; font-weight: 700; }
+/* 스킬화: 요청 분석표 */
+.sk-anal-box { margin: 8px 0; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; background: var(--surface); }
+.sk-anal-box > summary { cursor: pointer; font-weight: 700; }
+.sk-anal { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 13px; }
+.sk-anal th, .sk-anal td { border: 1px solid var(--border); padding: 4px 6px; text-align: left; vertical-align: top; }
+.sk-anal .sk-kind { white-space: nowrap; font-weight: 800; }
+.sk-anal tr.k-반영 .sk-kind { color: #166534; }
+.sk-anal tr.k-일반화 .sk-kind { color: #1d4ed8; }
+.sk-anal tr.k-제외 .sk-kind { color: #b45309; }

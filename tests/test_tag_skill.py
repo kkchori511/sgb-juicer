@@ -14,8 +14,9 @@ def fake_chat(key, model, system, user, privacy_block=False, history=None):
     CALLS.append((system, user, getattr(openrouter._tl, "temp", None)))
     if "[유사도 채점]" in system:
         return "채점 결과: " + JUDGE["v"], 0.0001
-    if "[목표] 아래 <원문>" in user:
-        return "```\n# 역할\n종합 프롬프트\n```", 0.001
+    if "[목표]" in user and "<목표 결과>" in user:
+        return ("<요청 분석>\n- 요청: 더 짧게 | 분류: 반영 | 규칙: 약 20자\n- 요청: 원문의 \"토론함\"을 넣어 줘 | 분류: 제외 | 규칙: 이 학생 글에만 해당\n</요청 분석>\n"
+                "<프롬프트>\n# 역할\n종합 프롬프트\n</프롬프트>"), 0.001
     return "결과글" + "가" * 20, 0.001
 
 
@@ -53,22 +54,23 @@ def test_skill():
     c2 = ok(api.tag_trial_run(w["id"], rids[0], {"src": "original", "steps": [s1, s2]}, c1))["id"]
     s3 = {"prompt": "", "example": "", "request": '원문의 "토론함"을 넣어 줘', "with_src": True, "only_here": True}
     c3 = ok(api.tag_trial_run(w["id"], rids[0], {"src": "original", "steps": [s1, s2, s3]}, c2))["id"]
-    # 종합: 단계·원문·목표 결과가 재료에, 📌 요청은 규칙에서 뺌
+    # 종합(v0.20): 대화를 모두 재료로, AI가 요청을 반영·일반화·제외로 분석
     r = ok(api.tag_skill_compose(c3))
     user = CALLS[-1][1]
     assert r["prompt"] == "# 역할\n종합 프롬프트" and r["example"] == "예시글" and r["copied"] is False
+    assert [x["kind"] for x in r["analysis"]] == ["반영", "제외"] and r["excluded"] == ['원문의 "토론함"을 넣어 줘']
     from app.api import _copied
     assert _copied("[옳은예시] : 원문1 책을 읽고 토론함 내용", ["원문1 책을 읽고 토론함"], n=8) and not _copied("일반 규칙", ["원문1 책을 읽고 토론함"], n=8)
     assert "지침A" in user and "더 짧게" in user and "<원문>\n원문1 책을 읽고 토론함\n</원문>" in user and "<목표 결과>" in user
-    assert "규칙으로 만들지 않습니다" in user and "3) 결과를 보고" not in user
+    assert "[1단계 — 요청 분석]" in user and '원문의 "토론함"을 넣어 줘' in user and "[이번 작업(스킬화)의 예외]" in CALLS[-1][0]
     # 지난 시도의 차이를 넘기면 고치기 재료에 들어감
     ok(api.tag_skill_compose(c3, {"prompt": "옛 프롬프트", "out": "옛 결과", "diff": "평가 문장 빠짐"}))
     assert "<지난 프롬프트>\n옛 프롬프트" in CALLS[-1][1] and "평가 문장 빠짐" in CALLS[-1][1]
     # 검증: 같은 원문 한 번 변환(TAG_TEMP) + 채점(0), 점수 = 내용 50 + 문체 30 + 길이 20
     n = len(CALLS)
-    v = ok(api.tag_skill_check(c3, "# 역할\n종합 프롬프트", "예시글"))
+    v = ok(api.tag_skill_check(c3, "# 역할\n종합 프롬프트", "예시글", None, None, r["excluded"]))
     assert len(CALLS) == n + 2 and CALLS[n][1] == "원문1 책을 읽고 토론함" and CALLS[n][2] == TAG_TEMP and CALLS[n + 1][2] == 0
-    assert "예시글" in CALLS[n][0] and "토론함" in CALLS[n + 1][0]  # 예시는 함께, 📌 요청은 감점 빼기 안내
+    assert "예시글" in CALLS[n][0] and "토론함" in CALLS[n + 1][0]  # 예시는 함께, 제외한 요청은 감점 빼기 안내
     assert v["content"] == 96 and v["style"] == 92 and v["length"] == 100 and v["score"] == round(96 * .5 + 92 * .3 + 100 * .2)
     JUDGE["v"] = "알 수 없음"
     assert not api.tag_skill_check(c3, "p", "")["ok"]

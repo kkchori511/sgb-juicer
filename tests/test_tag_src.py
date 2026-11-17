@@ -1,4 +1,4 @@
-"""태그 AI 변환 이어 고치기: 대화 누적(v0.20, 원문 → 결과1 → 요청2 …)·원문에서 고른 부분(only_here, 나머지 변환에서 뺌)."""
+"""태그 AI 변환 이어 고치기: 대화 누적(v0.20, 원문 → 결과1 → 요청2 …), 대화는 빼지 않고 모두 씀."""
 import os, sys, tempfile
 DATA = tempfile.mkdtemp()
 os.environ["SGB_DATA_DIR"] = DATA
@@ -59,18 +59,18 @@ def test_src():
     ok(api.tag_cand_delete(c1)); ok(api.tag_cand_delete(c2))
     ok(api.tag_trial_run(w["id"], rids[0], {"src": "original", "steps": [s1, s2, s3, {"prompt": "", "example": "", "request": "짧게"}]}, c3))
     assert [h[1] for h in CALLS[-1][2]] == ["결과1", "결과2", "결과3"], CALLS[-1][2]
-    # 이 기록만 단계 → 확정 후 나머지 변환에서는 빠짐
+    # v0.20: 대화는 빼지 않음 — (예전처럼 단계 그대로 확정한 설정이 있으면) 나머지 변환도 모든 단계를 대화로
     ok(api.tag_confirm(c3, True))
     run = ok(api.tag_run_create(w["id"], rids[1:]))["run"]
-    assert len(run["chain"]["steps"]) == 2 and not any(s.get("only_here") for s in run["chain"]["steps"])
+    assert len(run["chain"]["steps"]) == 3
     n = len(CALLS)
     ok(api.tag_run_item(run["id"], rids[1]))
-    assert len(CALLS) == n + 2
-    assert CALLS[-2][1] == "원문2 책을 읽고 토론함" and CALLS[-2][2] == []
-    assert CALLS[-1][2] == [("원문2 책을 읽고 토론함", f"결과{n + 1}")] and "토론 내용도 넣어" in CALLS[-1][1]
-    # 프롬프트 제작: 이 기록만 단계는 빼고, 원문 함께 단계는 표시
+    assert len(CALLS) == n + 3
+    assert CALLS[-3][1] == "원문2 책을 읽고 토론함" and CALLS[-3][2] == []
+    assert CALLS[-2][2] == [("원문2 책을 읽고 토론함", f"결과{n + 1}")] and "토론 내용도 넣어" in CALLS[-2][1]
+    # 프롬프트 제작: 모든 요청을 재료로
     ok(api.prompt_compose({"src": "original", "steps": [s1, s2, s3]}))
-    assert "토론 내용도 넣어" in CALLS[-1][1] and "토론함\" 내용" not in CALLS[-1][1]
+    assert "토론 내용도 넣어" in CALLS[-1][1] and "토론함\" 내용" in CALLS[-1][1]
     # 붙여넣은 글 대화: orig → 앞 결과들 누적
     ok(api.prompt_chat_free({"src": "original", "steps": [s1, s2]}, "앞 결과", None, "붙여넣은 원문", ["앞 결과"]))
     assert CALLS[-1][2] == [("붙여넣은 원문", "앞 결과")]
@@ -79,7 +79,7 @@ def test_src():
     # 스킬화 재료(v0.20): 실제 대화 순서(중간 결과 포함), 이 기록만 요청은 표시
     ok(api.tag_skill_compose(c3))
     m = CALLS[-1][1]
-    assert "[재료: 실제 대화" in m and "[1] AI 결과:\n결과1" in m and "[2] AI 결과:\n결과2" in m and "이 학생에게만 맞는 요청" in m and "(아래 <목표 결과>)" in m, m
+    assert "[재료: 실제 대화" in m and "[1] AI 결과:\n결과1" in m and "[2] AI 결과:\n결과2" in m and '원문의 "토론함" 내용' in m and "(아래 <목표 결과>)" in m, m
     # 붙여넣은 글 스킬화: 화면의 원문·결과로
     r = ok(api.skill_compose_free({"src": "original", "steps": [s1, s2]}, "붙여넣은 원문", "결과B"))
     assert "<원문>\n붙여넣은 원문" in CALLS[-1][1] and "결과B" in CALLS[-1][1]
