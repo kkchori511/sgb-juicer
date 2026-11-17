@@ -221,19 +221,22 @@
   const confirmBox = (m, okText) => modal(m, true, false, okText);
   // 최종안에 글 넣기: 최종안이 있으면 '뒤에 이어 붙이기 / 지우고 넣기'를 묻는다. → 'append' | 'replace' | null(취소). 비어 있으면 'replace'
   const appendFinal = (prev, add) => `${String(prev || '').trimEnd()} ${String(add || '').trim()}`.trim();
-  async function askFinalMode(prev, add, target, label) {
+  async function askFinalMode(prev, add, target, label, withCursor) {
     if (!String(prev || '').trim()) return 'replace';
     if (String(prev).trim() === String(add || '').trim()) return 'replace';
     const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const pb = bytesOf(String(prev).trim()), ab = bytesOf(String(add || '').trim()), sum = bytesOf(appendFinal(prev, add));
     const over = target && sum > target;
     const html = `<div class="fin-mode"><b>${label ? `${esc(label)}의 ` : ''}지금 최종안이 있습니다(${pb}B).</b> 새 글(${ab}B)을 어떻게 넣을까요?`
-      + `<div class="fin-mode-btns"><button type="button" class="primary" id="finAppend">뒤에 이어 붙이기 → 합계 <span class="${over ? 'bytes over' : ''}">${sum}B${target ? ` / ${target}B` : ''}</span></button></div>`
-      + `<p class="hint">이어 붙이기는 지금 최종안 뒤에 띄어쓰기 한 칸으로 붙입니다(줄바꿈 없음). 어느 쪽이든 넣은 직후 [되돌리기]로 원래 최종안을 돌려놓을 수 있습니다.</p></div>`;
+      + `<div class="fin-mode-btns"><button type="button" class="primary" id="finAppend">뒤에 이어 붙이기 → 합계 <span class="${over ? 'bytes over' : ''}">${sum}B${target ? ` / ${target}B` : ''}</span></button>`
+      + (withCursor ? ` <button type="button" id="finCursor" title="최종안 칸에서 마지막으로 커서를 둔 자리(없으면 맨 끝)에 끼워 넣습니다">커서 자리에 넣기</button>` : '') + `</div>`
+      + `<p class="hint">이어 붙이기는 지금 최종안 뒤에 띄어쓰기 한 칸으로 붙입니다(줄바꿈 없음). ${withCursor ? '넣은 뒤 최종안 칸에서 Ctrl+Z로 되돌릴 수 있습니다.' : '어느 쪽이든 넣은 직후 [되돌리기]로 원래 최종안을 돌려놓을 수 있습니다.'}</p></div>`;
     let mode = 'replace';
     const p = modal(html, true, true, '지우고 넣기', '취소');
     const b = $('finAppend');
     if (b) b.addEventListener('click', () => { mode = 'append'; $('modalOk').click(); });
+    const bc = $('finCursor');
+    if (bc) bc.addEventListener('click', () => { mode = 'cursor'; $('modalOk').click(); });
     return (await p) ? mode : null;
   }
   // 최종안 칸에 쓰던 글을 먼저 저장한 뒤, 서버에 저장된 지금 최종안 글을 읽는다(선택 창·바이트·되돌리기가 같은 글을 쓰게). 실패하면 null
@@ -2431,10 +2434,20 @@
   // ---------- 후보 문장을 최종안에 넣기 ----------
   // 최종안의 커서 자리(없으면 맨 끝)에 넣는다. 브라우저 되돌리기(Ctrl+Z)가 되도록 insertText를 쓴다.
   const draftOpen = () => !!(activeDraft && activeDraft.ta && activeDraft.ta.isConnected);
-  // 고른 글 넣기(지금은 커서 자리에 넣음 — 넣는 방식은 다음 항목에서 정함)
-  function insertSelected(t, done) {
-    const where = draftOpen() ? '작성 칸' : '최종안';
-    if (insertToFinal(t)) { if (done) done(); toast(`고른 부분을 ${where}에 넣었습니다. Ctrl+Z로 되돌릴 수 있습니다.`); }
+  // 고른 글 넣기: 작성 칸이 열려 있으면 커서 자리에. 최종안이 있으면 [뒤에 이어 붙이기 / 지우고 넣기 / 커서 자리에 넣기]를 묻는다(최종안 칸에서 바꾸므로 Ctrl+Z 됨)
+  async function insertSelected(t, done) {
+    if (draftOpen()) { if (insertToFinal(t)) { if (done) done(); toast('고른 부분을 작성 칸에 넣었습니다. Ctrl+Z로 되돌릴 수 있습니다.'); } return; }
+    const fd = finalDraft;
+    if (!fd || !fd.ta || !fd.ta.isConnected) { toast('최종안 칸이 보이는 화면에서 쓸 수 있습니다.'); return; }
+    if (fd.ro || fd.ta.disabled) { toast('마감되었거나 읽기 전용이라 최종안에 넣을 수 없습니다.'); return; }
+    const ta = fd.ta;
+    const mode = await askFinalMode(ta.value, t, R.target, null, true);
+    if (!mode) return;
+    if (mode === 'append') ta._sel = [ta.value.length, ta.value.length];
+    if (mode === 'replace') ta._sel = [0, ta.value.length];
+    if (!insertInto(ta, t)) return;
+    if (done) done();
+    toast(`고른 부분을 최종안${mode === 'append' ? ' 뒤에 붙였습니다' : mode === 'replace' ? '으로 바꿨습니다' : '의 커서 자리에 넣었습니다'}. Ctrl+Z로 되돌릴 수 있습니다.`);
   }
   function insertToFinal(text) {
     if (draftOpen()) return insertInto(activeDraft.ta, text);
