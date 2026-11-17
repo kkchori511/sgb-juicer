@@ -64,6 +64,11 @@ def test():
     # 일괄 종합 준비 정보
     for i in range(3):
         x = ok(api.ai_synth(hr, "career", "20302", [r3], None)); ok(api.lock_result(x["id"], True))
+    # 후보 글 고치기: 저장·'고침' 표시, 빈 글은 거절
+    ok(api.edit_result(x["id"], "  고친 후보 글  "))
+    got = [c for c in ok(api.student_view(hr, "career", "20302"))["results"] if c["id"] == x["id"]][0]
+    assert got["text"] == "고친 후보 글" and got["meta"]["edited"] is True
+    assert not api.edit_result(x["id"], "   ")["ok"]
     info = {s["student_no"]: s for s in ok(api.batch_info(hr, "career"))["students"]}
     assert info["20301"]["records"] == 2 and not info["20301"]["all_locked"]
     assert info["20302"]["all_locked"] and info["20303"]["records"] == 0

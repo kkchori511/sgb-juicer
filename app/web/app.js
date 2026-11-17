@@ -2431,6 +2431,11 @@
   // ---------- 후보 문장을 최종안에 넣기 ----------
   // 최종안의 커서 자리(없으면 맨 끝)에 넣는다. 브라우저 되돌리기(Ctrl+Z)가 되도록 insertText를 쓴다.
   const draftOpen = () => !!(activeDraft && activeDraft.ta && activeDraft.ta.isConnected);
+  // 고른 글 넣기(지금은 커서 자리에 넣음 — 넣는 방식은 다음 항목에서 정함)
+  function insertSelected(t, done) {
+    const where = draftOpen() ? '작성 칸' : '최종안';
+    if (insertToFinal(t)) { if (done) done(); toast(`고른 부분을 ${where}에 넣었습니다. Ctrl+Z로 되돌릴 수 있습니다.`); }
+  }
   function insertToFinal(text) {
     if (draftOpen()) return insertInto(activeDraft.ta, text);
     const fd = finalDraft;
@@ -2450,11 +2455,41 @@
     ta._sel = [ta.selectionStart, ta.selectionEnd];
     return true;
   }
+  // 후보 글: 끌어 고르면 [⤵ 최종안에 넣기], 누르면 그 자리에서 고치기(저장·취소, Ctrl+S 저장, Esc 취소)
+  function candBody(cd, locked) {
+    const body = el('div', { class: 'cand-body' + (locked ? '' : ' editable'), title: locked ? '필요한 부분을 마우스로 끌어 고른 뒤 Ctrl+C로 복사하거나 [⤵ 최종안에 넣기]' : '눌러서 고치기 · 끌어 고르면 [⤵ 최종안에 넣기]', text: cd.text });
+    if (locked) return body;
+    body.addEventListener('click', () => {
+      if (String(window.getSelection() || '').trim()) return; // 끌어 고르는 중이면 편집으로 바꾸지 않음
+      const ta = el('textarea', { rows: Math.min(14, Math.max(4, Math.ceil(cd.text.length / 60))), class: 'cand-edit-ta', 'aria-label': '후보 글 고치기' });
+      ta.value = cd.text;
+      const bc = el('span', {}, [bytesEl(bytesOf(cd.text), R.target)]);
+      ta.addEventListener('input', () => { bc.replaceChildren(bytesEl(bytesOf(ta.value), R.target)); });
+      const save = async () => {
+        if (ta.value.trim() === cd.text.trim()) { loadStudent(true); return; }
+        if (await mutate('edit_result', cd.id, ta.value)) { toast('후보 글을 고쳤습니다.'); loadStudent(true); }
+      };
+      const pick = el('button', { type: 'button', class: 'small', text: '⤵ 고른 부분 최종안에', title: '편집 칸에서 고른 부분만 최종안에 넣습니다', onclick: () => {
+        const t = ta.value.slice(ta.selectionStart, ta.selectionEnd).trim();
+        if (!t) { toast('편집 칸에서 넣을 부분을 먼저 고르세요.'); return; }
+        insertSelected(t);
+      } });
+      pick.addEventListener('mousedown', (e) => e.preventDefault());
+      ta.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); e.stopPropagation(); save(); }
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); loadStudent(true); }
+      });
+      body.replaceWith(el('div', { class: 'cand-edit' }, [ta, el('div', { class: 'rcard-foot' }, [el('button', { type: 'button', class: 'small primary', text: '저장', onclick: save }),
+        el('button', { type: 'button', class: 'small', text: '취소', onclick: () => loadStudent(true) }), pick, el('span', { class: 'spacer' }), bc])]));
+      setTimeout(() => ta.focus(), 30);
+    });
+    return body;
+  }
   function candEl(cd, locked, extra) {
     return el('div', { class: 'cand' + (cd.locked ? ' locked' : '') }, [
-      el('div', { class: 'cand-head' }, [el('b', { text: OP_LABEL[cd.op] || cd.op }), stdBadge(cd.meta), cd.meta.extra ? el('span', { class: 'badge extra-badge', title: cd.meta.extra, text: `추가 요구: ${cd.meta.extra.length > 24 ? cd.meta.extra.slice(0, 24) + '…' : cd.meta.extra}` }) : null, cd.created_at.slice(5, 16), cd.meta.model ? `· ${cd.meta.model}` : '',
+      el('div', { class: 'cand-head' }, [el('b', { text: OP_LABEL[cd.op] || cd.op }), cd.meta && cd.meta.edited ? el('span', { class: 'badge', title: 'AI가 만든 뒤 직접 고친 후보', text: '✏️ 고침' }) : null, stdBadge(cd.meta), cd.meta.extra ? el('span', { class: 'badge extra-badge', title: cd.meta.extra, text: `추가 요구: ${cd.meta.extra.length > 24 ? cd.meta.extra.slice(0, 24) + '…' : cd.meta.extra}` }) : null, cd.created_at.slice(5, 16), cd.meta.model ? `· ${cd.meta.model}` : '',
         cd.meta.ratios ? `· 비율 ${cd.meta.ratios.join('/')}%` : '', el('span', { class: 'spacer' }), bytesEl(cd.bytes, R.target)]),
-      el('div', { class: 'cand-body', title: '필요한 부분을 마우스로 끌어 고른 뒤 Ctrl+C로 복사하거나 [⤵ 최종안에 넣기]', text: cd.text }),
+      candBody(cd, locked),
       el('div', { class: 'rcard-foot' }, [...(extra || []), el('span', { class: 'spacer' }),
         el('button', { type: 'button', class: 'small', title: '새 결과가 생겨도 지우지 않음', text: cd.locked ? '🔒 보관 잠금됨' : '🔓 보관 잠금', onclick: async () => { if (await mutate('lock_result', cd.id, !cd.locked)) loadStudent(true); } }),
         el('button', { type: 'button', class: 'small link danger-text', disabled: locked, text: '삭제', onclick: async () => { if (await mutate('delete_result', cd.id)) loadStudent(true); } })]),
@@ -7152,8 +7187,7 @@
     selBtn.addEventListener('click', () => {
       const t = String(window.getSelection() || '').trim();
       selBtn.hidden = true;
-      const where = draftOpen() ? '작성 칸' : '최종안';
-      if (t && insertToFinal(t)) { window.getSelection().removeAllRanges(); toast(`고른 부분을 ${where}에 넣었습니다. Ctrl+Z로 되돌릴 수 있습니다.`); }
+      if (t) insertSelected(t, () => window.getSelection().removeAllRanges());
     });
     document.addEventListener('mouseup', () => setTimeout(() => {
       const sel = window.getSelection();

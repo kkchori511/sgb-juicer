@@ -1165,6 +1165,18 @@ class Records:
         with self.d.tx() as c:
             c.execute("UPDATE results SET locked=? WHERE id=?", (1 if locked else 0, r["id"]))
 
+    def edit_result(self, res_id, text):
+        """AI 후보 글을 고친다(분량 맞춤 후보 등). 고친 적 있음을 meta에 남긴다."""
+        r = self.result(res_id)
+        self.require_open(r["group_id"], r["item"], r["student_no"])
+        text = (text or "").strip()
+        if not text:
+            raise DbError("후보 글이 비어 있습니다. 지우려면 [삭제]를 누르세요.")
+        meta = json.loads(r["meta"] or "{}")
+        meta["edited"] = True
+        with self.d.tx() as c:
+            c.execute("UPDATE results SET text=?, meta=? WHERE id=?", (text, json.dumps(meta, ensure_ascii=False), r["id"]))
+
     def delete_result(self, res_id):
         r = self.result(res_id)
         self.require_open(r["group_id"], r["item"], r["student_no"])

@@ -1206,6 +1206,12 @@ class Api:
         return self._req_save(req_id, {"count": n, "skipped": skipped})
 
     @safe
+    def edit_result(self, res_id, text):
+        self._editable()
+        self._rec().edit_result(res_id, text)
+        return {}
+
+    @safe
     def lock_result(self, res_id, locked):
         self._editable()
         self._rec().lock_result(res_id, locked)

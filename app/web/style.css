@@ -1162,3 +1162,8 @@ label.inline[hidden] { display: none; }
 .cw-compose { font-size: 15px; line-height: 1.6; border-radius: 12px; }
 .cw-input { background: #fff; border-color: #cbd5e1; border-radius: 14px; }
 .sk-anal tr.k-미분석 .sk-kind { color: #b91c1c; }
+/* AI 분량 맞춤 후보: 눌러서 고치기 */
+.cand-body.editable { cursor: text; border-radius: 6px; }
+.cand-body.editable:hover { background: #f1f5f9; box-shadow: inset 0 0 0 1px var(--border); }
+.cand-edit { display: flex; flex-direction: column; gap: 6px; margin: 5px 0; }
+.cand-edit-ta { width: 100%; font-size: 14px; line-height: 1.6; }
