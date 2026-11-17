@@ -1840,6 +1840,13 @@ class Api:
         "(예: '원문의 토론 내용도 넣어' → '원문에 토론·발표처럼 다른 사람과 주고받은 활동이 있으면 빠뜨리지 말고 넣는다').\n"
         "- 제외: 이 학생의 글에만 해당해 다른 학생에게 옮길 수 없는 요청(예: '세 번째 문장 빼', 특정 책 이름·수치 고치기). 규칙으로 만들지 않습니다.\n"
         "- 앞 요청을 뒤 요청이 뒤집었으면 마지막 요청을 따릅니다.\n\n"
+        "[대원칙 — 절대 어기지 않음] 없는 내용을 지어내지 않는다. 항상 학생 자료에 적힌 내용만을 바탕으로 쓴다.\n"
+        "- 완성 프롬프트의 맨 앞(역할 바로 다음)에 이 대원칙을 그대로 넣고, 다른 어떤 규칙보다 우선한다고 적습니다.\n"
+        "- 원문 내용에 기대는 규칙(진로·희망 분야, 한계·성찰, 직접 만든 문제, 시행착오, 발표·토론 등)은 모두 조건부로 씁니다: "
+        "'원문에 그 내용이 있을 때만 쓰고, 없으면 그 부분을 쓰지 않는다(추측·일반론으로 채우지 않는다)'. 예: 진로 연결은 원문에 진로·관심 분야가 적혀 있을 때만, 적힌 만큼만.\n"
+        "- 분량 규칙이 있어도 원문 내용이 모자라면 없는 내용을 더해 채우지 않고 짧게 씁니다.\n"
+        "- <목표 결과>의 평가 표현(예: '학문적 정직성', '인상적임', '탁월함')을 모든 학생에게 같은 문구로 쓰게 하는 규칙이나 예시는 넣지 않습니다. "
+        "평가는 그 학생 자료에 드러난 행동에 맞춰 학생마다 다른 표현으로 쓰라고 적습니다.\n\n"
         "[2단계 — 프롬프트 쓰기] 처음 지침을 바탕으로, '반영'·'일반화' 규칙을 모두 녹여 단계를 거치지 않아도 같은 결과가 나오는 프롬프트 한 편을 씁니다.\n"
         "- 원문·목표 결과에 나온 이 학생만의 사실(활동 이름, 책 제목, 수치 등)을 규칙이나 예시로 넣지 않습니다.\n"
         "- <목표 결과>나 <원문>의 문장·구절을 프롬프트에 옮겨 적지 않습니다(틀린/옳은 예시도 이 학생의 활동이 아닌 다른 일반 활동으로 새로 만듭니다).\n\n"
@@ -1904,13 +1911,32 @@ class Api:
             parts += ["", "[지난 시도] 아래 프롬프트로 원문을 변환했더니 목표 결과와 달랐습니다. 차이가 없어지도록 프롬프트를 고쳐 처음부터 다시 쓰세요.",
                       f"<지난 프롬프트>\n{str(prev['prompt'])[:20000]}\n</지난 프롬프트>",
                       f"<지난 결과>\n{str(prev.get('out') or '')[:20000]}\n</지난 결과>", f"<차이>\n{str(prev.get('diff') or '')[:2000]}\n</차이>"]
+        parts += ["", "[출력 형식 — 다시 확인] 먼저 <요청 분석>…</요청 분석>(요청마다 한 줄: 요청 | 분류 | 규칙), 이어서 <프롬프트>…</프롬프트>. 두 부분 모두 반드시 씁니다."]
         text, cost, model = self._compose("\n".join(parts), model_index, self.SKILL_COMPOSE_EXTRA)
         prompt, analysis = self._skill_parse(text)
         if not prompt:
             raise openrouter.LlmError("AI가 프롬프트를 쓰지 않았습니다. 다시 시도해 주세요.")
+        reqs = [s["request"] for s in chain["steps"] if s["request"]]
+        if not analysis and reqs:  # 분석을 빼먹었으면 분석만 한 번 더(짧은 호출)
+            try:
+                analysis, c2 = self._skill_analyze(reqs, prompt, model_index)
+                cost += c2
+            except (openrouter.LlmError, db.DbError):
+                analysis = []
         excluded = [a["req"] for a in analysis if a["kind"] == "제외"]
         return self._ai_out({"prompt": prompt, "example": example, "analysis": analysis, "excluded": excluded,
                              "cost": cost, "model": model, "copied": _copied(prompt, [src, final])})
+
+    def _skill_analyze(self, reqs, prompt, model_index):
+        """스킬화 답에 요청 분석이 빠졌을 때: 대화 속 요청을 완성 프롬프트와 견줘 반영·일반화·제외로 나눈다."""
+        cfg, model = self._model(model_index)
+        system = ("교사가 AI와 대화하며 한 요청들을, 그 대화를 정리해 만든 완성 프롬프트와 견줘 분류합니다. 요청마다 한 줄만 씁니다(설명 없이).\n"
+                  "형식: - 요청: (요청 그대로) | 분류: 반영 또는 일반화 또는 제외 | 규칙: (프롬프트에 들어간 규칙, 제외면 제외한 이유)\n"
+                  "- 반영: 어느 학생에게나 통하는 요청. 일반화: 이 학생 내용을 가리키지만 비슷한 방식의 일반 규칙으로 바꾼 것. 제외: 이 학생 글에만 해당해 규칙으로 만들지 않은 것.\n"
+                  "- 맨 앞에 <요청 분석>, 맨 끝에 </요청 분석>을 붙입니다.")
+        user = "<요청들>\n" + "\n".join(f"- {r}" for r in reqs) + "\n</요청들>\n\n<완성 프롬프트>\n" + prompt[:20000] + "\n</완성 프롬프트>"
+        text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, user, cfg["privacy_block"], extra=False, temperature=0)
+        return self._skill_parse("<프롬프트>x</프롬프트>" + text)[1], cost
 
     SKILL_COMPOSE_EXTRA = ("\n\n[이번 작업(스킬화)의 예외]\n- 재료의 [1단계 — 요청 분석]에서 '제외'로 나눈 요청은 규칙으로 만들지 않습니다(위의 '빠짐없이 규칙으로'보다 우선).\n"
                            "- 출력은 재료의 [출력 형식]대로 <요청 분석>과 <프롬프트> 두 부분을 씁니다(위의 '프롬프트 본문만'보다 우선).")

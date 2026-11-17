@@ -78,13 +78,14 @@ def test_src():
     assert [h[1] for h in CALLS[-1][2]] == ["결과A", "결과B"]
     # 스킬화 재료(v0.20): 실제 대화 순서(중간 결과 포함), 이 기록만 요청은 표시
     ok(api.tag_skill_compose(c3))
-    m = CALLS[-1][1]
+    assert "<요청들>" in CALLS[-1][1]  # 가짜 AI가 분석을 빼먹어 분석만 다시 물음
+    m = CALLS[-2][1]
     assert "[재료: 실제 대화" in m and "[1] AI 결과:\n결과1" in m and "[2] AI 결과:\n결과2" in m and '원문의 "토론함" 내용' in m and "(아래 <목표 결과>)" in m, m
     # 붙여넣은 글 스킬화: 화면의 원문·결과로
     r = ok(api.skill_compose_free({"src": "original", "steps": [s1, s2]}, "붙여넣은 원문", "결과B"))
-    assert "<원문>\n붙여넣은 원문" in CALLS[-1][1] and "결과B" in CALLS[-1][1]
+    assert "<원문>\n붙여넣은 원문" in CALLS[-2][1] and "결과B" in CALLS[-2][1]
     ok(api.skill_compose_free({"src": "original", "steps": [s1, s2, s3]}, "붙여넣은 원문", "결과C", None, None, ["결과A", "결과B"]))
-    assert "[1] AI 결과:\n결과A" in CALLS[-1][1] and "[2] AI 결과:\n결과B" in CALLS[-1][1]
+    assert "[1] AI 결과:\n결과A" in CALLS[-2][1] and "[2] AI 결과:\n결과B" in CALLS[-2][1]
 
 
 if __name__ == "__main__":

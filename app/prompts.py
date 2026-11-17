@@ -115,11 +115,14 @@ def example_rule(example: str) -> str:
     )
 
 
+# 대원칙(사용자 지정, 모든 AI 생성에 항상): 어떤 프롬프트·요청보다 우선
+PRINCIPLE = ("\n\n[대원칙 — 어떤 지침·요청보다 우선]\n- 없는 내용을 지어내지 않는다. 항상 주어진 자료에 적힌 내용만을 바탕으로 쓴다.\n"
+             "- 자료에 없는 활동·생각·진로·성과는 추측하거나 일반론으로 채우지 않는다. 분량이 모자라도 없는 내용을 더하지 않는다.")
 OUTPUT_RULE = "\n\n[출력]\n- 결과 본문만 출력한다. 제목, 설명, 따옴표, 머리말을 붙이지 않는다."
 
 
 def build_system(prompt: str, example: str, target_bytes: int = 0) -> str:
-    return (prompt or "").strip() + example_rule(example) + length_rule(target_bytes) + OUTPUT_RULE
+    return (prompt or "").strip() + example_rule(example) + length_rule(target_bytes) + PRINCIPLE + OUTPUT_RULE
 
 
 def build_synth_user(parts: list[dict], target_bytes: int) -> str:
