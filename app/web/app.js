@@ -4179,7 +4179,7 @@
       } });
     pickBtn.addEventListener('mousedown', (e) => e.preventDefault()); // 누를 때 고른 글이 풀리지 않게
     const box = el('div', { class: 'tw-src-tools' }, [el('div', { class: 'tw-row' }, [
-      el('span', { class: 'muted small-note', title: '처음 원문부터 지금까지 주고받은 대화를 모두 AI에 보냅니다(앞 요청도 계속 지킴)' }, '💬 대화 전체(원문·앞 요청 포함)를 이어서 보냅니다'), pickBtn]), note]);
+      el('span', { class: 'muted small-note', title: '처음 원문부터 지금까지 주고받은 대화를 모두 AI에 보냅니다(앞 요청도 계속 지킴)' }, '💬 대화 전체(원문·앞 요청 포함)를 이어서 보냅니다 — 길어질수록 토큰(비용)이 크게 늘어남'), pickBtn]), note]);
     return { el: box, flags: () => (st.pick ? { with_src: true, only_here: true } : {}) };
   }
   function twRec(id) { return TV.data ? TV.data.records.find((x) => x.id === id) : null; }
@@ -4315,7 +4315,8 @@
   }
   async function twRunTrial(rec, chain, parentId, model, btn) {
     if (!(chain.steps[0].prompt || '').trim()) { toast('프롬프트(지침)를 입력해 주세요.'); return; }
-    if (!(await aiAsk(parentId ? '이어서 고치기' : '시험 변환', [['기록', twRecLabel(rec)], ['모델', modelName(model)], ['AI 호출', '1번']], 'tw'))) return;
+    if (!(await aiAsk(parentId ? '이어서 고치기' : '시험 변환', [['기록', twRecLabel(rec)], ['모델', modelName(model)], ['AI 호출', '1번'],
+      ...(parentId ? [['보내는 글', `처음부터 대화 ${chain.steps.length}단계 전체(길어질수록 토큰이 크게 늘어남)`]] : [])], 'tw'))) return;
     if (!(await twFlushOrWarn())) return;
     const out = await busyRun(btn, `tw${rec.id}`, () => aiRun({ title: parentId ? '이어서 고치기' : '시험 변환', skipConfirm: true,
       jobs: [{ label: twRecLabel(rec), run: () => api.tag_trial_run(TW.work.id, rec.id, chain, parentId, model.value, TW.year) }] }));
@@ -4417,7 +4418,7 @@
           let prev = SK.tries.length ? prevOf(SK.tries[SK.tries.length - 1]) : null;
           for (let i = 0; i < SKILL_TRIES; i += 1) {
             const c = await aiRun({ title: `스킬화 ${SK.tries.length + 1}번째 — 프롬프트 만들기`, skipConfirm: true,
-              jobs: [{ label: o.label, run: () => (o.free ? api.skill_compose_free(o.free.chain, o.free.src, o.target, prev, model.value)
+              jobs: [{ label: o.label, run: () => (o.free ? api.skill_compose_free(o.free.chain, o.free.src, o.target, prev, model.value, o.free.turns || null)
                 : api.tag_skill_compose(o.cid, prev, model.value, o.year)) }] });
             if (!c || !c.done) break;
             const a = { no: SK.tries.length + 1, prompt: c.results[0].prompt, example: c.results[0].example || '', checks: [], pass: false, copied: !!c.results[0].copied };
@@ -5042,7 +5043,8 @@
       el('div', { class: 'sheet-head' }, [el('h2', { text: '💬 프롬프트 마법사 · 대화' }), modeSel, el('span', { class: 'spacer' }),
         el('button', { type: 'button', class: 'primary', disabled: !cur, title: cur ? '지금 이어 가는 후보까지의 대화를 프롬프트 하나로 정리하고, 같은 원문으로 다시 변환해 같은 결과가 나오는지 검증합니다' : '먼저 대화를 시작하세요', text: '🧪 대화 내용 스킬화', onclick: () => cwCompose(model) })]),
       el('div', { class: 'cw-tip' }, ['💡 원하는 결과가 나올 때까지 대화로 고치세요. 마음에 들면 ', el('b', { text: '[🧪 대화 내용 스킬화]' }),
-        '로 지금까지의 대화를 프롬프트 하나로 정리해 저장하고, 다른 학생에게는 그 프롬프트를 적용하세요(태그별 기록 ② 나머지 변환, 또는 💬 프롬프트 목록에서 골라 쓰기).']),
+        '로 지금까지의 대화를 프롬프트 하나로 정리해 저장하고, 다른 학생에게는 그 프롬프트를 적용하세요(태그별 기록 ② 나머지 변환, 또는 💬 프롬프트 목록에서 골라 쓰기).',
+        el('div', { class: 'cw-tip-warn', text: '⚠ 이어 고칠 때마다 처음부터 지금까지의 대화 전체를 AI에 다시 보냅니다. 대화가 길어질수록 한 번에 쓰는 토큰(비용)이 큰 폭으로 늘어나니, 몇 번 고쳐 방향이 잡히면 스킬화하세요.' })]),
       el('div', { class: 'sheet-body cw-body' }, [el('div', { class: 'cw-main' }, [src, chat, input]), cands]),
       el('div', { class: 'sheet-foot' }, [el('span', { class: 'muted', text: CW.mode === 'record' ? '이 대화의 결과는 태그 AI 변환 ① 프롬프트 적용 시험의 후보와 같습니다(거기서 [✔ 확정] 가능).' : '붙여넣은 글로 한 대화는 저장하지 않습니다.' }),
         el('span', { class: 'spacer' }), el('button', { type: 'button', text: '닫기', onclick: () => cwClose() })]));
@@ -5055,7 +5057,8 @@
   }
   async function cwSend(chain, parent, model, btn) {
     if (!(chain.steps[0].prompt || '').trim()) { toast('처음 지침(프롬프트)을 입력해 주세요.'); return; }
-    if (!(await aiAsk(parent ? '이어서 고치기' : '대화 시작', [['자료', CW.mode === 'record' ? `'${CW.tagName}' 태그 기록` : '붙여넣은 글'], ['모델', modelName(model)], ['AI 호출', '1번']], 'cw'))) return;
+    if (!(await aiAsk(parent ? '이어서 고치기' : '대화 시작', [['자료', CW.mode === 'record' ? `'${CW.tagName}' 태그 기록` : '붙여넣은 글'], ['모델', modelName(model)], ['AI 호출', '1번'],
+      ...(parent ? [['보내는 글', `처음부터 대화 ${chain.steps.length}단계 전체(길어질수록 토큰이 크게 늘어남)`]] : [])], 'cw'))) return;
     if (CW.mode === 'record') {
       if (!CW.rid) { toast('기록을 고르세요.'); return; }
       const out = await busyRun(btn, `cw${CW.rid}`, () => aiRun({ title: parent ? '이어서 고치기' : '대화 시작', skipConfirm: true,
@@ -5086,7 +5089,7 @@
     const cur = CW.cur;
     if (!cur) return;
     if (CW.mode === 'paste' && cur.chain.steps.length > 1 && !CW.plainCompose) { // 붙여넣은 글 대화도 스킬화 + 같은 원문 검증(목록에 저장)
-      openSkillSheet({ free: { chain: cur.chain, src: cur.orig || CW.paste }, label: '붙여넣은 글', target: cur.text, chainText: twChainText(cur.chain),
+      openSkillSheet({ free: { chain: cur.chain, src: cur.orig || CW.paste, turns: cur.turns || null }, label: '붙여넣은 글', target: cur.text, chainText: twChainText(cur.chain),
         plainLabel: '검증 없이 프롬프트만 만들기', plainTitle: '대화 과정만 종합해 프롬프트를 만듭니다(같은 원문 검증 없음)',
         plain: async () => { CW.plainCompose = true; try { await cwCompose(model); } finally { CW.plainCompose = false; } } });
       return;

@@ -1810,6 +1810,28 @@ class Api:
                 parts += [f"{i}) 결과를 보고 한 요구{'(원문을 함께 보며)' if s.get('with_src') else ''}: {s['request']}"]
         return parts
 
+    @staticmethod
+    def _chat_material(chain, turns):
+        """스킬화 재료(v0.20): 실제 대화를 처음부터 차례대로 — 원문 → 결과1 → 요청2 → 결과2 … → 마지막 결과.
+        원문·마지막 결과는 아래 <원문>·<목표 결과>를 가리킨다(같은 글을 두 번 보내지 않음). 중간 결과가 없으면(예전 후보) None."""
+        steps = chain["steps"]
+        if not isinstance(turns, list) or len(turns) != len(steps) - 1 or len(steps) < 2:
+            return None
+        parts = ["[재료: 실제 대화(처음부터 차례대로)]", "처음 지침:", steps[0]["prompt"]]
+        if steps[0]["example"]:
+            parts += ["처음 지침의 예시:", steps[0]["example"]]
+        if steps[0]["request"]:
+            parts += [f"처음 추가 요청: {steps[0]['request']}"]
+        parts += ["", "[1] 교사가 보낸 글: (아래 <원문>)", f"[1] AI 결과:\n{str(turns[0])[:20000]}"]
+        for i, st in enumerate(steps[1:], 1):
+            mark = " (이 학생에게만 맞는 요청 — 규칙으로 만들지 않음)" if st.get("only_here") else ""
+            if st["prompt"]:
+                parts += [f"[{i + 1}] 교사가 지침을 이렇게 바꿈:", st["prompt"]]
+            if st["request"]:
+                parts += [f"[{i + 1}] 교사 요청{mark}: {st['request']}"]
+            parts += [f"[{i + 1}] AI 결과: (아래 <목표 결과>)" if i == len(steps) - 1 else f"[{i + 1}] AI 결과:\n{str(turns[i])[:20000]}"]
+        return parts
+
     # ---------- 스킬화: 이어 고친 단계를 한 프롬프트로 종합하고, 같은 원문으로 다시 돌려 결과가 비슷한지 검증 ----------
     SKILL_RULE = (
         "[목표] 아래 <원문>에 완성 프롬프트를 '한 번' 적용했을 때 <목표 결과>와 같은 결과(다루는 내용의 범위, 문체와 종결 방식, 문장 구성, 문단 구성, 길이)가 나오게 하는 완성 프롬프트를 쓰세요.\n"
@@ -1845,7 +1867,7 @@ class Api:
     def tag_skill_compose(self, cid, prev=None, model_index=None, year=None):
         """스킬화 한 번: 단계 + 원문 + 목표 결과로 완성 프롬프트를 쓴다. prev(지난 시도 {prompt, out, diff})가 있으면 그 차이를 고친다."""
         _, x, chain, src, final, picks, example = self._skill_ctx(cid, year)
-        return self._skill_compose(chain, src, final, picks, example, prev, model_index)
+        return self._skill_compose(chain, src, final, picks, example, prev, model_index, (x.get("meta") or {}).get("turns"))
 
     @staticmethod
     def _free_ctx(chain, src, final):
@@ -1858,18 +1880,18 @@ class Api:
         return chain, src, final, picks, effective(chain, len(chain["steps"]) - 1)[1]
 
     @safe
-    def skill_compose_free(self, chain, src, final, prev=None, model_index=None):
-        """대화 마법사(붙여넣은 글)의 [🧪 대화 내용 스킬화]: 태그 기록 대신 화면의 원문·결과로 같은 스킬화를 한다."""
+    def skill_compose_free(self, chain, src, final, prev=None, model_index=None, turns=None):
+        """대화 마법사(붙여넣은 글)의 [🧪 대화 내용 스킬화]: 태그 기록 대신 화면의 원문·대화·결과로 같은 스킬화를 한다."""
         chain, src, final, picks, example = self._free_ctx(chain, src, final)
-        return self._skill_compose(chain, src, final, picks, example, prev, model_index)
+        return self._skill_compose(chain, src, final, picks, example, prev, model_index, turns)
 
     @safe
     def skill_check_free(self, chain, src, final, prompt, example="", model_index=None):
         chain, src, final, picks, _ex = self._free_ctx(chain, src, final)
         return self._skill_check(chain, src, final, picks, prompt, example, model_index)
 
-    def _skill_compose(self, chain, src, final, picks, example, prev, model_index):
-        parts = [self.SKILL_RULE, ""] + self._chain_material(chain)
+    def _skill_compose(self, chain, src, final, picks, example, prev, model_index, turns=None):
+        parts = [self.SKILL_RULE, ""] + (self._chat_material(chain, turns) or self._chain_material(chain))
         if example:
             parts += ["(예시는 프롬프트와 따로 함께 쓰이므로 프롬프트 안에 옮겨 적지 않습니다.)"]
         if picks:
