@@ -1168,3 +1168,6 @@ label.inline[hidden] { display: none; }
 .cand-edit { display: flex; flex-direction: column; gap: 6px; margin: 5px 0; }
 .cand-edit-ta { width: 100%; font-size: 14px; line-height: 1.6; }
 .fin-mode-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.xlsx-bk { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.xlsx-bk h3 { margin: 0 0 4px; font-size: 16px; }
+.xlsx-bk .row-btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

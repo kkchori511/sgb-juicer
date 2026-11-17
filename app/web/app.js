@@ -1405,6 +1405,7 @@
     업데이트전: ['업데이트 직전', '새 버전으로 바꾸기 전 · 따로 보관'],
     형식변경전: ['자료 형식 변경 직전', '새 버전을 처음 켤 때 · 따로 보관'],
     복원전: ['다른 백업으로 복원하기 직전', '복원을 되돌릴 때 이 백업으로'],
+    엑셀복구: ['엑셀 파일로 복구한 자료', '[엑셀 파일로 복구]로 만든 자료(복구에 쓴 내용)'],
     담당삭제전: ['담당 삭제 직전', ''],
     학생삭제전: ['학생 삭제 직전', ''],
     삭제전: ['학년도 자료 삭제 직전', ''],
@@ -7099,6 +7100,34 @@
     });
     $('openDataBtn').addEventListener('click', () => call('open_data_dir'));
     $('backupNowBtn').addEventListener('click', async () => { const r = await mutate('backup_now'); if (r) { toast('백업했습니다.'); loadBackups(); } });
+    // 엑셀 백업(버튼을 누를 때만): 전체 / 최종안·마감 결과만, 엑셀로 복구('확인했어요' 입력)
+    const xlsxSave = async (onlyFinal, btn) => {
+      btn.disabled = true;
+      try {
+        const r = await rawCall('xlsx_backup_save', onlyFinal);
+        if (r && r.ok) toast(`${r.year}학년도 ${onlyFinal ? '최종안·마감 결과' : '전체 자료'}를 엑셀로 저장했습니다: ${r.path}`, 6000);
+        else if (r && !r.cancelled) alertBox(r.error || '저장하지 못했습니다.');
+      } finally { btn.disabled = false; }
+    };
+    $('xlsxBackupBtn').addEventListener('click', (e) => xlsxSave(false, e.currentTarget));
+    $('xlsxFinalBtn').addEventListener('click', (e) => xlsxSave(true, e.currentTarget));
+    $('xlsxRestoreBtn').addEventListener('click', async () => {
+      if (!(await leaveOk())) return;
+      const info = await rawCall('xlsx_restore_check');
+      if (!info || info.cancelled) return;
+      if (!info.ok) { alertBox(info.error || '엑셀 파일을 확인하지 못했습니다.'); return; }
+      const cnt = Object.entries(info.counts).map(([k, v]) => `${k} ${v}`).join(' · ');
+      const msg = `엑셀 파일로 ${info.year}학년도 자료를 되살립니다.\n\n파일: ${info.name}\n만든 때: ${info.created_at} (v${info.app_version})\n담긴 자료: ${cnt}\n\n`
+        + (info.exists ? `지금 ${info.year}학년도 자료는 이 파일 내용으로 바뀝니다(다른 학년도는 그대로). 바꾸기 전에 지금 자료를 '복원전' 백업으로 먼저 남깁니다. 스캔 PDF 원본은 지금 것을 그대로 둡니다.`
+          : `${info.year}학년도 자료가 지금은 없어 새로 만듭니다.`);
+      const typed = await typedConfirm(msg, '엑셀로 복구') ? TYPED_WORD : '';
+      if (!typed) return;
+      const r = await mutate('xlsx_restore_run', typed);
+      if (!r) return;
+      await reloadYear();
+      loadBackups();
+      alertBox(`${r.year}학년도 자료를 엑셀 파일로 되살렸습니다.\n바꾸기 전 자료는 백업 목록의 '${backupMeta(r.safety).when} · 다른 백업으로 복원하기 직전'에 있어, 그 백업으로 복원하면 되돌릴 수 있습니다.`);
+    });
     $('delYearBtn').addEventListener('click', async () => {
       const typed = $('delYearText').value;
       if (typed.trim() !== `${ys.year}학년도`) { alertBox(`확인 칸에 '${ys.year}학년도'를 정확히 입력해 주세요.`); return; }

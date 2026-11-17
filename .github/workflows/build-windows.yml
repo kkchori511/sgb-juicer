@@ -57,6 +57,7 @@ jobs:
           python tests/test_inbox_shared.py
           python tests/test_inbox_rounds.py
           python tests/test_confirm_join.py
+          python tests/test_xlsx_backup.py
           python tests/test_migrate_v13.py
           python tests/test_migrate_v14.py
           python tests/test_inbox_columns.py

@@ -7,15 +7,18 @@ import datetime as dt
 import json
 import os
 import platform
+import shutil
 import subprocess
 import threading
+import time
 import webbrowser
 from contextlib import contextmanager
 from functools import wraps
+from pathlib import Path
 
 import webview
 
-from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, existing, export, ocr, openrouter, prompts, roster, scan, stdformat, updater, weights
+from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, paths, existing, export, ocr, openrouter, prompts, roster, scan, stdformat, updater, weights
 from .records import Records, items_of
 from .inbox import Inbox
 from .tagwork import TagWork, chat_messages, effective, norm_chain, signature, step_system
@@ -2537,6 +2540,75 @@ class Api:
         with self._maintenance("복원", take_busy=True):
             self._last_undo = None
             return backup.restore(name)
+
+    # ---------- 엑셀 전체 백업·복구(버튼을 누를 때만, 만일을 위한 것) ----------
+    @safe
+    def xlsx_backup_save(self, only_final=False):
+        """지금 학년도를 엑셀 하나로. only_final: 최종안·마감 결과만(이 파일로는 복구 불가)."""
+        from . import xlsx_backup
+        year = config.load()["current_year"]
+        if not year or year not in db.list_years():
+            raise db.DbError("저장할 학년도 자료가 없습니다.")
+        name = f"{year}학년도_착즙기_{'최종안' if only_final else '전체백업'}_{time.strftime('%Y%m%d_%H%M')}.xlsx"
+        result = self._window.create_file_dialog(webview.SAVE_DIALOG, save_filename=name, file_types=("Excel 파일 (*.xlsx)",))
+        if not result:
+            return {"ok": False, "cancelled": True}
+        path = result[0] if isinstance(result, (list, tuple)) else result
+        if not path.lower().endswith(".xlsx"):
+            path += ".xlsx"
+        try:
+            xlsx_backup.save(year, path, bool(only_final))
+        except PermissionError:
+            raise db.DbError("저장하지 못했습니다. 같은 파일이 Excel에서 열려 있으면 닫고 다시 시도해 주세요.")
+        return {"path": path, "year": year}
+
+    @safe
+    def xlsx_restore_check(self):
+        """복구할 엑셀 고르기 → 파일 정보(학년도·만든 때·버전·자료 수). 실제 복구는 xlsx_restore_run."""
+        from . import xlsx_backup
+        res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
+        if not res:
+            return {"ok": False, "cancelled": True}
+        path = res[0] if isinstance(res, (list, tuple)) else res
+        info = xlsx_backup.read_info(path)
+        self._xlsx_restore = path
+        t = info["tables"]
+        n = lambda k: (t.get(k) or {}).get("rows", 0)  # noqa: E731
+        return {"year": info["year"], "created_at": info["created_at"], "app_version": info["app_version"],
+                "exists": int(info["year"]) in db.list_years(), "name": Path(path).name,
+                "counts": {"학생": n("students"), "기록": n("records"), "최종안": n("finals"), "AI 결과": n("results"), "태그": n("tags")}}
+
+    @safe
+    def xlsx_restore_run(self, typed):
+        """고른 엑셀로 그 학년도 자료를 바꾼다. 복원 전 자동 백업 → 바꾸기(실패하면 되돌림). 스캔 원본은 지금 것을 그대로 둔다."""
+        from . import xlsx_backup
+        if (typed or "").strip() != "확인했어요":
+            raise db.DbError("확인 칸에 '확인했어요'를 정확히 입력해 주세요.")
+        path = getattr(self, "_xlsx_restore", None)
+        if not path:
+            raise db.DbError("먼저 복구할 엑셀 파일을 고르세요.")
+        with self._maintenance("엑셀 복구", take_busy=True):
+            self._last_undo = None
+            info = xlsx_backup.read_info(path)
+            year = int(info["year"])
+            name = backup._new_name("엑셀복구")
+            folder = paths.backup_dir() / name
+            folder.mkdir(parents=True)
+            try:
+                xlsx_backup.build_db(path, folder / db.year_path(year).name)
+                scans = paths.data_dir() / "스캔" / str(year)
+                if scans.is_dir() and any(scans.iterdir()):  # 엑셀에는 스캔 PDF가 없으니 지금 원본을 그대로 쓴다
+                    shutil.copytree(scans, folder / "스캔" / str(year))
+                (folder / backup.DONE).write_text("ok", encoding="utf-8")
+            except BaseException:
+                shutil.rmtree(folder, ignore_errors=True)
+                raise
+            out = backup.restore(name)
+            cfg = config.load()
+            if not cfg["current_year"] or cfg["current_year"] not in db.list_years():
+                config.save({"current_year": year, "setup_done": True})
+            self._xlsx_restore = None
+        return {"year": year, "safety": out.get("safety")}
 
     @safe
     def delete_year(self, year, typed):
