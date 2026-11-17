@@ -157,7 +157,8 @@ select { height: 40px; }
 .check-result.err { color: var(--danger); }
 
 /* ---------- 버튼 ---------- */
-button { font: inherit; font-size: 14px; font-weight: 600; padding: 7px 13px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong); background: var(--input); color: var(--text); cursor: pointer; white-space: nowrap; }
+/* 버튼 글자는 가운데 정렬이 원칙(목록·메뉴·카드형 버튼만 왼쪽: .nav .stu .tv-tag .ib-item .pr-item .gcard .role-card .wiz-pick .opt-list 등) */
+button { text-align: center; font: inherit; font-size: 14px; font-weight: 600; padding: 7px 13px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong); background: var(--input); color: var(--text); cursor: pointer; white-space: nowrap; }
 button:hover { background: var(--accent-soft); border-color: var(--accent); }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 800; }

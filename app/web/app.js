@@ -5117,7 +5117,7 @@
     const original = rec ? (rec.original && rec.original !== rec.content ? rec.original : rec.content) : (CW.cur && CW.cur.orig) || CW.paste;
     // 대화(지금 고른 후보까지의 흐름)
     const chat = el('div', { class: 'cw-chat', role: 'log', 'aria-live': 'polite' });
-    const bubble = (who, text, extra) => el('div', { class: `cw-msg ${who}` }, [el('div', { class: 'cw-who', text: who === 'me' ? '나' : who === 'ai' ? '🤖 AI' : '📄 보낸 자료(원문)' }), el('div', { class: 'cw-text', text }), extra || null]);
+    const bubble = (who, text, extra) => el('div', { class: `cw-msg ${who}` }, [who === 'me' ? null : el('div', { class: 'cw-who', text: who === 'ai' ? '🤖 AI' : '📄 보낸 자료(원문)' }), el('div', { class: 'cw-text', text }), extra || null]);
     chat.appendChild(bubble('src', original || (CW.mode === 'paste' ? '(아직 붙여 넣은 글이 없습니다)' : '(원문 없음)')));
     const cur = CW.cur;
     if (cur) {
