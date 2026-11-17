@@ -1767,10 +1767,10 @@
       }
     }
     const html = `<div class="ai-conf"><b>${escHtml(title)}</b> — AI로 실행할까요?<table>${rows.filter(Boolean).map(([k, v]) => `<tr><th>${escHtml(k)}</th><td>${escHtml(v)}</td></tr>`).join('')}`
-      + (opts ? `<tr><th>프롬프트</th><td><select id="aiPrompt">${opts}</select> <span class="muted">(${escHtml(P.data.kinds[kind])} · 고친 것은 메뉴 › 프롬프트)</span></td></tr>` : '') + '</table>'
+      + (opts ? `<tr><th>프롬프트</th><td><select id="aiPrompt">${opts}</select></td></tr>` : '') + '</table>'
       + `<label class="ai-extra-label" for="aiExtra">이번 추가 요구 사항 <span class="muted">(선택 · 이번 실행에만 · 저장된 지침은 그대로)</span></label>`
       + `<textarea id="aiExtra" rows="2" maxlength="1000" placeholder="예: 숫자는 빼 줘 / 탐구 과정을 더 강조 / 두 문장으로 짧게"></textarea>`
-      + `<p class="hint">명렬의 학번·이름은 따로 보내지 않습니다. 다만 기록 본문에 적힌 이름 등은 그대로 보내지니 확인하세요. 실행하면 크레딧이 듭니다.${warn ? `<br>${escHtml(warn)}` : ''}</p></div>`;
+      + `<p class="hint">${warn ? `${escHtml(warn)}<br>` : ''}AI에는 글과 프롬프트만 보냅니다(명렬의 학번·이름은 보내지 않음). 글 속에 적힌 이름은 그대로 가니 확인하세요. 원문에 없는 활동·결과물은 지어내지 않게 합니다. 실행하면 크레딧이 듭니다.${wiz ? '<br>결과를 보며 대화로 고치고 싶으면 왼쪽 아래 [🪄 프롬프트 마법사]를 누르세요.' : ''}</p></div>`;
     $('modalOk').classList.add('ai-btn');
     let goWiz = false;
     const wb = wiz ? el('button', { type: 'button', class: 'wiz-btn modal-wiz', title: '이 원문으로 AI와 대화하며 결과를 고치고, 마음에 들면 스킬화해 프롬프트로 저장한 뒤 다른 학생에게도 적용합니다', text: '🪄 프롬프트 마법사',
@@ -2572,7 +2572,7 @@
     const out = await busyRun(btn, `rec${r.id}`, () => aiRun({
       title: what, kind: r.kind === 'existing' ? 'polish' : 'refine',
       rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['대상', `${r.kind === 'existing' ? '기존 완성문' : `${r.seq}회 기록 원문`}${r.title ? ` · ${r.title}` : ''} (${bytesOf(r.orig)}B)`], ['모델', modelName($('recModel'))]],
-      warn: '결과는 이 기록의 결과 묶음 맨 위에 더해집니다(지워지는 것 없음). 확정은 따로 합니다.',
+      warn: '결과는 이 기록의 결과 묶음 맨 위에 더해집니다(원문·이전 결과는 그대로). 확정은 따로 합니다.',
       wiz: async () => { if (await flushFinal()) openWizardMenu(recWizCtx(r.kind === 'existing' ? 'polish' : 'refine', r.orig, r.id)); },
       jobs: [{ run: () => api.ai_record(r.id, $('recModel').value) }],
     }));
