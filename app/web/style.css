@@ -378,7 +378,7 @@ textarea.tall { min-height: 300px; height: calc(100vh - 470px); resize: vertical
 .final-box { border: 2px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--input); padding: 10px 12px; margin-bottom: 12px; }
 .final-box.has { border-color: var(--st-final); }
 .final-box.closed { border-color: var(--st-closed); background: #eff6ff; }
-.final-box textarea { min-height: 170px; font-size: 14.5px; }
+.final-box textarea { min-height: 170px; font-size: 14.5px; resize: none; overflow-y: hidden; } /* 높이는 글에 맞춰 자동(fitFinalTa) */
 .final-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .stale { background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
 .tagpick { display: flex; flex-wrap: wrap; gap: 6px; }

@@ -2491,6 +2491,22 @@
     actionToast(mode === 'append' ? '최종안 뒤에 이어 붙였습니다.' : '최종안으로 채택했습니다.', '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, prev, ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
   }
   // ---------- 후보 문장을 최종안에 넣기 ----------
+  // 최종안 칸 높이를 글에 맞춘다(스크롤 없이 한눈에, 최소 170px · 최대 없음). 입력·코드로 넣기·폭 바뀜·접었다 펼침 때 다시 맞춘다.
+  function fitFinalTa(ta) {
+    const fit = () => {
+      if (!ta.isConnected || !ta.offsetWidth) return;
+      const cs = getComputedStyle(ta);
+      const edge = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+      ta.style.height = 'auto';
+      ta.style.height = `${Math.max(170, ta.scrollHeight + edge)}px`;
+    };
+    ta.addEventListener('input', fit);
+    const proto = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+    Object.defineProperty(ta, 'value', { configurable: true, get() { return proto.get.call(this); }, set(v) { proto.set.call(this, v); fit(); } });
+    let w = 0;
+    if (window.ResizeObserver) new ResizeObserver(() => { if (ta.offsetWidth !== w) { w = ta.offsetWidth; fit(); } }).observe(ta);
+    requestAnimationFrame(fit);
+  }
   // 최종안의 커서 자리(없으면 맨 끝)에 넣는다. 브라우저 되돌리기(Ctrl+Z)가 되도록 insertText를 쓴다.
   const draftOpen = () => !!(activeDraft && activeDraft.ta && activeDraft.ta.isConnected);
   // 고른 글 넣기: 작성 칸이 열려 있으면 커서 자리에. 최종안이 있으면 [뒤에 이어 붙이기 / 지우고 넣기 / 커서 자리에 넣기]를 묻는다(최종안 칸에서 바꾸므로 Ctrl+Z 됨)
@@ -2793,6 +2809,7 @@
     const bc = el('span', {});
     const upd = () => { bc.innerHTML = ''; bc.appendChild(bytesEl(bytesOf(ta.value), R.target)); };
     ta.addEventListener('input', () => { upd(); saveState.textContent = '저장 중…'; finalAutoSave(); });
+    fitFinalTa(ta);
     // 후보 문장을 넣을 자리: 마지막 커서 위치를 기억(없으면 맨 끝)
     const keepSel = () => { ta._sel = [ta.selectionStart, ta.selectionEnd]; };
     ['keyup', 'click', 'select', 'blur'].forEach((ev) => ta.addEventListener(ev, keepSel));
