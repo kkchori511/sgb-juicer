@@ -2752,6 +2752,8 @@
     const ctx = { ...R.viewCtx };
     let order = v.records.filter((r) => r.confirmed);
     if (!order.length) { alertBox('확정 기록이 없습니다.'); return; }
+    const off = new Set(); // 이번 최종안에서 뺀 기록(확정은 그대로)
+    const use = () => order.filter((r) => !off.has(r.id));
     openSheet((box) => {
       box.style.height = 'auto';
       box.style.width = 'min(760px, 94vw)';
@@ -2760,29 +2762,41 @@
       const bc = el('div', {});
       const draw = () => {
         list.innerHTML = '';
-        const rows = order.map((r, i) => ({ id: r.id, el: el('div', { class: 'join-row' }, [el('b', { text: `${i + 1}. ${recName(r)}` }), el('span', { class: 'muted', text: `${r.bytes}B` }),
-          el('span', { class: 'spacer' })]) }));
+        let no = 0;
+        const rows = order.map((r) => {
+          const on = !off.has(r.id);
+          if (on) no += 1;
+          const cb = el('input', { type: 'checkbox', checked: on, 'aria-label': `${recName(r)} 넣기`, title: '끄면 이번 최종안에서 뺍니다(확정은 그대로)',
+            onchange: (e) => { if (e.target.checked) off.delete(r.id); else off.add(r.id); draw(); } });
+          return { id: r.id, el: el('div', { class: 'join-row' + (on ? '' : ' off') }, [cb, el('b', { text: on ? `${no}. ${recName(r)}` : `빼기 · ${recName(r)}` }), el('span', { class: 'muted', text: `${r.bytes}B` }),
+            el('span', { class: 'spacer' })]) };
+        });
         const handle = sortable(rows, (ids) => { order = ids.map((id) => order.find((r) => r.id === id)); draw(); }, order.length < 2);
         rows.forEach((x) => { x.el.prepend(handle(x.id)); list.appendChild(x.el); });
-        const t = joinText(order.map((r) => r.content));
-        pv.textContent = t;
+        const t = joinText(use().map((r) => r.content));
+        pv.textContent = t || '(넣을 기록을 하나 이상 고르세요)';
         bc.innerHTML = '';
         bc.appendChild(bytesEl(bytesOf(t), R.target));
+        go.disabled = !use().length;
       };
       const unc = v.records.filter((r) => !r.confirmed);
       const go = el('button', { type: 'button', class: 'primary', text: '최종안으로 넣기' });
+      go.disabled = true;
       go.addEventListener('click', async () => {
         const prev = v.final ? v.final.text || '' : '';
         if (prev.trim() && !(await confirmBox('지금 최종안을 이어 붙인 글로 바꿉니다. 넣은 직후 [되돌리기]로 원래 최종안을 돌려놓을 수 있습니다.', '바꾸기'))) return;
-        const res = await afterFinalSaved(() => mutate('join_confirmed', ctx.gid, ctx.item, ctx.sno, order.map((r) => r.id)));
+        const pick = use();
+        if (!pick.length) return;
+        // 서버는 넣을 기록만 받아, 그 기록들이 있던 자리 안에서 이 순서로 저장한다(뺀 기록 자리는 그대로)
+        const res = await afterFinalSaved(() => mutate('join_confirmed', ctx.gid, ctx.item, ctx.sno, pick.map((r) => r.id)));
         if (!res) return;
         closeSheet();
         loadStudent(true);
-        actionToast(`확정 기록 ${order.length}건을 이어 최종안에 넣었습니다.`, '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, res.prev || '', ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
+        actionToast(pick.length < order.length ? `확정 기록 ${order.length}건 중 ${pick.length}건을 이어 최종안에 넣었습니다.` : `확정 기록 ${order.length}건을 이어 최종안에 넣었습니다.`, '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, res.prev || '', ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
       });
       addTo(box,
         el('div', { class: 'sheet-head' }, [el('h2', { text: `확정 기록 이어 붙이기 · ${v.student.name}` }), el('span', { class: 'muted', text: `${R.slot.label} · 목표 ${R.target}B` })]),
-        el('p', { class: 'hint', text: '이 순서대로 확정본을 내용 그대로 이어 최종안에 넣습니다(띄어쓰기 한 칸, 줄바꿈 없음). 바꾼 순서는 기록 순서에도 저장됩니다.' }),
+        el('p', { class: 'hint', text: '이 순서대로 확정본을 내용 그대로 이어 최종안에 넣습니다(띄어쓰기 한 칸, 줄바꿈 없음). 체크를 끄면 이번 최종안에서만 빠집니다(확정은 그대로). 바꾼 순서는 기록 순서에도 저장됩니다.' }),
         list,
         unc.length ? el('p', { class: 'muted small-note', text: `확정 안 된 기록 ${unc.length}건은 빠집니다: ${unc.map(recName).join(', ')}` }) : null,
         el('div', { class: 'col-label' }, ['미리보기 ', bc]), pv,

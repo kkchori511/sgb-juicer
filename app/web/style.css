@@ -1141,3 +1141,5 @@ label.inline[hidden] { display: none; }
 .sk-anal tr.k-반영 .sk-kind { color: #166534; }
 .sk-anal tr.k-일반화 .sk-kind { color: #1d4ed8; }
 .sk-anal tr.k-제외 .sk-kind { color: #b45309; }
+.join-row.off { opacity: 0.5; background: var(--surface-2); }
+.join-row.off b { text-decoration: line-through; font-weight: 600; }
