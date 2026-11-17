@@ -82,42 +82,44 @@
 <path d="M 636 206 V 224" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
 <path d="M 633.60 219.61 L 636.0 224.0 L 638.40 219.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
 <text x="656" y="216" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent, #2563eb)">예</text>
-<rect x="544" y="224" width="176" height="70" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
-<text x="632.0" y="244.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">🏷 태그별 기록</text>
-<text x="632.0" y="262.84000000000003" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">① 프롬프트 적용 시험</text>
-<text x="632.0" y="280.84000000000003" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">(한 건)</text>
-<path d="M 636 294 V 310" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
-<path d="M 633.60 305.61 L 636.0 310.0 L 638.40 305.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
-<path d="M 636 310.0 L 711.0 342 L 636 374.0 L 561.0 342 L 636 310.0 Z" fill="var(--warn-bg, #fff7d6)" stroke="var(--warn-border, #f0cf5a)"/>
-<text x="636" y="338" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">결과 마음에</text>
-<text x="636" y="354" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">드나?</text>
-<path d="M 636 374 V 397" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
-<path d="M 633.60 392.61 L 636.0 397.0 L 638.40 392.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
-<text x="659" y="390" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent, #2563eb)">예</text>
-<rect x="544" y="397" width="176" height="32" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
-<text x="632.0" y="416.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">✔ 설정 확정</text>
-<path d="M 636 429 V 446" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
-<path d="M 633.60 441.61 L 636.0 446.0 L 638.40 441.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
-<rect x="544" y="446" width="176" height="32" rx="10" fill="var(--input, #ffffff)" stroke="var(--border, #c9d3de)"/>
-<text x="632.0" y="465.84" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">② 나머지 변환</text>
-<path d="M 636 478 V 495" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
-<path d="M 633.60 490.61 L 636.0 495.0 L 638.40 490.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
-<rect x="544" y="495" width="176" height="44" rx="10" fill="var(--input, #ffffff)" stroke="var(--border, #c9d3de)"/>
-<text x="632.0" y="511.84" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">③ 검토·반영</text>
-<text x="632.0" y="529.8399999999999" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">체크한 것 기록 확정</text>
-<path d="M 561 342 H 536 V 566 H 537 M 547 566 H 728 V 259 H 721" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5" stroke-dasharray="4 4"/>
-<path d="M 725.39 256.60 L 721.0 259.0 L 725.39 261.40" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5"/>
-<text x="636" y="559" text-anchor="middle" font-size="12" font-weight="600" fill="var(--flow-return-text, #995000)">아니오 · 고쳐 다시 시험</text>
-<path d="M 731 171 H 736 V 591 H 721" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
-<path d="M 725.39 588.60 L 721.0 591.0 L 725.39 593.40" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<rect x="544" y="224" width="176" height="86" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="632" y="240" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">🏷 태그별 기록 · 태그 고르기</text>
+<text x="632" y="256" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">한 명 · 기록 카드 [AI 변환]</text>
+<text x="632" y="272" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">→ 🪄 프롬프트 마법사</text>
+<text x="632" y="294" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">💬 대화로 더 고치기</text>
+<path d="M 636 310 V 342" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 633.60 337.61 L 636.0 342.0 L 638.40 337.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 636 342 L 711 364 L 636 386 L 561 364 Z" fill="var(--warn-bg, #fff7d6)" stroke="var(--warn-border, #f0cf5a)"/>
+<text x="636" y="368" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">마음에 드나?</text>
+<path d="M 711 364 H 728 V 318 H 674 V 311" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5" stroke-dasharray="4 4"/>
+<path d="M 676.40 315.39 L 674.0 311.0 L 671.60 315.39" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5"/>
+<text x="710" y="381" text-anchor="middle" font-size="12" font-weight="600" fill="var(--flow-return-text, #995000)">아니오</text>
+<path d="M 636 386 V 405" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 633.60 400.61 L 636.0 405.0 L 638.40 400.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<text x="657" y="400" text-anchor="middle" font-size="12" font-weight="600" fill="var(--accent, #2563eb)">예</text>
+<rect x="544" y="405" width="176" height="42" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="632" y="422" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">🧪 대화 내용 스킬화</text>
+<text x="632" y="439" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">→ 프롬프트 저장</text>
+<path d="M 636 447 V 461" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 633.60 456.61 L 636.0 461.0 L 638.40 456.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<rect x="544" y="461" width="176" height="50" rx="10" fill="var(--input, #ffffff)" stroke="var(--border, #c9d3de)"/>
+<text x="632" y="476" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">다른 학생에게도 적용</text>
+<text x="632" y="492" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">또는 🤖 이 태그 AI 변환</text>
+<text x="632" y="506" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">→ 결과 묶음에 더해짐</text>
+<path d="M 636 511 V 525" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 633.60 520.61 L 636.0 525.0 L 638.40 520.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<rect x="544" y="525" width="176" height="46" rx="10" fill="var(--input, #ffffff)" stroke="var(--border, #c9d3de)"/>
+<text x="632" y="541" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">✔ 이걸로 확정 · 고쳐서 확정</text>
+<text x="632" y="559" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">최신 결과로 확정 (여러 건)</text>
+<path d="M 731 171 H 736 V 597 H 721" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 725.39 594.60 L 721.0 597.0 L 725.39 599.40" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
 <text x="730" y="214" text-anchor="end" font-size="12" font-weight="600" fill="var(--accent, #2563eb)">아니오</text>
-<rect x="544" y="574" width="176" height="34" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
-<text x="632.0" y="594.84" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">📝 항목별 기록 · AI 변환</text>
-<path d="M 556 539 H 542 V 616 H 636" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
-<path d="M 631.61 618.40 L 636.0 616.0 L 631.61 613.60" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
-<path d="M 636 608 V 616" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
-<path d="M 633.60 611.61 L 636.0 616.0 L 638.40 611.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
-<path d="M 636 616 V 624" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<rect x="544" y="581" width="176" height="36" rx="10" fill="var(--accent-soft, #e3ecfd)" stroke="var(--border, #c9d3de)"/>
+<text x="632" y="595" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">📝 항목별 기록 · AI 변환</text>
+<text x="632" y="610" text-anchor="middle" font-size="12" font-weight="650" fill="var(--text, #17202b)">프롬프트 골라 실행</text>
+<path d="M 556 571 H 530 V 642 H 535" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 530.61 644.40 L 535.0 642.0 L 530.61 639.60" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
+<path d="M 636 617 V 624" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
 <path d="M 633.60 619.61 L 636.0 624.0 L 638.40 619.61" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
 <rect x="536" y="624" width="196" height="36" rx="10" fill="var(--input, #ffffff)" stroke="var(--border, #c9d3de)"/>
 <text x="634.0" y="636.84" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">결과 묶음 · 기록 아래</text>
