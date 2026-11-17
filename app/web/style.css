@@ -1172,3 +1172,14 @@ label.inline[hidden] { display: none; }
 .xlsx-bk { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
 .xlsx-bk h3 { margin: 0 0 4px; font-size: 16px; }
 .xlsx-bk .row-btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* AI 실행 확인 창: 버튼 줄 맨 왼쪽 프롬프트 마법사 */
+.modal-actions .modal-wiz { margin-right: auto; }
+/* 다른 학생에게도 적용 */
+.rb-list { max-height: 55vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+.rb-stu { font-weight: 600; margin: 10px 0 4px; }
+.rb-stu:first-child { margin-top: 2px; }
+.rb-row { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0 4px 8px; margin: 0; font-weight: normal; }
+.rb-row.me { background: rgba(124, 58, 237, 0.06); border-radius: 6px; }
+.rb-meta { flex: none; min-width: 72px; color: var(--muted); }
+.rb-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }

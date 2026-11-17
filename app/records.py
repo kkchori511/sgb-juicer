@@ -795,6 +795,43 @@ class Records:
             self.require_open(r["group_id"], r["item"], r["student_no"])
             return self._add_plain(c, r, "draft", text, {"label": "직접 작성"})
 
+    def save_chat_result(self, rid, text, meta=None):
+        """대화 마법사(항목별 기록에서 연 대화)의 AI 답 → 그 기록의 결과 묶음(💬 대화 결과)."""
+        text = (text or "").strip()
+        if not text:
+            raise DbError("넣을 글이 비어 있습니다.")
+        with self.d.tx() as c:
+            r = self.record(rid)
+            self.require_open(r["group_id"], r["item"], r["student_no"])
+            if r["confirmed"]:
+                raise DbError("이미 확정한 기록입니다. 확정을 푼 뒤 넣어 주세요.")
+            return self._add_plain(c, r, "chat", text, dict(meta or {}))
+
+    def ai_targets(self, gid, item, kind="record"):
+        """같은 담당·항목 학생들의 아직 확정하지 않은 기록(종류 kind). 비활성·마감 학생은 빼고, 몇 명 뺐는지 알린다."""
+        self.slot(gid, item)
+        mem = {m["student_no"]: m for m in self.d.members(gid)}
+        closed = {f["student_no"] for f in self.d.q("SELECT student_no FROM finals WHERE group_id=? AND item=? AND closed=1", (int(gid), item))}
+        nres = {x["record_id"]: x["n"] for x in self.d.q(
+            "SELECT record_id, COUNT(*) AS n FROM results WHERE group_id=? AND item=? AND record_id IS NOT NULL GROUP BY record_id", (int(gid), item))}
+        rows = self.d.q("SELECT id, student_no, seq, date, title, content, original FROM records WHERE group_id=? AND item=? AND kind=? AND COALESCE(confirmed,0)=0 ORDER BY student_no, pos, seq, id",
+                        (int(gid), item, kind))
+        out, skip_closed, skip_inactive = [], set(), set()
+        for r in rows:
+            m = mem.get(r["student_no"])
+            if not m:
+                continue
+            if not m["active"]:
+                skip_inactive.add(r["student_no"]); continue
+            if r["student_no"] in closed:
+                skip_closed.add(r["student_no"]); continue
+            src = r["original"] if r["original"] is not None else r["content"]
+            if not (src or "").strip():
+                continue
+            out.append({"id": r["id"], "student_no": r["student_no"], "name": m["name"], "seq": r["seq"], "date": r["date"] or "", "title": r["title"] or "",
+                        "text": src, "results": nres.get(r["id"], 0)})
+        return {"records": out, "skipped_closed": len(skip_closed), "skipped_inactive": len(skip_inactive)}
+
     def new_record_from(self, rid, text):
         """[직접 작성] → 새 기록으로 저장(같은 활동명·날짜·태그, 확정된 상태). 반환: 새 기록 id."""
         text = (text or "").strip()

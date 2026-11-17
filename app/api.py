@@ -1173,6 +1173,19 @@ class Api:
         return {}
 
     @safe
+    def save_chat_result(self, rid, text, meta=None):
+        """항목별 기록에서 연 대화 마법사의 답을 그 기록의 결과 묶음에 넣는다."""
+        self._editable()
+        m = meta if isinstance(meta, dict) else {}
+        keep = {k: m[k] for k in ("model",) if k in m}
+        return {"id": self._rec().save_chat_result(rid, text, {**keep, "op": "chat"})}
+
+    @safe
+    def rec_ai_targets(self, gid, item, kind="record"):
+        """[다른 학생에게도 적용]: 같은 담당·항목의 확정 전 기록 목록."""
+        return self._rec().ai_targets(gid, item, "existing" if kind == "existing" else "record")
+
+    @safe
     def save_draft(self, rid, text):
         self._editable()
         return {"id": self._rec().save_draft(rid, text)}
