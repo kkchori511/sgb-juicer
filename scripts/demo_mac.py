@@ -29,6 +29,9 @@ def _fake_chat(key, model, system, user, privacy_block=False, history=None):
         return ("{\"내용\": 80, \"문체\": 85, \"차이\": \"마지막 평가 문장이 빠짐\"}" if _JUDGE[0] <= 2 else "{\"내용\": 97, \"문체\": 95, \"차이\": \"\"}"), 0.0001
     if "[목표] 아래 <원문>" in system + user:
         return "# 역할\n(시험용 스킬화 프롬프트) 학생 활동 자료를 관찰자 시점으로 3문장 안팎 한 문단에 씁니다.", 0.0003
+    if history:  # 대화 누적(이어 고치기): 앞 결과를 조금 고친 척
+        prev = history[-1][1].replace("(시험용 AI 결과) ", "")
+        return f"(시험용 AI 결과·{len(history) + 1}단계) " + prev[: max(30, len(prev) - 15)], 0.0006
     return "(시험용 AI 결과) 수업 활동에 적극적으로 참여하며 탐구 과정을 꼼꼼히 기록함. " + user.replace("\n", " ")[:100], 0.0004
 
 
