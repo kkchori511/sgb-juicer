@@ -9,7 +9,7 @@ from app import config, openrouter
 CALLS = []
 
 
-def fake_chat(key, model, system, user, privacy_block=False):
+def fake_chat(key, model, system, user, privacy_block=False, history=None):
     CALLS.append((system, user))
     return "결과:" + user[:15], 0.001
 

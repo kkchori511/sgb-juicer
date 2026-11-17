@@ -18,7 +18,7 @@ import webview
 from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, existing, export, ocr, openrouter, prompts, roster, scan, stdformat, updater, weights
 from .records import Records, items_of
 from .inbox import Inbox
-from .tagwork import TagWork, effective, norm_chain, signature, step_input, step_system
+from .tagwork import TagWork, chat_messages, effective, norm_chain, signature, step_system
 from .standards import Outlines, Standards, avoid_rule, new_words, outline_tidy_prompt, check_level, outline_rule, read_hwpx_text, read_pdf_text, similarity, standards_rule
 from .paths import data_dir
 from .textutil import count_bytes
@@ -866,6 +866,9 @@ class Api:
                 raise db.DbError("이 후보를 만든 뒤 기록 내용이 바뀌었습니다. 바뀐 내용으로 처음부터 다시 시험해 주세요.")
             base = (par["record_ver"] or 0, par["record_text"])
             src_text, input_src = (par["edited"] if par["edited"] is not None else par["text"]), "cand"
+            # 대화 누적: 앞 후보에 저장한 앞 결과들 + 앞 후보 결과(앞 후보가 지워져도 대화가 이어지게 후보마다 저장)
+            pt = (par.get("meta") or {}).get("turns")
+            turns = (list(pt) if isinstance(pt, list) and len(pt) == len(par["chain"]["steps"]) - 1 else []) + [src_text]
         else:
             if len(chain["steps"]) != 1:
                 raise db.DbError("처음 변환은 한 단계만 할 수 있습니다.")
@@ -877,11 +880,15 @@ class Api:
         self._guard(key)
         try:
             gen = openrouter.generation()
-            last = len(chain["steps"]) - 1
-            send = step_input(chain, last, src_text, tw.source_text(r, chain["src"]) if last else "")
-            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, last), send,
-                                       cfg["privacy_block"], extra=False, temperature=TAG_TEMP)
-            nid, dropped = tw.add_trial(w["id"], r, chain, int(parent_id) if parent_id else None, input_src, src_text, text, model, cost, {},
+            meta = {}
+            if parent_id:
+                sysm, hist, user = chat_messages(chain, tw.source_text(r, chain["src"]), turns)
+                meta = {"turns": turns if len(turns) == len(chain["steps"]) - 1 else []}
+            else:
+                sysm, hist, user = step_system(chain, 0), [], src_text
+            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, sysm, user,
+                                       cfg["privacy_block"], extra=False, temperature=TAG_TEMP, history=hist)
+            nid, dropped = tw.add_trial(w["id"], r, chain, int(parent_id) if parent_id else None, input_src, src_text, text, model, cost, meta,
                                         base=base, alive=self._alive(gen))
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
         finally:
@@ -991,9 +998,12 @@ class Api:
             try:
                 shared = tw.shares_source(run, r["id"], first)
                 for i in range(len(outs), len(chain["steps"])):
-                    text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, i) + (SHARED_RULE if shared and i == 0 else ""),
-                                               step_input(chain, i, text, first),
-                                               cfg["privacy_block"], extra=False, temperature=TAG_TEMP)
+                    if i == 0:
+                        sysm, hist, user = step_system(chain, 0) + (SHARED_RULE if shared else ""), [], first
+                    else:  # 대화 누적: 원문 → 결과1 → 요청2 … (시험 때와 같은 방식)
+                        sysm, hist, user = chat_messages({**chain, "steps": chain["steps"][: i + 1]}, first, outs[:i])
+                    text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, sysm, user,
+                                               cfg["privacy_block"], extra=False, temperature=TAG_TEMP, history=hist)
                     total += cost
                     outs.append(text)
             except openrouter.Cancelled:
@@ -1362,7 +1372,7 @@ class Api:
         x = getattr(self, "_ai_extra", "")
         return {**(meta or {}), "extra": x} if x else meta
 
-    def _call_ai(self, key, model, system, user, privacy, extra=True, temperature=None):
+    def _call_ai(self, key, model, system, user, privacy, extra=True, temperature=None, history=None):
         x = getattr(self, "_ai_extra", "") if extra else ""
         if x:
             system = (system + "\n\n[이번 추가 요구 사항 — 교사가 이번 실행에만 준 요청]\n<요청>\n" + x + "\n</요청>\n"
@@ -1372,7 +1382,7 @@ class Api:
         gen = openrouter.generation()
         openrouter.set_temperature(temperature)
         try:
-            text, cost = openrouter.chat(key, model, system, user, privacy)
+            text, cost = openrouter.chat(key, model, system, user, privacy, **({"history": history} if history else {}))
         finally:
             openrouter.set_temperature(None)
         with self._ai_lock:
@@ -1835,6 +1845,30 @@ class Api:
     def tag_skill_compose(self, cid, prev=None, model_index=None, year=None):
         """스킬화 한 번: 단계 + 원문 + 목표 결과로 완성 프롬프트를 쓴다. prev(지난 시도 {prompt, out, diff})가 있으면 그 차이를 고친다."""
         _, x, chain, src, final, picks, example = self._skill_ctx(cid, year)
+        return self._skill_compose(chain, src, final, picks, example, prev, model_index)
+
+    @staticmethod
+    def _free_ctx(chain, src, final):
+        """붙여넣은 글 대화의 스킬화 재료(저장된 후보 없이 화면에서 받은 대화)."""
+        chain = norm_chain(chain)
+        src, final = str(src or "").strip()[:20000], str(final or "").strip()[:20000]
+        if not src or not final:
+            raise db.DbError("원문과 결과가 있어야 스킬화할 수 있습니다.")
+        picks = [s["request"] for s in chain["steps"] if s.get("only_here")]
+        return chain, src, final, picks, effective(chain, len(chain["steps"]) - 1)[1]
+
+    @safe
+    def skill_compose_free(self, chain, src, final, prev=None, model_index=None):
+        """대화 마법사(붙여넣은 글)의 [🧪 대화 내용 스킬화]: 태그 기록 대신 화면의 원문·결과로 같은 스킬화를 한다."""
+        chain, src, final, picks, example = self._free_ctx(chain, src, final)
+        return self._skill_compose(chain, src, final, picks, example, prev, model_index)
+
+    @safe
+    def skill_check_free(self, chain, src, final, prompt, example="", model_index=None):
+        chain, src, final, picks, _ex = self._free_ctx(chain, src, final)
+        return self._skill_check(chain, src, final, picks, prompt, example, model_index)
+
+    def _skill_compose(self, chain, src, final, picks, example, prev, model_index):
         parts = [self.SKILL_RULE, ""] + self._chain_material(chain)
         if example:
             parts += ["(예시는 프롬프트와 따로 함께 쓰이므로 프롬프트 안에 옮겨 적지 않습니다.)"]
@@ -1873,6 +1907,9 @@ class Api:
     def tag_skill_check(self, cid, prompt, example="", model_index=None, year=None):
         """검증 한 번: 스킬화한 프롬프트로 같은 원문을 한 번에 변환하고, 확정할 결과와 AI로 비교 채점한다(내용 50·문체 30·길이 20)."""
         _, x, chain, src, final, picks, _ex = self._skill_ctx(cid, year)
+        return self._skill_check(chain, src, final, picks, prompt, example, model_index)
+
+    def _skill_check(self, chain, src, final, picks, prompt, example, model_index):
         prompt = str(prompt or "").strip()
         if not prompt:
             raise db.DbError("프롬프트가 비어 있습니다.")
@@ -1923,18 +1960,22 @@ class Api:
         return self._ai_out({"assembled": assembled, "text": text, "cost": cost, "model": model})
 
     @safe
-    def prompt_chat_free(self, chain, text, model_index=None, orig=None):
-        """대화 마법사(붙여넣은 글): 저장하지 않고 마지막 단계만 실행한다(첫 단계면 붙여넣은 글, 이어 가기면 앞 결과).
-        orig: 처음 붙여넣은 글(원문을 함께 보내는 단계에 쓴다)."""
+    def prompt_chat_free(self, chain, text, model_index=None, orig=None, turns=None):
+        """대화 마법사(붙여넣은 글): 저장하지 않고 마지막 단계를 실행한다(첫 단계면 붙여넣은 글).
+        이어 가기는 대화 누적: orig(처음 붙여넣은 글) → 결과1 → 요청2 … turns: 앞 단계 결과들(없으면 text=앞 결과 하나로)."""
         chain = norm_chain(chain)
         src = str(text or "").strip()
         if not src:
             raise db.DbError("보낼 글이 비어 있습니다.")
         cfg, model = self._model(model_index)
         last = len(chain["steps"]) - 1
-        out, cost = self._call_ai(cfg["openrouter_key"].strip(), model, step_system(chain, last),
-                                  step_input(chain, last, src[:20000], str(orig or "")[:20000]), cfg["privacy_block"], extra=False,
-                                  temperature=TAG_TEMP)
+        if last:
+            outs = [str(x)[:20000] for x in turns] if isinstance(turns, list) and len(turns) == last else [src[:20000]]
+            sysm, hist, user = chat_messages(chain, (str(orig or "").strip() or src)[:20000], outs)
+        else:
+            sysm, hist, user = step_system(chain, 0), [], src[:20000]
+        out, cost = self._call_ai(cfg["openrouter_key"].strip(), model, sysm, user, cfg["privacy_block"], extra=False,
+                                  temperature=TAG_TEMP, history=hist)
         return self._ai_out({"text": out, "cost": cost, "model": model})
 
     @safe

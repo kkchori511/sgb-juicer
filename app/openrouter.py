@@ -90,13 +90,15 @@ def set_temperature(t):
     _tl.temp = t
 
 
-def build_payload(model: str, system: str, user: str, privacy_block: bool) -> dict:
+def build_payload(model: str, system: str, user: str, privacy_block: bool, history=None) -> dict:
+    """history: 앞 대화 [(사용자 글, AI 답), ...] — 대화를 처음부터 쌓아 보낼 때(태그 시험 이어 고치기·대화 마법사)."""
+    msgs = [{"role": "system", "content": system}]
+    for u, a in history or []:
+        msgs += [{"role": "user", "content": u}, {"role": "assistant", "content": a}]
+    msgs.append({"role": "user", "content": user})
     payload = {
         "model": normalize_model_id(model),
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
+        "messages": msgs,
         "usage": {"include": True},
     }
     if privacy_block:
@@ -203,12 +205,12 @@ def _read_stream(res):
     return "".join(parts).strip(), cost
 
 
-def chat(key: str, model: str, system: str, user: str, privacy_block: bool = False) -> tuple[str, float]:
+def chat(key: str, model: str, system: str, user: str, privacy_block: bool = False, history=None) -> tuple[str, float]:
     """(응답 텍스트, 비용 크레딧). 학번·이름은 부르는 쪽에서 미리 빼고 내용만 넘긴다.
     응답은 스트리밍으로 받아 [바로 중지] 때 연결을 끊을 수 있게 한다."""
     if not key:
         raise LlmError("OpenRouter API 키를 입력해 주세요.")
-    payload = {**build_payload(model, system, user, privacy_block), "stream": True}
+    payload = {**build_payload(model, system, user, privacy_block, history), "stream": True}
     last = None
     for attempt in range(3):
         _check()

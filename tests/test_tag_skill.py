@@ -10,7 +10,7 @@ CALLS = []
 JUDGE = {"v": '{"내용": 96, "문체": 92, "차이": ""}'}
 
 
-def fake_chat(key, model, system, user, privacy_block=False):
+def fake_chat(key, model, system, user, privacy_block=False, history=None):
     CALLS.append((system, user, getattr(openrouter._tl, "temp", None)))
     if "[유사도 채점]" in system:
         return "채점 결과: " + JUDGE["v"], 0.0001

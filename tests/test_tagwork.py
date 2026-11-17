@@ -8,8 +8,8 @@ from app import config, openrouter
 CALLS = []
 
 
-def fake_chat(key, model, system, user, privacy_block=False):
-    CALLS.append((system, user))
+def fake_chat(key, model, system, user, privacy_block=False, history=None):
+    CALLS.append((system, user, list(history or [])))
     n = len(CALLS)
     if "실패시켜" in user:
         raise openrouter.LlmError("가짜 실패")
@@ -60,11 +60,12 @@ def test_flow():
     assert len(trials) == 3 and c1 in [t["id"] for t in trials]
     assert {t["ver_no"] for t in trials} == {1, 2}  # 지침A=1, 지침B=2
     assert CALLS[-1][1] == "원문1 책을 읽음" and "지침B" in CALLS[-1][0]
-    # 이어 고치기: 앞 후보 글에 요청만
+    # 이어 고치기
     par = trials[-1]
     chain2 = {"src": "original", "steps": par["chain"]["steps"] + [{"prompt": "", "example": "", "request": "더 짧게"}]}
     c2 = ok(api.tag_trial_run(w["id"], r0, chain2, par["id"]))["id"]
-    assert CALLS[-1][1] == par["text"] and "더 짧게" in CALLS[-1][0] and "지침B" in CALLS[-1][0]
+    # 대화 누적(v0.20): 원문 → 앞 결과 → 이번 요청
+    assert CALLS[-1][2] == [("원문1 책을 읽음", par["text"])] and "더 짧게" in CALLS[-1][1] and "지침B" in CALLS[-1][0]
     bad = api.tag_trial_run(w["id"], r0, {"src": "original", "steps": [{"prompt": "다른", "request": ""}, {"request": "x"}]}, par["id"])
     assert not bad["ok"]
     # 확정 → 그 기록에 반영, 단계 2개가 태그 설정

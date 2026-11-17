@@ -10,7 +10,7 @@ CALLS = []
 HOOK = {"fn": None}
 
 
-def fake_chat(key, model, system, user, privacy_block=False):
+def fake_chat(key, model, system, user, privacy_block=False, history=None):
     CALLS.append((system, user))
     if HOOK["fn"]:
         HOOK["fn"](system, user)
@@ -120,7 +120,7 @@ def test_edges():
     # C08: 2단계 중 두 번째에서 실패하면 첫 단계 결과·비용을 남기고, 다시 할 때 두 번째부터
     fail = {"n": 0}
     def fail_b(s, u):
-        if "요청B" in s and fail["n"] == 0:
+        if ("요청B" in s or "요청B" in u) and fail["n"] == 0:
             fail["n"] += 1
             raise openrouter.LlmError("가짜 실패")
     HOOK["fn"] = fail_b
@@ -150,7 +150,7 @@ def test_edges():
     # A04: 단계 사이에서 중지하면 끝낸 단계·비용은 '중지함'으로 남고, 다시 할 때 다음 단계부터
     stop = {"n": 0}
     def stop_b(s, u):
-        if "요청B" in s and stop["n"] == 0:
+        if ("요청B" in s or "요청B" in u) and stop["n"] == 0:
             stop["n"] += 1
             openrouter.cancel()
             raise openrouter.Cancelled()

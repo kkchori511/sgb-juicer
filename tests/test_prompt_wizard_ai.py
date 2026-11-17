@@ -8,7 +8,7 @@ from app import config, openrouter
 SEEN = []
 
 
-def fake_chat(key, model, system, user, privacy_block=False):
+def fake_chat(key, model, system, user, privacy_block=False, history=None):
     SEEN.append((system, user))
     if "프롬프트' 를" in system or "프롬프트'를 정교하게" in system:
         return "```\n# 역할\n완성된 프롬프트\n```", 0.002

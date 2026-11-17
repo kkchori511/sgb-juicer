@@ -89,6 +89,35 @@ def step_input(chain, i, text, src):
     return text
 
 
+CHAT_RULE = ("\n\n[이어서 고치기 — 대화]\n- 교사가 결과를 보고 요청을 이어 갑니다. 이번 요청을 반영하되, 앞에서 한 요청도 계속 지킵니다.\n"
+             "- 위 지침(문체·쓰지 않는 것·출력 형식)은 그대로 지킵니다. 요청과 관계없는 문장은 되도록 그대로 둡니다.\n"
+             "- 요청이 원문 내용을 넣으라고 하면 첫 메시지의 원문에서 찾아 지금 글의 문체·종결 방식에 맞게 알맞은 자리에 넣습니다. 원문에 없는 사실은 지어내지 않습니다.\n"
+             "- 매번 고친 글 전체만 출력합니다(설명·인사·표시 없이).")
+TURN_TAIL = "\n\n(위 요청대로 고친 글 전체만 출력하세요.)"
+
+
+def _ask(s):
+    return (f"<요청>\n{s['request']}\n</요청>" if s["request"] else "바뀐 지침대로 원문을 다시 써 주세요.") + TURN_TAIL
+
+
+def chat_messages(chain, src, outs):
+    """대화 누적(v0.20): 마지막 단계를 부를 (시스템 글, 앞 대화, 이번 사용자 글).
+    대화 = 원문 → 결과1 → 요청2 → 결과2 … → 이번 요청. outs: 앞 단계들의 결과(단계 수 - 1개).
+    예전 후보처럼 앞 결과가 모자라면 '원문 → 마지막 결과'부터 시작한다."""
+    steps = chain["steps"]
+    last = len(steps) - 1
+    if last == 0:
+        return step_system(chain, 0), [], src
+    base, example = effective(chain, last)
+    system = prompts.build_system(base, example, 0) + (FIRST_REQ_RULE.format(req=steps[0]["request"]) if steps[0]["request"] else "") + CHAT_RULE
+    outs = [str(x) for x in (outs or [])]
+    if len(outs) == last:
+        history = [(src, outs[0])] + [(_ask(steps[k]), outs[k]) for k in range(1, last)]
+    else:
+        history = [(src, outs[-1])] if outs else []
+    return system, history, _ask(steps[last])
+
+
 def replay_chain(chain):
     """나머지 변환에 쓸 단계: 그 기록에만 맞는 단계(only_here)는 뺀다."""
     return {**chain, "steps": [s for i, s in enumerate(chain.get("steps") or []) if i == 0 or not s.get("only_here")]}

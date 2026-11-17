@@ -20,7 +20,7 @@ from app import openrouter  # noqa: E402
 
 
 _JUDGE = [0]
-def _fake_chat(key, model, system, user, privacy_block=False):
+def _fake_chat(key, model, system, user, privacy_block=False, history=None):
     # 3초 걸리는 척: 여러 건 동시 처리와 [바로 중지]를 볼 수 있게(중지하면 바로 끊김)
     if openrouter._cancel.wait(3):
         raise openrouter.Cancelled()

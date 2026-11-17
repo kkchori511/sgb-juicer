@@ -1129,3 +1129,5 @@ label.inline[hidden] { display: none; }
 .ib-flow h3 { margin: 0 0 10px; font-size: 17px; }
 .ib-flow svg, .flow-svg svg { display: block; width: 100%; height: auto; }
 .guide-flow { margin: 6px 0 14px; }
+/* 대화 마법사: 스킬화 안내 */
+.cw-tip { margin: 0 0 8px; padding: 8px 12px; border: 1px solid #fcd34d; background: #fffbeb; border-radius: var(--radius-sm); font-size: 13.5px; line-height: 1.55; }

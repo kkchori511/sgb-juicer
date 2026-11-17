@@ -4141,7 +4141,7 @@
     if (!chain || !chain.steps) return '';
     const parts = [chain.src === 'current' ? '지금 기록 내용' : '처음 원문'];
     chain.steps.forEach((s, i) => parts.push(i === 0 ? `지침 '${twShort(s.prompt, 24)}'${s.request ? ` + 요청 '${twShort(s.request, 20)}'` : ''}`
-      : `요청 '${twShort(s.request || '(전체 프롬프트 고침)', 24)}'${s.only_here ? '(이 기록만)' : s.with_src ? '(원문 함께)' : ''}`));
+      : `요청 '${twShort(s.request || '(전체 프롬프트 고침)', 24)}'${s.only_here ? '(이 기록만)' : ''}`));
     return parts.join(' → ');
   }
   function twChainInfo(chain, title) {
@@ -4152,19 +4152,17 @@
       if (s.example) lines.push(`예시:\n${s.example}`);
       if (s.request) lines.push(`${i === 0 ? '추가 요청' : '이어서 고칠 요청'}: ${s.request}`);
       if (i > 0 && !s.prompt) lines.push('(지침은 앞 단계에서 마지막으로 쓴 것 그대로)');
-      if (s.with_src) lines.push('(원문도 함께 보냄)');
       if (s.only_here) lines.push('📌 이 기록에만 적용 — ② 나머지 변환에서는 이 단계를 뺍니다');
     });
     alertBox(`${title || '이 후보를 만든 단계'}\n\n${lines.join('\n')}`);
   }
   // 나머지 변환에서 실제로 거치는 단계(그 기록에만 맞는 단계는 뺌) — 서버 replay_chain과 같게
   const twReplaySteps = (chain) => chain.steps.filter((s, i) => i === 0 || !s.only_here);
-  // 이어 고치기 칸 도구: 원문도 함께 보내기 + 원문에서 고른 부분 넣기(그 기록에만 적용)
+  // 이어 고치기 칸 도구: 원문에서 고른 부분 넣기(그 기록에만 적용). v0.20부터 대화를 처음부터 쌓아 보내 원문은 늘 함께 간다
   function contSrcTools(rq, srcEls) {
-    const st = { withSrc: true, pick: false };
+    const st = { pick: false };
     const note = el('div', { class: 'tw-pick-note' }); note.hidden = true;
     const clearPick = () => { st.pick = false; note.hidden = true; };
-    const cb = el('input', { type: 'checkbox', checked: true, onchange: (e) => { st.withSrc = e.target.checked; if (!st.withSrc) clearPick(); } });
     const pickBtn = el('button', { type: 'button', class: 'small', text: '➕ 원문에서 고른 부분 넣기', title: '원문 칸에서 넣을 문장을 마우스로 끌어 고른 뒤 누르세요',
       onclick: () => {
         const sel = window.getSelection();
@@ -4173,7 +4171,7 @@
         if (!t || !inSrc) { toast('먼저 원문 칸에서 넣을 부분을 마우스로 끌어 고르세요.'); return; }
         const q = t.length > 300 ? `${t.slice(0, 300)}…` : t;
         rq.value = `${rq.value.trim() ? `${rq.value.trim()} / ` : ''}원문의 "${q}" 내용을 알맞은 자리에 넣어 줘`;
-        st.pick = true; st.withSrc = true; cb.checked = true;
+        st.pick = true;
         note.replaceChildren('📌 원문에서 고른 부분은 이 기록에만 맞으므로, ② 나머지 변환에서는 이 단계를 빼고 실행합니다. ',
           el('button', { type: 'button', class: 'link', text: '다른 기록에도 쓸 요청으로 바꾸기', title: '요청을 다른 학생에게도 통하는 말로 고쳤다면 누르세요', onclick: clearPick }));
         note.hidden = false;
@@ -4181,8 +4179,8 @@
       } });
     pickBtn.addEventListener('mousedown', (e) => e.preventDefault()); // 누를 때 고른 글이 풀리지 않게
     const box = el('div', { class: 'tw-src-tools' }, [el('div', { class: 'tw-row' }, [
-      el('label', { class: 'inline', style: 'margin:0', title: '켜면 앞 결과와 함께 원문도 AI에 보내, 결과에서 빠진 원문 내용을 다시 가져와 넣을 수 있습니다' }, [cb, '원문도 함께 보내기']), pickBtn]), note]);
-    return { el: box, flags: () => (st.withSrc ? { with_src: true, ...(st.pick ? { only_here: true } : {}) } : {}) };
+      el('span', { class: 'muted small-note', title: '처음 원문부터 지금까지 주고받은 대화를 모두 AI에 보냅니다(앞 요청도 계속 지킴)' }, '💬 대화 전체(원문·앞 요청 포함)를 이어서 보냅니다'), pickBtn]), note]);
+    return { el: box, flags: () => (st.pick ? { with_src: true, only_here: true } : {}) };
   }
   function twRec(id) { return TV.data ? TV.data.records.find((x) => x.id === id) : null; }
   function twRecLabel(x) { return `${x.name || x.student_no}${x.seq ? ` · ${x.seq}회` : x.kind === 'existing' ? ' · 기존 완성문' : ''}${x.title ? ` · ${x.title}` : ''}`; }
@@ -4385,7 +4383,7 @@
       box.style.width = 'min(1200px, 96vw)';
       const model = el('select', { 'aria-label': '모델' }); fillModelSelect(model);
       const body = el('div', { class: 'sheet-body sk-body' });
-      const nameIn = el('input', { type: 'text', maxlength: 60, value: `${o.tagName || '태그'} 스킬` });
+      const nameIn = el('input', { type: 'text', maxlength: 60, value: `${o.tagName || (o.free ? '대화' : '태그')} 스킬` });
       const saveCb = el('input', { type: 'checkbox', checked: true });
       const startBtn = el('button', { type: 'button', class: 'primary ai-btn' });
       const okBtn = el('button', { type: 'button', class: 'primary' });
@@ -4403,7 +4401,8 @@
       };
       const verify = async (a) => {
         const out = await aiRun({ title: `스킬화 ${a.no}번째 — 같은 원문으로 2번 변환해 비교`, skipConfirm: true, concurrency: 2,
-          jobs: [1, 2].map((k) => ({ label: `검증 ${k}`, run: () => api.tag_skill_check(o.cid, a.prompt, a.example, model.value, o.year) })) });
+          jobs: [1, 2].map((k) => ({ label: `검증 ${k}`, run: () => (o.free ? api.skill_check_free(o.free.chain, o.free.src, o.target, a.prompt, a.example, model.value)
+            : api.tag_skill_check(o.cid, a.prompt, a.example, model.value, o.year)) })) });
         if (!out) return false;
         a.checks = out.results.map((r) => ({ text: r.text, score: r.score, content: r.content, style: r.style, length: r.length, diff: r.diff }));
         a.min = a.checks.length ? Math.min(...a.checks.map((c) => c.score)) : 0;
@@ -4418,7 +4417,8 @@
           let prev = SK.tries.length ? prevOf(SK.tries[SK.tries.length - 1]) : null;
           for (let i = 0; i < SKILL_TRIES; i += 1) {
             const c = await aiRun({ title: `스킬화 ${SK.tries.length + 1}번째 — 프롬프트 만들기`, skipConfirm: true,
-              jobs: [{ label: o.label, run: () => api.tag_skill_compose(o.cid, prev, model.value, o.year) }] });
+              jobs: [{ label: o.label, run: () => (o.free ? api.skill_compose_free(o.free.chain, o.free.src, o.target, prev, model.value)
+                : api.tag_skill_compose(o.cid, prev, model.value, o.year)) }] });
             if (!c || !c.done) break;
             const a = { no: SK.tries.length + 1, prompt: c.results[0].prompt, example: c.results[0].example || '', checks: [], pass: false, copied: !!c.results[0].copied };
             SK.tries.push(a); SK.sel = SK.tries.length - 1; draw();
@@ -4462,6 +4462,8 @@
         startBtn.disabled = SK.running || (a && a.pass);
         okBtn.textContent = a && !a.pass ? '그래도 이 프롬프트로 확정' : '이 프롬프트로 확정';
         okBtn.disabled = SK.running || !a || !a.checks.length;
+        okBtn.hidden = !!o.free; // 붙여넣은 글은 태그 설정이 없어 목록 저장만
+        if (o.free) { saveOnly.classList.add('primary'); saveOnly.textContent = '프롬프트 목록에 저장'; saveCb.parentNode.hidden = true; }
         saveOnly.disabled = SK.running || !a;
         if (plainBtn) plainBtn.disabled = SK.running;
       };
@@ -4484,7 +4486,7 @@
         if (!a) return;
         if (!name) { toast('저장할 이름을 적어 주세요.'); nameIn.focus(); return; }
         const r = await mutate('prompt_save', { name, prompt: a.prompt, example: a.example, made: '스킬화', tags: o.tagName ? [o.tagName] : [] });
-        if (r) { TW.lib = null; toast(`프롬프트 목록에 '${name}'으로 저장했습니다(확정은 하지 않음).`); }
+        if (r) { TW.lib = null; toast(o.free ? `프롬프트 목록에 '${name}'으로 저장했습니다. 다른 학생에게는 이 프롬프트를 골라 적용하세요.` : `프롬프트 목록에 '${name}'으로 저장했습니다(확정은 하지 않음).`); if (o.free) closeSheet(); }
       });
       if (plainBtn) plainBtn.addEventListener('click', () => { if (SK.running) return; closeSheet(); o.plain(); });
       addTo(box, el('div', { class: 'sheet-head' }, [el('h2', { text: '🧪 스킬화 — 이어 고친 단계를 하나의 프롬프트로' }), el('span', { class: 'muted', text: o.label })]),
@@ -4983,10 +4985,12 @@
       const steps = cur.chain.steps;
       steps.forEach((s, i) => {
         const msg = i === 0 ? `지침: ${twShort(s.prompt, 140)}${s.example ? `\n예시: ${twShort(s.example, 80)}` : ''}${s.request ? `\n요청: ${s.request}` : ''}`
-          : `${s.request || '(요청 없음)'}${s.prompt ? `\n(지침 전체를 고침: ${twShort(s.prompt, 100)})` : ''}${s.only_here ? '\n📌 원문 함께 · 이 기록에만 적용' : s.with_src ? '\n(원문 함께 보냄)' : ''}`;
+          : `${s.request || '(요청 없음)'}${s.prompt ? `\n(지침 전체를 고침: ${twShort(s.prompt, 100)})` : ''}${s.only_here ? '\n📌 원문에서 고른 부분 · 이 기록에만 적용' : ''}`;
         chat.appendChild(bubble('me', msg));
         const t = path.find((x) => x.chain.steps.length === i + 1);
-        chat.appendChild(bubble('ai', t ? t.text : '(이 단계 결과는 후보 3칸에서 밀려나 보이지 않습니다)'));
+        const turns = (cur.meta && cur.meta.turns) || cur.turns || [];
+        const old = i < steps.length - 1 && turns.length === steps.length - 1 ? turns[i] : null; // 후보마다 저장한 앞 대화
+        chat.appendChild(bubble('ai', t ? t.text : old || '(이 단계 결과는 후보 3칸에서 밀려나 보이지 않습니다)'));
       });
     } else {
       chat.appendChild(el('div', { class: 'cw-empty muted', text: '아래에 지침(프롬프트)을 쓰고 [보내기]를 누르면 대화가 시작됩니다. 결과를 보고 "더 짧게"처럼 요구를 이어서 보내세요.' }));
@@ -5036,7 +5040,9 @@
       el('button', { type: 'button', class: 'small' + (cur && cur.id === t.id ? ' primary' : ''), text: cur && cur.id === t.id ? '지금 이어 가는 중' : '여기서 이어 가기', onclick: () => { CW.cur = t; cwRender(); } })])));
     box.append(
       el('div', { class: 'sheet-head' }, [el('h2', { text: '💬 프롬프트 마법사 · 대화' }), modeSel, el('span', { class: 'spacer' }),
-        el('button', { type: 'button', class: 'primary', disabled: !cur, title: cur ? '지금 이어 가는 후보까지의 대화를 종합해 완성된 프롬프트를 만듭니다' : '먼저 대화를 시작하세요', text: '🧩 프롬프트 제작', onclick: () => cwCompose(model) })]),
+        el('button', { type: 'button', class: 'primary', disabled: !cur, title: cur ? '지금 이어 가는 후보까지의 대화를 프롬프트 하나로 정리하고, 같은 원문으로 다시 변환해 같은 결과가 나오는지 검증합니다' : '먼저 대화를 시작하세요', text: '🧪 대화 내용 스킬화', onclick: () => cwCompose(model) })]),
+      el('div', { class: 'cw-tip' }, ['💡 원하는 결과가 나올 때까지 대화로 고치세요. 마음에 들면 ', el('b', { text: '[🧪 대화 내용 스킬화]' }),
+        '로 지금까지의 대화를 프롬프트 하나로 정리해 저장하고, 다른 학생에게는 그 프롬프트를 적용하세요(태그별 기록 ② 나머지 변환, 또는 💬 프롬프트 목록에서 골라 쓰기).']),
       el('div', { class: 'sheet-body cw-body' }, [el('div', { class: 'cw-main' }, [src, chat, input]), cands]),
       el('div', { class: 'sheet-foot' }, [el('span', { class: 'muted', text: CW.mode === 'record' ? '이 대화의 결과는 태그 AI 변환 ① 프롬프트 적용 시험의 후보와 같습니다(거기서 [✔ 확정] 가능).' : '붙여넣은 글로 한 대화는 저장하지 않습니다.' }),
         el('span', { class: 'spacer' }), el('button', { type: 'button', text: '닫기', onclick: () => cwClose() })]));
@@ -5065,10 +5071,11 @@
     const text = parent ? parent.text : CW.paste;
     if (!text.trim()) { toast('변환해 볼 글을 붙여넣으세요.'); return; }
     if (!parent && CW.local.length >= 3 && CW.local.every((t) => t.locked)) { toast('후보 3칸이 모두 잠겨 있습니다.'); return; }
+    const turns = parent ? [...(parent.turns || []), parent.text] : []; // 대화 누적: 앞 결과들을 차례대로
     const out = await busyRun(btn, 'cwpaste', () => aiRun({ title: parent ? '이어서 고치기' : '대화 시작', skipConfirm: true,
-      jobs: [{ label: '붙여넣은 글', run: () => api.prompt_chat_free(chain, text, model.value, parent ? parent.orig : CW.paste) }] }));
+      jobs: [{ label: '붙여넣은 글', run: () => api.prompt_chat_free(chain, text, model.value, parent ? parent.orig : CW.paste, turns) }] }));
     if (!out || !out.done) return;
-    const t = { id: `L${Date.now()}`, parent_id: parent ? parent.id : null, orig: parent ? parent.orig : CW.paste, chain, text: out.results[0].text, locked: false, created_at: new Date().toISOString().replace('T', ' ') };
+    const t = { id: `L${Date.now()}`, parent_id: parent ? parent.id : null, orig: parent ? parent.orig : CW.paste, turns, chain, text: out.results[0].text, locked: false, created_at: new Date().toISOString().replace('T', ' ') };
     CW.local.push(t);
     while (CW.local.length > 3) { const i = CW.local.findIndex((x) => !x.locked && x !== t); if (i < 0) break; CW.local.splice(i, 1); }
     CW.cur = t;
@@ -5078,6 +5085,12 @@
   async function cwCompose(model) {
     const cur = CW.cur;
     if (!cur) return;
+    if (CW.mode === 'paste' && cur.chain.steps.length > 1 && !CW.plainCompose) { // 붙여넣은 글 대화도 스킬화 + 같은 원문 검증(목록에 저장)
+      openSkillSheet({ free: { chain: cur.chain, src: cur.orig || CW.paste }, label: '붙여넣은 글', target: cur.text, chainText: twChainText(cur.chain),
+        plainLabel: '검증 없이 프롬프트만 만들기', plainTitle: '대화 과정만 종합해 프롬프트를 만듭니다(같은 원문 검증 없음)',
+        plain: async () => { CW.plainCompose = true; try { await cwCompose(model); } finally { CW.plainCompose = false; } } });
+      return;
+    }
     if (CW.mode === 'record' && twReplaySteps(cur.chain).length > 1 && !CW.plainCompose) { // 태그 기록 대화: 스킬화 + 같은 원문 검증
       const rec = CW.recs.find((x) => x.id === CW.rid);
       openSkillSheet({ cid: cur.id, year: CW.year, tagId: CW.tag, tagName: CW.tagName, label: rec ? twRecLabel(rec) : CW.tagName,
