@@ -65,8 +65,8 @@ def test_all():
     ok(api.ai_record(rid, 0))
     system, user = CALLS[-1]
     assert "행동특성 및 종합의견" in system and "바이트" in system
-    assert "문제해결력(" in user and "직접키워드" in user and "수학 마스터" in user and "(없음 — 키워드에 맞는" in user
-    assert "청소" not in user and "20301" not in user and "김하나" not in user
+    assert "- 문제해결력: " in user and "<키워드 뜻 참고" in user and "직접키워드" in user and "수학 마스터" in user and "사례·기록: 없음 →" in user and "[분량]" in user
+    assert "청소 당번" not in user and "20301" not in user and "김하나" not in user
     rec = next(x for x in ok(api.student_view(hr, "behavior", "20301"))["records"] if x["id"] == rid)
     assert rec["bundle"][0]["op"] == "trait" and rec["bundle"][0]["meta"]["prompt_name"] == "행특 생성"
 

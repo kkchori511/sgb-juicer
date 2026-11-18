@@ -64,24 +64,32 @@ def summary(d):
     return "\n".join(lines)
 
 
-def ai_user(d, dic):
-    """AI에 보낼 글(학번·이름 없음): 성격 + 영역별 키워드(사전 설명 포함)·사례."""
+def ai_user(d, dic, target=0):
+    """AI에 보낼 글(학번·이름 없음): 성격 + 영역별 키워드·사례. 키워드 뜻은 학생 자료와 섞지 않고 맨 끝 '참고'로 따로 둔다."""
     if is_empty(d):
         raise DbError("성격유형이나 영역 키워드·사례를 하나 이상 넣어 주세요.")
     descs = {a: {e["kw"]: e["desc"] for e in dic["areas"][a]} for a in AREAS}
-    out = []
+    out = ["<학생 자료 — 이 안에 적힌 것만 이 학생의 사실>"]
     if d["type"] or d["desc"]:
         out.append(f"[성격]\n- 성격유형: {d['type'] or '(없음)'}\n- 성격 설명: {d['desc'] or '(없음)'}")
+    ref = []
     for a in used_areas(d):
         x = d["areas"][a]
         part = [f"[{AREA_NAMES[a]}]"]
         if x["kws"]:
-            part.append("- 키워드: " + "; ".join(f"{k}({descs[a][k]})" if descs[a].get(k) else k for k in x["kws"]))
-        part.append(f"- 실제 사례·기록: {x['case']}" if x["case"] else "- 실제 사례·기록: (없음 — 키워드에 맞는 성향·태도로만 서술하고 활동을 지어내지 않음)")
+            part.append("- 드러낼 키워드: " + ", ".join(x["kws"]))
+            ref += [f"- {k}: {descs[a][k]}" for k in x["kws"] if descs[a].get(k)]
+        part.append(f"- 실제 사례·기록: {x['case']}" if x["case"] else "- 실제 사례·기록: 없음 → 키워드가 뜻하는 성향·태도만 쓰고, 구체적 행동·활동·습관(언제·어디서·무엇을)은 쓰지 않음")
         out.append("\n".join(part))
     skipped = [AREA_NAMES[a] for a in AREAS if a not in used_areas(d)]
     if skipped:
         out.append("[쓰지 않는 영역] " + ", ".join(skipped))
+    out.append("</학생 자료>")
+    if ref:
+        out.append("<키워드 뜻 참고 — 학생이 한 일이 아님>\n키워드가 무슨 뜻인지만 이해하는 데 쓰세요. 아래 문장 속 구체적 행동·장소·빈도(예: 청소, 봉사활동, 매일, 자투리 시간, 모둠 과제, 학급 임원)는 위 학생 자료의 사례에 없으면 결과에 쓰지 마세요.\n"
+                   + "\n".join(ref) + "\n</키워드 뜻 참고>")
+    if target:
+        out.append(f"[분량] 공백 포함 약 {round(target * 0.95 / 3)}자 안팎(약 {round(target * 0.95)}바이트), {target}바이트를 넘지 않게. 넘을 것 같으면 꾸밈 문구부터 줄이세요.")
     return "\n\n".join(out)
 
 

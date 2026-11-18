@@ -1693,7 +1693,7 @@ class Api:
             # 결과 묶음은 원문에서 만든다(확정본이 있어도 원문 기준). 행특 설계 카드는 설계(성격·키워드·사례)로
             if op == "trait":
                 from . import trait, trait_dict
-                src = trait.ai_user(trait.parse(r["design"]), trait_dict.load())
+                src = trait.ai_user(trait.parse(r["design"]), trait_dict.load(), target)
             else:
                 src = r["original"] if r["original"] is not None else r["content"]
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, src, cfg["privacy_block"])
