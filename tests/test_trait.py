@@ -70,8 +70,18 @@ def test_all():
     rec = next(x for x in ok(api.student_view(hr, "behavior", "20301"))["records"] if x["id"] == rid)
     assert rec["bundle"][0]["op"] == "trait" and rec["bundle"][0]["meta"]["prompt_name"] == "행특 생성"
 
+    # 목표(행특 기본 1500B)를 넘으면 한 번 줄이기, 빈 줄 정리
+    target = ok(api.student_view(hr, "behavior", "20301"))["target"]
+    seq = iter(["가" * (target // 3 + 50) + "\n\n둘째 문단", "줄인 첫 문단\n\n줄인 둘째 문단"])
+    openrouter.chat = lambda key, model, system, user, privacy_block=False, history=None: (CALLS.append((system, user)) or next(seq), 0.0)
+    n0 = len(CALLS)
+    ok(api.ai_record(rid, 0))
+    assert len(CALLS) == n0 + 2 and "분량만 줄인다" in CALLS[-1][0]
+    top = next(x for x in ok(api.student_view(hr, "behavior", "20301"))["records"] if x["id"] == rid)["bundle"][0]
+    assert top["text"] == "줄인 첫 문단\n줄인 둘째 문단" and top["meta"]["shrunk_from"] > target
+    openrouter.chat = fake_chat
     # 확정 → 확정 기록(최종안 이어 붙이기 대상), 확정 뒤 설계를 고쳐도 확정본은 그대로
-    ok(api.confirm_record(rid, rec["bundle"][0]["text"]))
+    ok(api.confirm_record(rid, "성실한 성격으로 맡은 일을 끝까지 해냄."))
     ok(api.trait_save(hr, "20301", dict(design, desc="바뀐 설명")))
     rec = next(x for x in ok(api.student_view(hr, "behavior", "20301"))["records"] if x["id"] == rid)
     assert rec["confirmed"] and rec["content"] == "성실한 성격으로 맡은 일을 끝까지 해냄." and "바뀐 설명" in rec["orig"]

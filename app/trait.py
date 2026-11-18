@@ -89,7 +89,8 @@ def ai_user(d, dic, target=0):
         out.append("<키워드 뜻 참고 — 학생이 한 일이 아님>\n키워드가 무슨 뜻인지만 이해하는 데 쓰세요. 아래 문장 속 구체적 행동·장소·빈도(예: 청소, 봉사활동, 매일, 자투리 시간, 모둠 과제, 학급 임원)는 위 학생 자료의 사례에 없으면 결과에 쓰지 마세요.\n"
                    + "\n".join(ref) + "\n</키워드 뜻 참고>")
     if target:
-        out.append(f"[분량] 공백 포함 약 {round(target * 0.95 / 3)}자 안팎(약 {round(target * 0.95)}바이트), {target}바이트를 넘지 않게. 넘을 것 같으면 꾸밈 문구부터 줄이세요.")
+        aim = round(target * 0.88)
+        out.append(f"[분량] 약 {aim}바이트(공백 포함 한글 약 {round(aim / 3)}자)로 쓰고, {target}바이트는 절대 넘지 않게. 넘을 것 같으면 꾸밈 문구부터 줄이세요.")
     return "\n\n".join(out)
 
 

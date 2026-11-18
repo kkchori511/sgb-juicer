@@ -127,6 +127,19 @@ def build_system(prompt: str, example: str, target_bytes: int = 0) -> str:
     return (prompt or "").strip() + example_rule(example) + length_rule(target_bytes) + PRINCIPLE + OUTPUT_RULE
 
 
+def trait_shrink_system(target_bytes: int, text: str = "") -> str:
+    """행특 생성 결과가 목표를 넘을 때 줄이기(사실·문단 구성 유지). AI는 바이트를 잘 못 세므로 지금 글자 수 → 목표 글자 수(비율)로 알려 준다."""
+    from .textutil import count_bytes
+    now_b, now_c = max(count_bytes(text), 1), max(len(text), 1)
+    goal_c = max(1, round(now_c * target_bytes * 0.93 / now_b))
+    cut = max(1, round((1 - goal_c / now_c) * 100))
+    return ("다음은 학교생활기록부 '행동특성 및 종합의견' 글이다. 분량만 줄인다.\n"
+            f"- 지금 공백 포함 {now_c}자다. 약 {goal_c}자(약 {cut}% 줄이기)로 줄인다. 이보다 많이 줄이지도, 덜 줄이지도 않는다.\n"
+            "- 꾸밈 문구·겹치는 평가 표현부터 줄이고, 글에 적힌 사실(활동·역할·행동)은 남긴다. 새 내용을 더하지 않는다.\n"
+            "- 두 문단 구성과 문체('~함', '~임', '~보임')를 그대로 두고, 문단 사이는 빈 줄 없이 줄바꿈 한 번."
+            + PRINCIPLE + OUTPUT_RULE)
+
+
 def build_synth_user(parts: list[dict], target_bytes: int) -> str:
     """parts: [{text, ratio(0~1)}] — 학번·이름 없이 내용과 비율만."""
     lines = []

@@ -7,6 +7,7 @@ import datetime as dt
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import threading
@@ -1698,6 +1699,19 @@ class Api:
                 src = r["original"] if r["original"] is not None else r["content"]
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, src, cfg["privacy_block"])
             meta = {"model": model, "op": op, "prompt_name": pr["name"], "prompt": pr["prompt"], "example": pr["example"], "record_ids": [r["id"]]}
+            if op == "trait":  # 문단 사이 빈 줄 정리, 목표를 넘으면 한 번만 줄이기
+                text = re.sub(r"\n\s*\n+", "\n", text.strip())
+                first = count_bytes(text)
+                for _ in range(2):  # 넘으면 줄이기(그래도 넘으면 한 번 더)
+                    if not target or count_bytes(text) <= target:
+                        break
+                    short, c2 = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.trait_shrink_system(target, text), text, cfg["privacy_block"], extra=False)
+                    short = re.sub(r"\n\s*\n+", "\n", short.strip())
+                    cost += c2
+                    if not short or count_bytes(short) >= count_bytes(text):
+                        break
+                    text = short
+                    meta["shrunk_from"] = first
             nid, dropped = rec.add_result(r["group_id"], r["item"], r["student_no"], op, text, self._xm(meta), cost, record_id=r["id"])
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
         finally:
