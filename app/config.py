@@ -32,6 +32,9 @@ DEFAULTS = {
     "prompts": {},
     # v0.17.6 프롬프트 목록 [{id, name, prompt, example}] — None이면 처음(기본 3개 + 예전 항목별 프롬프트로 만든다)
     "prompt_lib": None,
+    # v0.22 행특 설계 사전(None이면 기본 사전)과 바로 앞 사전(되돌리기 한 번)
+    "trait_dict": None,
+    "trait_dict_prev": None,
     # 작업 종류(synth/refine/polish)마다 마지막에 고른 프롬프트 id
     "prompt_pick": {},
     # 종합 비중 합계 100% 검사(기본 꺼짐)
@@ -66,6 +69,9 @@ def _normalize(cfg: dict) -> dict:
         cfg["prompt_lib"] = None
     if not isinstance(cfg.get("prompt_pick"), dict):
         cfg["prompt_pick"] = {}
+    for k in ("trait_dict", "trait_dict_prev"):
+        if not isinstance(cfg.get(k), dict):
+            cfg[k] = None
     for k in ("privacy_block", "setup_done", "menu_collapsed", "weight_sum_check"):
         cfg[k] = bool(cfg.get(k))
     try:

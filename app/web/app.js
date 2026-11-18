@@ -1201,6 +1201,7 @@
     if (name === 'data') loadBackups();
     if (name === 'year') renderRoleCards($('roleCardsSettings'), ys.role, changeRole);
     if (name === 'sched') { renderTargets(); renderSchedTable(); }
+    if (name === 'trait') renderTraitDictSettings();
   }
   function renderSettings() {
     $('cfgPath').textContent = info.config_path;
@@ -1700,7 +1701,7 @@
   // =====================================================================
   const R = { slots: [], slot: null, students: [], sno: null, view: null, filter: '', search: '', selected: new Set(), busy: new Set() };
   const slotKey = (s) => `${s.group_id}:${s.item}`;
-  const OP_LABEL = { refine: '정제', polish: '다듬기', synth: '종합' };
+  const OP_LABEL = { refine: '정제', polish: '다듬기', synth: '종합', trait: '행특 생성' };
 
   function setCredits(r) {
     if (!r) return;
@@ -1966,7 +1967,8 @@
   function updateRecTools() {
     const off = !R.slot || !!ys.archived || !(R.students || []).length;
     $('recToolsLabel').textContent = R.slot ? `${R.slot.label} 전체 작업` : '이 항목 전체 작업';
-    ['recBulkRecord', 'recBulkExisting', 'recBulkFinal', 'recBasisGen', 'recBulkClose', 'recJoinBulk'].forEach((id) => { $(id).disabled = off; });
+    ['recBulkRecord', 'recBulkExisting', 'recBulkFinal', 'recBasisGen', 'recBulkClose', 'recJoinBulk', 'recTraitBulk', 'recTraitTpl', 'recTraitImp'].forEach((id) => { $(id).disabled = off; });
+    ['recTraitBulk', 'recTraitTpl', 'recTraitImp'].forEach((id) => { $(id).hidden = !R.slot || R.slot.item !== 'behavior'; });
     const bg = $('recBasisGen');
     bg.hidden = !R.slot || !BASIS_ITEMS.includes(R.slot.item);
     if (R.slot) { bg.textContent = `${basisRo(R.slot.item)} 여러 명 생성`; bg.title = `미입력자를 모으거나 체크한 학생만, 학생관찰기록 없이 ${basisWord(R.slot.item)}만으로 후보를 만듭니다`; }
@@ -2099,6 +2101,7 @@
     $('recStudentHead').append(`${r.student.student_no} ${r.student.name} `, el('span', { class: `st ${stInfo.cls}`, text: `${stInfo.icon} ${stInfo.text}` }),
       r.student.active ? '' : el('span', { class: 'tag', text: '비활성' }), r.student.level ? el('span', { class: 'tag', text: `성취수준 ${r.student.level}` }) : '');
     $('crumb').textContent = `${ys.year}학년도 › 항목별 기록 › ${R.slot.label} › ${r.student.name}`;
+    if (R.slot.item === 'behavior' && !TD) await traitDict();
     renderRecords();
     renderFinal();
     if (keepScroll) { $('recRecords').scrollTop = scroll[0]; $('recFinal').scrollTop = scroll[1]; }
@@ -2180,7 +2183,9 @@
   function renderRecords() {
     const box = $('recRecords');
     box.innerHTML = '';
-    const v = R.view;
+    const v0 = R.view;
+    const trait = v0.records.find((r) => r.kind === 'trait') || null;
+    const v = { ...v0, records: v0.records.filter((r) => r.kind !== 'trait') }; // 행특 설계 카드는 따로(맨 위)
     const locked = closedNow();
     const nConf = v.records.filter((r) => r.confirmed).length;
     const head = el('div', { class: 'sec-title' }, [foldBtn('records', box, `${v.student.name} 기록 ${v.records.length}건 · 확정 ${nConf}건`), el('span', { class: 'spacer' }),
@@ -2192,6 +2197,7 @@
     ]);
     box.appendChild(head);
     if (locked && !ys.archived) box.appendChild(el('div', { class: 'stale', text: '● 마감된 항목입니다. 고치려면 오른쪽 [마감 해제]를 누르세요.' }));
+    if (R.slot.item === 'behavior') box.appendChild(traitCard(trait, locked || !!ys.archived));
     const sel = [...R.selected].filter((id) => v.records.some((r) => r.id === id));
     R.selected = new Set(sel);
     box.appendChild(el('div', { class: 'toolbar' }, [
@@ -2205,7 +2211,7 @@
       ], '고르기·태그·이동'); })(),
     ]));
     if (!v.records.length) {
-      box.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '아직 기록이 없습니다.' }), BASIS_ITEMS.includes(R.slot.item) ? el('button', { type: 'button', class: 'primary ai-btn', disabled: locked, text: `기록 없이 ${basisWord(R.slot.item)}만으로 생성`, onclick: () => openBasisGen(R.sno) }) : null, el('p', { class: 'hint', text: '[+ 학생관찰기록]으로 활동을 하나씩 쌓거나, 이미 쓴 생기부를 넣어 다듬을 수 있습니다. 여러 학생의 엑셀 자료는 자료 인박스에서 학생별로 나눠 한 번에 보낼 수 있습니다.' })]));
+      box.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: R.slot.item === 'behavior' ? '관찰기록은 아직 없습니다(위 🧩 행특 설계 카드만으로도 만들 수 있습니다).' : '아직 기록이 없습니다.' }), BASIS_ITEMS.includes(R.slot.item) ? el('button', { type: 'button', class: 'primary ai-btn', disabled: locked, text: `기록 없이 ${basisWord(R.slot.item)}만으로 생성`, onclick: () => openBasisGen(R.sno) }) : null, el('p', { class: 'hint', text: '[+ 학생관찰기록]으로 활동을 하나씩 쌓거나, 이미 쓴 생기부를 넣어 다듬을 수 있습니다. 여러 학생의 엑셀 자료는 자료 인박스에서 학생별로 나눠 한 번에 보낼 수 있습니다.' })]));
       return;
     }
     // 기록 순서: ⠿ 끌기·▲▼ (종합할 때 AI에 보내는 순서)
@@ -2245,7 +2251,7 @@
   // BO.open: 결과 묶음을 펼친 기록, BO.more: '이전 n개 더 보기'를 연 기록, BO.drafts: [직접 작성] 칸
   const BO = { open: new Set(), more: new Set(), drafts: {} };
   let activeDraft = null; // 고른 글을 넣을 [직접 작성] 칸(없으면 최종안)
-  const BUNDLE_OP = { chat: '💬 대화 결과', refine: '📝 AI 정제', polish: '📝 AI 다듬기', draft: '✍ 직접 작성', prev: '↩ 이전 확정본', prev_applied: '↩ 이전 반영본', tag_trial: '🔖 태그 시험', tag_bulk: '🔖 태그 일괄', orig: '📄 원문' };
+  const BUNDLE_OP = { trait: '🧩 행특 생성', chat: '💬 대화 결과', refine: '📝 AI 정제', polish: '📝 AI 다듬기', draft: '✍ 직접 작성', prev: '↩ 이전 확정본', prev_applied: '↩ 이전 반영본', tag_trial: '🔖 태그 시험', tag_bulk: '🔖 태그 일괄', orig: '📄 원문' };
   const bundleLabel = (b) => (b.label && b.op !== 'draft' ? `↩ ${b.label}` : BUNDLE_OP[b.op] || b.op) + (b.src === 'tag' && b.meta && b.meta.tag_name ? ` · ${b.meta.tag_name}` : '');
   const recText = (r) => (r.confirmed ? r.content : r.orig); // 지금 이 기록을 대표하는 글
   // AI 결과 아래 작은 글씨: 쓴 모델(짧게)·프롬프트 이름
@@ -2395,8 +2401,350 @@
     if (dbx) card.appendChild(dbx);
     return card;
   }
+  // ---------- v0.22 행특 설계 카드(행동특성 및 종합의견) ----------
+  // 성격유형 → 성격 설명 → 영역(학업 역량·학업 태도·인성 및 학업 외 소양)마다 키워드 0~3개·실제 사례(선택) → [AI 변환] → 결과 묶음 → 확정
+  const TRAIT_AREAS = [['academic', '학업 역량'], ['attitude', '학업 태도'], ['social', '인성 및 학업 외 소양']];
+  const TRAIT_PII = '⚠ 학생 이름·학번·연락처·가족·건강 등 인적사항은 적지 마세요. 적은 글은 AI에 그대로 보내집니다.';
+  let TD = null; // 사전 캐시
+  async function traitDict(force) {
+    if (!TD || force) { const r = await rawCall('trait_dict_get'); if (r && r.ok) TD = r; }
+    return TD;
+  }
+  const traitBlank = () => ({ type: '', desc: '', areas: Object.fromEntries(TRAIT_AREAS.map(([a]) => [a, { kws: [], case: '', off: false }])) });
+  const traitCopy = (d) => JSON.parse(JSON.stringify(d || traitBlank()));
+  const TRS = { key: '', design: null, warnings: [] }; // 지금 학생의 설계(화면 값)
+  function traitSaveKey() { return `trait:${R.slot.group_id}:${R.sno}`; }
+  function traitSave(stateEl) {
+    const ctx = { gid: R.slot.group_id, sno: R.sno };
+    const d = traitCopy(TRS.design);
+    if (stateEl) stateEl.textContent = '저장 중…';
+    saveLater(traitSaveKey(), async () => {
+      const r = await rawCall('trait_save', ctx.gid, ctx.sno, d);
+      if (!r || r.ok === false) { if (stateEl) stateEl.textContent = `저장하지 못함: ${(r && r.error) || ''}`; return false; }
+      if (R.slot && R.slot.group_id === ctx.gid && R.sno === ctx.sno) {
+        TRS.warnings = r.warnings || []; TRS.rid = r.id || TRS.rid;
+        if (stateEl && stateEl.isConnected) stateEl.textContent = '저장됨';
+        const w = document.querySelector('.tr-warn-list');
+        if (w) { w.innerHTML = ''; TRS.warnings.forEach((x) => w.appendChild(el('div', { text: `⚠ ${x}` }))); w.hidden = !TRS.warnings.length; }
+        if (!TRS.recExists && r.id) TRS.recExists = true; // 처음 만든 기록: 다시 그리지 않음(쓰던 칸 유지). AI 변환 때 새로 읽음
+      }
+      markSaved();
+      return true;
+    }, 700);
+  }
+  function traitCard(r, locked) {
+    const key = `${R.slot.group_id}:${R.sno}`;
+    if (TRS.key !== key || !TRS.design) { TRS.key = key; TRS.design = traitCopy(r && r.design); TRS.warnings = []; }
+    TRS.rid = r ? r.id : null; TRS.recExists = !!r;
+    const d = TRS.design;
+    const card = el('div', { class: 'rcard trait-card' + (r && r.confirmed ? ' confirmed' : '') });
+    const state = el('span', { class: 'muted', text: pendingSaves.has(traitSaveKey()) ? '저장 중…' : '' });
+    const changed = () => { traitSave(state); };
+    const dic = TD ? TD.dict : { types: [], areas: { academic: [], attitude: [], social: [] } };
+    // ① 성격유형 ② 성격 설명
+    const typeSel = el('select', { disabled: locked, 'aria-label': '성격유형' }, [el('option', { value: '', text: '— 성격유형 고르기 —' }),
+      ...dic.types.map((t) => el('option', { value: t.name, text: t.name, selected: t.name === d.type })),
+      d.type && !dic.types.some((t) => t.name === d.type) ? el('option', { value: d.type, text: `${d.type} (사전에 없음)`, selected: true }) : null].filter(Boolean));
+    const tdef = () => dic.types.find((t) => t.name === d.type);
+    const descSel = el('select', { disabled: locked, 'aria-label': '성격 설명 고르기' });
+    const descIn = el('input', { type: 'text', maxlength: 200, disabled: locked, value: d.desc, placeholder: '성격 설명(고르거나 직접 쓰기)', 'aria-label': '성격 설명' });
+    const descAdd = el('button', { type: 'button', class: 'small link', hidden: true, text: '+ 사전에 추가', title: '이 설명을 이 성격유형의 설명 목록에 더합니다' });
+    const drawDesc = () => {
+      descSel.innerHTML = '';
+      const t = tdef();
+      descSel.append(el('option', { value: '', text: t ? '— 설명 고르기 —' : '(성격유형을 먼저 고르세요)' }), ...(t ? t.descs : []).map((x) => el('option', { value: x, text: x, selected: x === d.desc })));
+      descSel.disabled = locked || !t;
+      descAdd.hidden = locked || !d.type || !d.desc || !!(t && t.descs.includes(d.desc));
+    };
+    typeSel.addEventListener('change', () => { d.type = typeSel.value; const t = tdef(); if (t && d.desc && !t.descs.includes(d.desc)) { /* 직접 쓴 설명은 그대로 */ } drawDesc(); changed(); });
+    descSel.addEventListener('change', () => { if (descSel.value) { d.desc = descSel.value; descIn.value = d.desc; } drawDesc(); changed(); });
+    descIn.addEventListener('input', () => { d.desc = descIn.value; drawDesc(); changed(); });
+    descAdd.addEventListener('click', async () => { if (await mutate('trait_dict_add', 'type', d.type, d.desc)) { await traitDict(true); toast('사전에 더했습니다.'); renderRecords(); } });
+    drawDesc();
+    // ③④⑤ 영역
+    const areas = TRAIT_AREAS.map(([a, label], i) => {
+      const x = d.areas[a];
+      const box = el('div', { class: 'tr-area' + (x.off ? ' off' : '') });
+      const chips = el('div', { class: 'tr-chips' });
+      const drawChips = () => {
+        chips.innerHTML = '';
+        x.kws.forEach((k) => { const e = (dic.areas[a] || []).find((y) => y.kw === k); chips.appendChild(el('span', { class: 'tr-chip', title: e ? e.desc : '사전에 없는 키워드' }, [k,
+          locked ? null : el('button', { type: 'button', class: 'tr-x', 'aria-label': `${k} 빼기`, text: '×', onclick: () => { x.kws = x.kws.filter((y) => y !== k); drawChips(); changed(); } })].filter(Boolean))); });
+        if (!locked) chips.appendChild(el('button', { type: 'button', class: 'small', disabled: x.kws.length >= 3, title: x.kws.length >= 3 ? '키워드는 3개까지' : '사전에서 고르거나 직접 씁니다', text: x.kws.length >= 3 ? '3개 다 고름' : '+ 키워드 고르기',
+          onclick: () => openTraitKw(a, label, d, () => { drawChips(); changed(); }) }));
+      };
+      drawChips();
+      const ta = el('textarea', { rows: 2, class: 'tr-case', disabled: locked, maxlength: 3000, placeholder: '실제 사례·기록(선택) — 예: 1인 1역할 수행평가 알림이를 맡아 매주 일정을 안내함', 'aria-label': `${label} 실제 사례` });
+      ta.value = x.case;
+      const fit = () => { ta.style.height = 'auto'; ta.style.height = `${Math.max(ta.scrollHeight + 2, 52)}px`; };
+      ta.addEventListener('input', () => { x.case = ta.value; fit(); changed(); });
+      requestAnimationFrame(fit);
+      const others = R.view.records.filter((y) => y.kind !== 'trait' && String(y.confirmed ? y.content : y.orig || '').trim());
+      const pull = others.length && !locked ? menuBox('기록에서 가져오기 ▾', others.map((y) => el('button', { type: 'button', class: 'small', title: '이 기록 글을 사례 칸 끝에 붙입니다',
+        text: `${y.seq ? `${y.seq}회 ` : ''}${y.title || ''} ${twShort(y.confirmed ? y.content : y.orig, 40)}`,
+        onclick: () => { const t = y.confirmed ? y.content : y.orig; x.case = `${x.case.trim()}${x.case.trim() ? ' ' : ''}${t}`.trim(); ta.value = x.case; fit(); changed(); } })), '이 학생 행특의 다른 기록 글을 사례로 가져옵니다') : null;
+      const off = el('input', { type: 'checkbox', checked: x.off, disabled: locked });
+      off.addEventListener('change', () => { x.off = off.checked; box.classList.toggle('off', x.off); changed(); });
+      box.append(el('div', { class: 'tr-area-head' }, [el('b', { text: `${'③④⑤'[i]} ${label}` }), el('span', { class: 'muted', text: '키워드 0~3개 · 사례 선택' }), el('span', { class: 'spacer' }), pull,
+        el('label', { class: 'inline', style: 'margin:0', title: '이 영역은 생성에 쓰지 않습니다' }, [off, '이 영역 빼기'])].filter(Boolean)), chips, ta);
+      return box;
+    });
+    const warnList = el('div', { class: 'tr-warn-list', hidden: !TRS.warnings.length }, TRS.warnings.map((w) => el('div', { text: `⚠ ${w}` })));
+    const aiBtn = el('button', { type: 'button', class: 'ai-btn', disabled: locked, title: '고른 성격·키워드와 사례로 행동특성 및 종합의견을 만들어 아래 결과 묶음에 더합니다(확정은 따로)', text: 'AI 변환' });
+    aiBtn.addEventListener('click', () => traitAi(aiBtn));
+    card.append(
+      el('div', { class: 'rcard-head' }, [el('b', { text: '🧩 행특 설계' }), r && r.confirmed ? el('span', { class: 'badge conf-badge', text: '✔ 확정' }) : null, el('span', { class: 'muted', text: '성격유형 → 설명 → 영역별 키워드·사례 → AI 변환' }), el('span', { class: 'spacer' }), state, el('span', { class: 'muted', text: `목표 ${R.target}B` })].filter(Boolean)),
+      el('div', { class: 'tr-pii', text: TRAIT_PII }),
+      el('div', { class: 'tr-row' }, [el('b', { text: '① 성격유형' }), typeSel, el('span', { class: 'muted', text: TD && !TD.is_default ? '(내 사전)' : '' })]),
+      el('div', { class: 'tr-row' }, [el('b', { text: '② 성격 설명' }), descSel]),
+      el('div', { class: 'tr-row' }, [el('span', { class: 'muted', text: '직접 고치기' }), descIn, descAdd]),
+      ...areas, warnList,
+      el('div', { class: 'rcard-foot' }, [aiBtn, el('span', { class: 'muted', text: '키워드도 사례도 없는 영역은 생성에서 빠집니다. 사례가 없는 영역은 성향·태도로만 쓰고 활동을 지어내지 않습니다.' })]));
+    if (r && r.confirmed) {
+      card.append(el('div', { class: 'rcard-label conf', text: '✔ 확정본(오른쪽 확정 기록에 들어감)' }), el('div', { class: 'rcard-body', text: r.content }),
+        el('div', { class: 'rcard-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', disabled: locked, text: '확정 풀기', onclick: async () => { if (await mutate('unconfirm_record', r.id)) { toast('확정을 풀었습니다. 확정본은 결과 묶음에 남겨 두었습니다.'); loadStudent(true); } } })]));
+    }
+    if (r) {
+      const bx = bundleBox(r, (r.bundle || []).filter((b) => b.op !== 'prev_applied'), '변환 결과', locked);
+      if (bx) card.appendChild(bx);
+      const dbx = draftBox(r, locked);
+      if (dbx) card.appendChild(dbx);
+    }
+    return card;
+  }
+  async function traitAi(btn) {
+    if (!(await runPending(traitSaveKey()))) { toast('설계를 저장하지 못했습니다. 잠시 뒤 다시 시도하세요.'); return; }
+    const v = await call('student_view', R.slot.group_id, 'behavior', R.sno);
+    const r = v && v.records.find((x) => x.kind === 'trait');
+    if (!r) { toast('성격유형이나 영역 키워드·사례를 하나 이상 넣어 주세요.'); return; }
+    const used = TRAIT_AREAS.filter(([a]) => !r.design.areas[a].off && (r.design.areas[a].kws.length || r.design.areas[a].case.trim())).map(([, l]) => l);
+    const out = await busyRun(btn, `trait${r.id}`, () => aiRun({
+      title: '행특 생성', kind: 'trait',
+      rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['자료', `성격 ${r.design.type || '-'} · 영역 ${used.join('·') || '없음'}`], ['목표', `${R.target}B`], ['모델', modelName($('recModel'))]],
+      warn: '결과는 설계 카드의 결과 묶음 맨 위에 더해집니다(설계는 그대로). 확정은 따로 합니다.',
+      wiz: async () => { if (await flushFinal()) openWizardMenu(recWizCtx('trait', r.content || r.orig, r.id)); },
+      jobs: [{ run: () => api.ai_record(r.id, $('recModel').value) }],
+    }));
+    if (!out || !out.done) return;
+    BO.open.add(r.id);
+    toast('행특을 만들었습니다. 설계 카드 아래 결과 묶음 맨 위에 있습니다.');
+    loadStudent(true);
+  }
+  // 키워드 고르기: 이 성격유형 추천이 위, 찾기, 설명, 직접 쓰기(+ 사전에 추가)
+  function openTraitKw(a, label, d, done) {
+    const x = d.areas[a];
+    const list = (TD ? TD.dict.areas[a] : []) || [];
+    openSheet((box) => {
+      box.style.width = 'min(720px, 94vw)'; box.style.height = 'min(80vh, 760px)';
+      const find = el('input', { type: 'search', placeholder: '키워드·설명 찾기', 'aria-label': '키워드 찾기' });
+      const body = el('div', { class: 'tr-kw-list' });
+      const count = el('b', {});
+      const pick = new Set(x.kws);
+      const upd = () => { count.textContent = `${pick.size}/3 고름`; };
+      const row = (e) => {
+        const cb = el('input', { type: 'checkbox', checked: pick.has(e.kw) });
+        cb.addEventListener('change', () => { if (cb.checked && pick.size >= 3) { cb.checked = false; toast('키워드는 3개까지 고를 수 있습니다.'); return; } cb.checked ? pick.add(e.kw) : pick.delete(e.kw); upd(); });
+        return el('label', { class: 'tr-kw' }, [cb, el('b', { text: e.kw }), el('span', { class: 'muted', text: e.desc || '' })]);
+      };
+      const draw = () => {
+        const q = find.value.trim();
+        const hit = (e) => !q || e.kw.includes(q) || (e.desc || '').includes(q);
+        body.innerHTML = '';
+        const rec = d.type ? list.filter((e) => (e.types || []).includes(d.type) && hit(e)) : [];
+        const rest = list.filter((e) => !rec.includes(e) && hit(e));
+        const extra = [...pick].filter((k) => !list.some((e) => e.kw === k)).map((k) => ({ kw: k, desc: '(직접 쓴 키워드)' }));
+        if (extra.length) body.append(el('div', { class: 'tr-kw-sec', text: '직접 쓴 키워드' }), ...extra.map(row));
+        if (rec.length) body.append(el('div', { class: 'tr-kw-sec', text: `'${d.type}' 추천` }), ...rec.map(row));
+        body.append(el('div', { class: 'tr-kw-sec', text: rec.length ? '그 밖의 키워드' : '키워드' }), ...rest.map(row));
+        if (!rec.length && !rest.length) body.appendChild(el('p', { class: 'muted', text: '찾는 키워드가 없습니다. 아래에서 직접 쓰세요.' }));
+      };
+      find.addEventListener('input', draw);
+      const own = el('input', { type: 'text', maxlength: 30, placeholder: '직접 쓰기(예: 나눔실천)', 'aria-label': '키워드 직접 쓰기' });
+      const ownDesc = el('input', { type: 'text', maxlength: 200, placeholder: '(선택) 설명', 'aria-label': '키워드 설명' });
+      const toDict = el('input', { type: 'checkbox' });
+      const addOwn = async () => {
+        const k = own.value.trim();
+        if (!k) return;
+        if (pick.size >= 3 && !pick.has(k)) { toast('키워드는 3개까지 고를 수 있습니다.'); return; }
+        if (toDict.checked && !list.some((e) => e.kw === k)) { if (await mutate('trait_dict_add', a, k, ownDesc.value.trim(), d.type || '')) { await traitDict(true); list.splice(0, list.length, ...TD.dict.areas[a]); toast('사전에 더했습니다.'); } }
+        pick.add(k); own.value = ''; ownDesc.value = ''; upd(); draw();
+      };
+      own.addEventListener('keydown', (e) => { if (e.key === 'Enter') addOwn(); });
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `${label} 키워드` }), el('span', { class: 'muted', text: '3개까지 · 설명은 AI에 함께 보냅니다' }), el('span', { class: 'spacer' }), count]),
+        el('div', { class: 'tr-find' }, [find]),
+        el('div', { class: 'sheet-body' }, [body]),
+        el('div', { class: 'tw-row tr-own' }, [own, ownDesc, el('label', { class: 'inline', style: 'margin:0' }, [toDict, '사전에 추가']), el('button', { type: 'button', class: 'small', text: '넣기', onclick: addOwn })]),
+        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }),
+          el('button', { type: 'button', class: 'primary', text: '고르기', onclick: () => { x.kws = [...pick].slice(0, 3); closeSheet(); done(); } })]));
+      upd(); draw();
+      setTimeout(() => find.focus(), 30);
+    });
+  }
+  // [🧩 행특 설계 일괄 변환]: 설계한 학생(확정 전)을 골라 한꺼번에 — 대상 고르기 창(공용)
+  async function openTraitBulk(pid, pname) {
+    if (!R.slot || R.slot.item !== 'behavior') return;
+    if (R.sno && !(await runPending(traitSaveKey()))) return;
+    const r = await call('trait_targets', R.slot.group_id);
+    if (!r) return;
+    const st = r.students || [];
+    const recs = st.filter((x) => x.rid && x.filled && !x.confirmed).map((x) => ({ id: x.rid, student_no: x.student_no, name: x.name, title: '', text: x.summary, results: x.results, kind: 'trait' }));
+    const none = st.filter((x) => !x.filled).length, conf = st.filter((x) => x.confirmed).length;
+    const skipped = [none ? `설계 안 한 ${none}명` : '', conf ? `확정한 ${conf}명` : '', r.skipped_closed ? `마감 ${r.skipped_closed}명` : '', r.skipped_inactive ? `비활성 ${r.skipped_inactive}명` : ''].filter(Boolean).join(' · ');
+    openAiTargets({ title: pid ? '🤖 다른 학생에게도 적용' : '🧩 행특 설계 일괄 변환', sub: `${R.slot.label} · 행특 설계${pname ? ` · '${pname}'` : ''}`, recs, me: null, pid: pid || '', kind: 'trait',
+      hint: `설계 카드를 채운 학생을 골라 한꺼번에 행특을 만듭니다. 결과는 학생마다 설계 카드의 결과 묶음에 더해지고, 확정은 학생마다 합니다.${skipped ? ` (${skipped}은 빼고 보여 줍니다)` : ''}`,
+      runTitle: pid ? `다른 학생에게도 적용 · ${pname}` : '행특 설계 일괄 변환', where: `${R.slot.label} 행특 설계`,
+      done: () => { if (R.sno) loadStudent(true); } });
+  }
+  // ---------- 설정 › 행특 사전 ----------
+  async function renderTraitDictSettings() {
+    const r = await traitDict(true);
+    if (!r) return;
+    $('tdState').textContent = r.is_default ? '기본 사전' : '내 사전(고친 사전)';
+    $('tdUndoBtn').disabled = !r.has_prev;
+    $('tdResetBtn').disabled = r.is_default;
+    const d = r.dict;
+    $('tdSummary').innerHTML = '';
+    $('tdSummary').appendChild(el('p', { class: 'muted', text: `성격유형 ${d.types.length}개(설명 ${d.types.reduce((n, t) => n + t.descs.length, 0)}개) · 학업 역량 키워드 ${d.areas.academic.length}개 · 학업 태도 ${d.areas.attitude.length}개 · 인성 및 학업 외 소양 ${d.areas.social.length}개` }));
+  }
+  const tdAfter = async (msg) => { TD = null; await renderTraitDictSettings(); if (msg) toast(msg); if (R.sno && R.slot && R.slot.item === 'behavior' && document.querySelector('[data-panel-content=records]:not([hidden])')) { await traitDict(); renderRecords(); } };
+  async function tdImport() {
+    const r = await call('trait_dict_import_check');
+    if (!r || !r.diff) return;
+    const f = (x) => `추가 ${x.add} · 바뀜 ${x.change} · 빠짐 ${x.gone}`;
+    const html = `<div class="ai-conf"><b>${escHtml(r.name)}</b>로 사전을 바꿀까요?<table>`
+      + `<tr><th>성격유형</th><td>${r.types}개 (${f(r.diff.types)})</td></tr>`
+      + TRAIT_AREAS.map(([a, l]) => `<tr><th>${l}</th><td>키워드 ${r.kws[a]}개 (${f(r.diff.areas[a])})</td></tr>`).join('')
+      + '</table><p class="hint">바꾼 뒤에도 [↩ 앞 사전으로]로 한 번 되돌릴 수 있습니다. 이미 고른 설계 카드의 키워드는 그대로 남습니다.</p></div>';
+    if (!(await modal(html, true, true, '바꾸기', '취소'))) return;
+    if (await mutate('trait_dict_import_apply')) tdAfter('사전을 바꿨습니다.');
+  }
+  // 사전 편집: 성격유형(설명 목록) · 영역별 키워드(설명·추천 유형). [저장]을 눌러야 반영
+  async function openTraitDictEditor() {
+    const r = await traitDict(true);
+    if (!r) return;
+    const d = JSON.parse(JSON.stringify(r.dict));
+    let tab = 'types', cur = d.types.length ? d.types[0].name : '';
+    let dirty = false;
+    openSheet((box) => {
+      box.style.width = 'min(1100px, 96vw)'; box.style.height = 'min(88vh, 860px)';
+      const tabs = el('div', { class: 'tw-tabs' });
+      const body = el('div', { class: 'sheet-body td-body' });
+      const mark = () => { dirty = true; };
+      const draw = () => {
+        tabs.innerHTML = '';
+        [['types', '성격유형·설명'], ...TRAIT_AREAS].forEach(([k, l]) => tabs.appendChild(el('button', { type: 'button', class: 'tw-tab' + (tab === k ? ' on' : ''), text: k === 'types' ? l : `${l} 키워드 (${d.areas[k].length})`, onclick: () => { tab = k; draw(); } })));
+        body.innerHTML = '';
+        if (tab === 'types') {
+          const left = el('div', { class: 'td-types' });
+          d.types.forEach((t, i) => left.appendChild(el('div', { class: 'td-type' + (t.name === cur ? ' on' : '') }, [
+            el('button', { type: 'button', class: 'td-type-name', text: `${t.name} (${t.descs.length})`, onclick: () => { cur = t.name; draw(); } }),
+            el('button', { type: 'button', class: 'small', title: '위로', disabled: !i, text: '▲', onclick: () => { d.types.splice(i - 1, 0, d.types.splice(i, 1)[0]); mark(); draw(); } }),
+            el('button', { type: 'button', class: 'small danger-text', title: '이 성격유형 지우기', text: '×', onclick: async () => { if (!(await confirmBox(`'${t.name}' 성격유형과 설명 ${t.descs.length}개를 사전에서 뺍니다(저장해야 반영).`, '빼기'))) return; d.types.splice(i, 1); cur = d.types[0] ? d.types[0].name : ''; mark(); draw(); } })])));
+          const nin = el('input', { type: 'text', maxlength: 30, placeholder: '새 성격유형 이름' });
+          left.appendChild(el('div', { class: 'tw-row' }, [nin, el('button', { type: 'button', class: 'small', text: '+ 추가', onclick: () => { const n = nin.value.trim(); if (!n) return; if (d.types.some((t) => t.name === n)) { toast('이미 있는 이름입니다.'); return; } d.types.push({ name: n, descs: [] }); cur = n; mark(); draw(); } })]));
+          const right = el('div', { class: 'td-descs' });
+          const t = d.types.find((x) => x.name === cur);
+          if (t) {
+            const ren = el('input', { type: 'text', maxlength: 30, value: t.name, 'aria-label': '성격유형 이름' });
+            ren.addEventListener('change', () => { const n = ren.value.trim(); if (!n || (n !== t.name && d.types.some((x) => x.name === n))) { ren.value = t.name; toast('이름이 비었거나 겹칩니다.'); return; }
+              Object.values(d.areas).forEach((lst) => lst.forEach((e) => { e.types = e.types.map((y) => (y === t.name ? n : y)); })); t.name = n; cur = n; mark(); draw(); });
+            right.appendChild(el('div', { class: 'tw-row' }, [el('b', { text: '이름' }), ren]));
+            t.descs.forEach((x, j) => {
+              const inp = el('input', { type: 'text', maxlength: 120, value: x, 'aria-label': `설명 ${j + 1}` });
+              inp.addEventListener('input', () => { t.descs[j] = inp.value; mark(); });
+              right.appendChild(el('div', { class: 'tw-row td-line' }, [el('span', { class: 'muted', text: `${j + 1}` }), inp,
+                el('button', { type: 'button', class: 'small danger-text', text: '×', title: '이 설명 빼기', onclick: () => { t.descs.splice(j, 1); mark(); draw(); } })]));
+            });
+            right.appendChild(el('button', { type: 'button', class: 'small', text: '+ 설명 추가', onclick: () => { t.descs.push(''); mark(); draw(); setTimeout(() => { const all = right.querySelectorAll('.td-line input'); if (all.length) all[all.length - 1].focus(); }, 30); } }));
+          } else right.appendChild(el('p', { class: 'muted', text: '왼쪽에서 성격유형을 고르거나 추가하세요.' }));
+          body.appendChild(el('div', { class: 'td-cols' }, [left, right]));
+          return;
+        }
+        const lst = d.areas[tab];
+        const find = el('input', { type: 'search', placeholder: '찾기', 'aria-label': '키워드 찾기' });
+        const table = el('div', { class: 'td-kws' });
+        const drawRows = () => {
+          table.innerHTML = '';
+          table.appendChild(el('div', { class: 'td-kw head' }, ['키워드', '설명(AI에 함께 보냄)', '추천 성격유형', ''].map((h) => el('b', { text: h }))));
+          const q = find.value.trim();
+          lst.forEach((e, i) => {
+            if (q && !e.kw.includes(q) && !(e.desc || '').includes(q)) return;
+            const k = el('input', { type: 'text', maxlength: 30, value: e.kw, 'aria-label': '키워드' });
+            k.addEventListener('change', () => { const n = k.value.trim(); if (!n || (n !== e.kw && lst.some((y) => y.kw === n))) { k.value = e.kw; toast('키워드가 비었거나 겹칩니다.'); return; } e.kw = n; mark(); });
+            const ds = el('input', { type: 'text', maxlength: 200, value: e.desc || '', 'aria-label': '설명' });
+            ds.addEventListener('input', () => { e.desc = ds.value; mark(); });
+            const sum = el('summary', { text: e.types.length ? e.types.join(', ') : '(없음)', title: '이 키워드를 맨 위에 추천할 성격유형' });
+            const ty = el('details', { class: 'opt-menu menu-down td-ty' }, [sum, el('div', { class: 'opt-list' }, d.types.map((t) => {
+              const cb = el('input', { type: 'checkbox', checked: e.types.includes(t.name) });
+              cb.addEventListener('change', () => { e.types = cb.checked ? [...e.types, t.name] : e.types.filter((y) => y !== t.name); sum.textContent = e.types.length ? e.types.join(', ') : '(없음)'; mark(); });
+              return el('label', { class: 'inline', style: 'margin:0' }, [cb, t.name]);
+            }))]);
+            table.appendChild(el('div', { class: 'td-kw' }, [k, ds, ty, el('button', { type: 'button', class: 'small danger-text', text: '×', title: '이 키워드 빼기', onclick: () => { lst.splice(i, 1); mark(); drawRows(); } })]));
+          });
+        };
+        find.addEventListener('input', drawRows);
+        const nk = el('input', { type: 'text', maxlength: 30, placeholder: '새 키워드' });
+        const nd = el('input', { type: 'text', maxlength: 200, placeholder: '설명(선택)' });
+        body.append(el('div', { class: 'td-add' }, [find, nk, nd, el('button', { type: 'button', class: 'small', text: '+ 추가', onclick: () => {
+          const n = nk.value.trim(); if (!n) return; if (lst.some((y) => y.kw === n)) { toast('이미 있는 키워드입니다.'); return; }
+          lst.unshift({ kw: n, desc: nd.value.trim(), types: [] }); nk.value = ''; nd.value = ''; mark(); drawRows(); } })]), table);
+        drawRows();
+      };
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: '✏️ 행특 설계 사전 편집' }), el('span', { class: 'muted', text: '[저장]을 눌러야 반영 · 저장 뒤에도 [↩ 앞 사전으로] 한 번' })]),
+        tabs, body,
+        el('div', { class: 'sheet-foot' }, [el('span', { class: 'muted', text: '⚠ 인적사항은 넣지 마세요.' }), el('span', { class: 'spacer' }),
+          el('button', { type: 'button', text: '닫기', onclick: async () => { if (dirty && !(await confirmBox('저장하지 않은 고침이 있습니다. 버리고 닫을까요?', '버리고 닫기'))) return; closeSheet(); } }),
+          el('button', { type: 'button', class: 'primary', text: '저장', onclick: async () => {
+            d.types.forEach((t) => { t.descs = t.descs.map((x) => x.trim()).filter(Boolean); });
+            if (await mutate('trait_dict_save', d)) { dirty = false; closeSheet(); tdAfter('사전을 저장했습니다.'); }
+          } })]));
+      draw();
+    });
+  }
+  // 설계 엑셀: 양식 내려받기 / 채운 파일 올리기(학생 찾기 확인 → 고른 줄만 넣기)
+  async function traitTemplate() {
+    if (!R.slot || R.slot.item !== 'behavior') return;
+    if (R.sno && !(await runPending(traitSaveKey()))) return;
+    const r = await call('trait_template', R.slot.group_id);
+    if (r && r.path) toast(`설계 엑셀 양식을 저장했습니다: ${r.path}`, 6000);
+  }
+  async function traitImport() {
+    if (!R.slot || R.slot.item !== 'behavior') return;
+    if (R.sno && !(await runPending(traitSaveKey()))) return;
+    const r = await call('trait_import_check', R.slot.group_id);
+    if (!r || !r.rows) return;
+    const ok = r.rows.filter((x) => x.state !== 'error');
+    openSheet((box) => {
+      box.style.width = 'min(980px, 95vw)'; box.style.height = 'auto';
+      const cbs = [];
+      const t = el('table', { class: 'tbl tr-imp' }, [el('tr', {}, ['', '엑셀 행', '학생', '상태', '설계 내용', '확인'].map((h) => el('th', { text: h })))]);
+      r.rows.forEach((x) => {
+        const cb = x.state === 'error' ? null : el('input', { type: 'checkbox', checked: true });
+        if (cb) cbs.push([cb, x]);
+        t.appendChild(el('tr', { class: x.state === 'error' ? 'off' : '' }, [el('td', {}, cb ? [cb] : []), el('td', { text: `${x.row}` }), el('td', { text: `${x.sno} ${x.name}` }),
+          el('td', { text: x.state === 'new' ? '새로 넣음' : x.state === 'over' ? '지금 설계를 바꿈' : `넣지 않음: ${x.why}` }),
+          el('td', { class: 'tr-imp-sum', text: x.summary || '' }), el('td', { class: 'warn-text', text: (x.warnings || []).map((w) => `⚠ ${w}`).join('\n') })]));
+      });
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: '엑셀로 설계 입력' }), el('span', { class: 'muted', text: `${r.name} · ${R.slot.label}` })]),
+        el('div', { class: 'sheet-body' }, [el('div', { class: 'tr-pii', text: TRAIT_PII }),
+          el('p', { class: 'hint', text: `읽은 줄 ${r.rows.length}개 · 넣을 수 있는 줄 ${ok.length}개. 체크한 줄만 넣습니다. 이미 설계가 있는 학생은 엑셀 내용으로 바뀝니다(확정한 행특은 그대로).` }), t]),
+        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }),
+          el('button', { type: 'button', class: 'primary', disabled: !ok.length, text: '체크한 줄 넣기', onclick: async () => {
+            const rows = cbs.filter(([c]) => c.checked).map(([, x]) => x.row);
+            if (!rows.length) { toast('넣을 줄을 고르세요.'); return; }
+            const o = await mutate('trait_import_apply', R.slot.group_id, rows);
+            if (!o) return;
+            closeSheet();
+            TRS.key = '';
+            if (o.failed.length) await alertBox(`${o.done}명 넣었습니다.\n넣지 못한 줄:\n${o.failed.join('\n')}`);
+            else toast(`${o.done}명의 설계를 넣었습니다. [🧩 행특 설계 일괄 변환]으로 한꺼번에 만들 수 있습니다.`, 6000);
+            await loadSlotStudents();
+            if (R.sno) loadStudent(true);
+          } })]));
+    });
+  }
   // ---------- 항목별 기록 › 🪄 프롬프트 마법사 ----------
-  const KIND_NAMES = { refine: '정제', polish: '다듬기', synth: '종합' };
+  const KIND_NAMES = { refine: '정제', polish: '다듬기', synth: '종합', trait: '행특 생성' };
   function recWizCtx(kind, text, rid) {
     return { rec: { gid: R.slot.group_id, item: R.slot.item, sno: R.sno, kind, rid: rid || null, text: text || '', label: `${R.view.student.name} · ${R.slot.label}`, year: ys.year } };
   }
@@ -2412,6 +2760,7 @@
     let name = pname;
     if (!name) { const l = await rawCall('prompt_list'); const f = l && l.ok ? l.prompts.find((x) => x.id === pid) : null; name = f ? f.name : '저장한 프롬프트'; }
     if (rc.tag) { await openTagTargets(rc.tag, rc.tagName, {}, { pid, pname: name, me: rc.rid, title: '🤖 다른 학생에게도 적용' }); return; }
+    if (rc.kind === 'trait') { await openTraitBulk(pid, name); return; }
     const r = await call('rec_ai_targets', rc.gid, rc.item, rc.kind === 'polish' ? 'existing' : 'record');
     if (!r) return;
     const what = rc.kind === 'polish' ? '기존 완성문' : '학생관찰기록';
@@ -2949,7 +3298,7 @@
       el('button', { type: 'button', class: 'small', text: '정보', onclick: () => candInfo(cd) }),
     ])));
   }
-  const recName = (r) => `${r.kind === 'existing' ? '기존 완성문' : r.seq + '회'}${r.title ? ' ' + r.title : ''}`;
+  const recName = (r) => (r.kind === 'trait' ? '🧩 행특 설계' : `${r.kind === 'existing' ? '기존 완성문' : r.seq + '회'}${r.title ? ' ' + r.title : ''}`);
   // 확정 기록 한 줄: 누르면 그 자리에서 고치기(왼쪽 카드의 확정본과 같은 자료)
   function confRow(r, i, ro) {
     const row = el('div', { class: 'conf-row' });
@@ -7396,6 +7745,14 @@
     $('recBulkRecord').addEventListener('click', () => openExistingBulk('record'));
     $('recBulkExisting').addEventListener('click', () => openExistingBulk('existing'));
     $('recBulkFinal').addEventListener('click', openFinalBulk);
+    $('recTraitBulk').addEventListener('click', () => openTraitBulk());
+    $('recTraitTpl').addEventListener('click', traitTemplate);
+    $('recTraitImp').addEventListener('click', traitImport);
+    $('tdEditBtn').addEventListener('click', openTraitDictEditor);
+    $('tdExportBtn').addEventListener('click', async () => { const r = await call('trait_dict_export'); if (r && r.path) toast(`사전 엑셀을 저장했습니다: ${r.path}`, 6000); });
+    $('tdImportBtn').addEventListener('click', tdImport);
+    $('tdUndoBtn').addEventListener('click', async () => { if (await mutate('trait_dict_undo')) tdAfter('앞 사전으로 되돌렸습니다.'); });
+    $('tdResetBtn').addEventListener('click', async () => { if (!(await confirmBox('기본 사전으로 되돌립니다. 지금 사전은 [↩ 앞 사전으로]로 한 번 되살릴 수 있습니다.', '기본으로'))) return; if (await mutate('trait_dict_reset')) tdAfter('기본 사전으로 되돌렸습니다.'); });
     $('recJoinBulk').addEventListener('click', openJoinBulk);
     document.addEventListener('click', (e) => {
       document.querySelectorAll('details.opt-menu[open]').forEach((d) => { if (!d.contains(e.target) || e.target.closest('.opt-list button')) d.open = false; });

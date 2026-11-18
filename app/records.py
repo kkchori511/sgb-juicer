@@ -398,7 +398,7 @@ class Records:
             for m in self.d.members(gid):
                 mem[(gid, m["student_no"])] = m
         smaps = {}
-        rows = self.d.q("SELECT id, group_id, item, student_no, kind, seq, date, title, content, original, updated_at, pos, confirmed FROM records")
+        rows = self.d.q("SELECT id, group_id, item, student_no, kind, seq, date, title, content, original, updated_at, pos, confirmed FROM records WHERE kind<>'trait'")  # 행특 설계 카드는 항목별 기록에서만
         tagmap = {}
         for t in self.d.q("SELECT record_id, tag_id FROM record_tags"):
             tagmap.setdefault(t["record_id"], []).append(t["tag_id"])
@@ -528,6 +528,9 @@ class Records:
             cands.setdefault(res["record_id"], []).append(_result_out(res))
         tagc = self.tag_cands_for(ids)
         for r in recs:
+            if r.get("kind") == "trait":
+                from . import trait
+                r["design"] = trait.parse(r.get("design"))
             r["tags"] = tagmap.get(r["id"], [])
             r["candidates"] = cands.get(r["id"], [])
             r["bytes"] = count_bytes(r["content"])
@@ -589,6 +592,48 @@ class Records:
                 c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (rid, int(tid)))
             self._stale(c, gid, item, sno)
         return rid
+
+    # ---------- v0.22 행특 설계 카드(kind='trait', 학생마다 하나) ----------
+    def trait_record(self, gid, sno):
+        rows = self.d.q("SELECT * FROM records WHERE group_id=? AND item='behavior' AND student_no=? AND kind='trait' ORDER BY id LIMIT 1", (int(gid), str(sno)))
+        return rows[0] if rows else None
+
+    def trait_save(self, gid, sno, design):
+        """설계 저장(없으면 만듦). 확정 전이면 content=요약, 확정 뒤면 original(원문)만 요약으로. 반환: 기록 id(빈 설계로 처음이면 None)."""
+        from . import trait
+        self.slot(gid, "behavior")
+        self._member(gid, sno)
+        self.require_open(gid, "behavior", sno)
+        d = trait.normalize(design)
+        text = json.dumps(d, ensure_ascii=False)
+        summ = trait.summary(d)
+        with self.d.tx() as c:
+            r = self.trait_record(gid, sno)
+            if not r:
+                if trait.is_empty(d):
+                    return None
+                rid = c.execute("INSERT INTO records(group_id,item,student_no,kind,seq,date,title,content,source,design) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                                (int(gid), "behavior", str(sno), "trait", None, "", "행특 설계", summ, "trait", text)).lastrowid
+                self._stale(c, gid, "behavior", sno)
+                return rid
+            if r["confirmed"]:
+                c.execute("UPDATE records SET design=?, original=?, updated_at=datetime('now','localtime') WHERE id=?", (text, summ, r["id"]))
+            else:
+                c.execute("UPDATE records SET design=?, content=?, original=NULL, updated_at=datetime('now','localtime') WHERE id=?", (text, summ, r["id"]))
+            return r["id"]
+
+    def trait_status(self, gid):
+        """담당(반) 학생마다 설계 상태: {학번: {rid, filled, results, confirmed}}"""
+        from . import trait
+        out = {}
+        for r in self.d.q("SELECT id, student_no, design, confirmed FROM records WHERE group_id=? AND item='behavior' AND kind='trait'", (int(gid),)):
+            if r["student_no"] in out:
+                continue
+            n = self.d.q("SELECT COUNT(*) n FROM results WHERE record_id=? AND op NOT IN ('prev','draft')", (r["id"],))[0]["n"]
+            d = trait.parse(r["design"])
+            out[r["student_no"]] = {"rid": r["id"], "filled": not trait.is_empty(d), "results": n, "confirmed": bool(r["confirmed"]),
+                                    "summary": trait.summary(d)}
+        return out
 
     def add_existing_bulk(self, gid, item, rows, kind="existing"):
         """여러 학생 한꺼번에 — 전부 넣거나 전부 취소.

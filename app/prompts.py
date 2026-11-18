@@ -10,7 +10,7 @@ AI에는 학번·이름을 넣지 않는다(부르는 쪽에서 내용만 넘긴
 import hashlib
 import uuid
 
-from .prompt_default import DEFAULT_TEXT, LEGACY_TEXT, POLISH_TEXT, REFINE_TEXT, SCAN_TEXT, VOICE_TEXT
+from .prompt_default import DEFAULT_TEXT, LEGACY_TEXT, POLISH_TEXT, REFINE_TEXT, SCAN_TEXT, TRAIT_TEXT, VOICE_TEXT
 
 ITEMS = ("autonomy", "career", "behavior", "subject", "club")
 OPS = ("refine", "polish", "synth")
@@ -139,8 +139,8 @@ def build_synth_user(parts: list[dict], target_bytes: int) -> str:
 
 
 # ---------- 프롬프트 목록(v0.17.6) ----------
-KINDS = ("synth", "refine", "polish")  # 종합·생성 / 기록 정제 / 다듬기
-KIND_NAMES = {"synth": "종합·생성", "refine": "기록 정제", "polish": "다듬기"}
+KINDS = ("synth", "refine", "polish", "trait")  # 종합·생성 / 기록 정제 / 다듬기 / 행특 생성(v0.22)
+KIND_NAMES = {"synth": "종합·생성", "refine": "기록 정제", "polish": "다듬기", "trait": "행특 생성"}
 BUILTIN = {
     "default": {"name": "종합·생성", "prompt": DEFAULT_TEXT, "example": ""},
     "refine": {"name": "기록 정제", "prompt": REFINE_TEXT, "example": ""},
@@ -148,6 +148,7 @@ BUILTIN = {
     # v0.17.9: 기록 정제 작업에서 고를 수 있는 특수 정리(스캔 PDF 묶음은 처음 값이 스캔 내용 정리)
     "scan": {"name": "스캔 내용 정리", "prompt": SCAN_TEXT, "example": ""},
     "voice": {"name": "음성 스크립트 정리", "prompt": VOICE_TEXT, "example": ""},
+    "trait": {"name": "행특 생성", "prompt": TRAIT_TEXT, "example": ""},  # v0.22 행특 설계 카드
 }
 # v0.17.6~0.17.7의 정제·다듬기 기본(고치지 않고 쓰던 사람은 새 기본으로 바꿔 준다)
 LEGACY_BUILTIN = {
@@ -165,7 +166,7 @@ LEGACY_BUILTIN = {
 LEGACY_HASH = {
     "default": {"59e066f633ef8bb082fc48ba910b1adf0c07a19d8d9ea3ef60889f13b20f6ad2"},  # v0.17.7~0.18.2(본문 + 빈 줄 + 교사 의견)
 }
-KIND_DEFAULT = {"synth": "default", "refine": "refine", "polish": "polish"}
+KIND_DEFAULT = {"synth": "default", "refine": "refine", "polish": "polish", "trait": "trait"}
 # 여러 학생에게 같은 자료로 쓰는 일이 많아 종합·생성에는 늘 붙인다(프롬프트를 바꿔도 유지)
 SYNTH_RULE = "\n\n[다른 학생과 겹치지 않기]\n- 같은 성취기준·활동 개요를 쓰는 다른 학생들과 표현·문장 구성이 반드시 50% 이상 다르게 작성한다."
 

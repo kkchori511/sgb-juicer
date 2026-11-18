@@ -1191,3 +1191,43 @@ label.inline[hidden] { display: none; }
 .tv-model { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 13px; }
 .tv-model select { max-width: 240px; padding: 3px 6px; font-size: 13px; }
 .rb-tip { margin: 0 0 8px; }
+
+/* v0.22 행특 설계 카드 */
+.trait-card { border: 2px solid #c4b5fd; background: #faf8ff; }
+.trait-card .rcard-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tr-pii { background: #fff7ed; border: 1px solid #fdba74; color: #9a3412; border-radius: 6px; padding: 6px 10px; margin: 8px 0; font-size: 13px; font-weight: 600; }
+.tr-row { display: grid; grid-template-columns: 96px 1fr auto; gap: 8px; align-items: center; margin: 6px 0; }
+.tr-row select, .tr-row input { width: 100%; min-width: 0; }
+.tr-area { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 8px 0; background: #fff; }
+.tr-area.off { opacity: 0.5; }
+.tr-area-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.tr-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
+.tr-chip { display: inline-flex; align-items: center; gap: 4px; background: #ede9fe; color: #4c1d95; border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 13px; }
+.tr-x { border: 0; background: transparent; padding: 0 6px; font-size: 15px; line-height: 1; cursor: pointer; color: #6d28d9; min-height: 0; }
+.tr-case { width: 100%; box-sizing: border-box; resize: none; overflow-y: hidden; }
+.tr-warn-list { background: #fefce8; border: 1px solid #fde047; border-radius: 6px; padding: 6px 10px; font-size: 13px; color: #854d0e; margin: 6px 0; }
+.tr-kw-list { display: flex; flex-direction: column; gap: 2px; }
+.tr-kw-sec { font-weight: 700; margin: 10px 0 4px; color: #6d28d9; }
+.tr-kw { display: grid; grid-template-columns: auto 130px 1fr; gap: 8px; align-items: start; padding: 4px 6px; margin: 0; font-weight: normal; border-radius: 6px; text-align: left; }
+.tr-kw:hover { background: #f5f3ff; }
+.tr-own input[type=text] { flex: 1; min-width: 120px; }
+.tr-imp td { vertical-align: top; }
+.tr-imp tr.off { opacity: 0.55; }
+.tr-imp-sum { white-space: pre-wrap; font-size: 12.5px; max-width: 420px; }
+.warn-text { color: #b45309; white-space: pre-wrap; font-size: 12.5px; }
+/* 행특 사전 편집 */
+.td-body { overflow: auto; }
+.td-cols { display: grid; grid-template-columns: 260px 1fr; gap: 14px; }
+.td-types { display: flex; flex-direction: column; gap: 4px; }
+.td-type { display: flex; gap: 4px; align-items: center; }
+.td-type-name { flex: 1; text-align: left; }
+.td-type.on .td-type-name { background: #ede9fe; border-color: #a78bfa; font-weight: 700; }
+.td-descs .td-line input { flex: 1; }
+.td-kws { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.td-kw { display: grid; grid-template-columns: 150px 1fr 170px auto; gap: 6px; align-items: center; }
+.td-kw.head { font-size: 12.5px; color: var(--muted); }
+.td-ty summary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px; }
+
+.td-add { display: grid; grid-template-columns: 200px 160px 1fr auto; gap: 6px; align-items: center; }
+.td-add input, .tr-find input { width: 100%; box-sizing: border-box; }
+.tr-find { margin: 4px 0 6px; }

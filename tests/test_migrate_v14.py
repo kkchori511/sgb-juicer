@@ -27,7 +27,7 @@ def test_v13_to_v14():
     d = db.open_year(2026)
     olds = [p for p in backup_dir().iterdir() if p.name.endswith("_형식변경전")]
     assert len(olds) == 1 and (olds[0] / backup.DONE).exists()
-    assert d.get_meta("schema_version") == "14"
+    assert d.get_meta("schema_version") == str(db.SCHEMA_VERSION)
     d.checkpoint()
     assert counts(dst) == before
     tags = d.q("SELECT record_id, tag_id FROM record_tags ORDER BY record_id")

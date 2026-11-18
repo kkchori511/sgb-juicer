@@ -112,7 +112,7 @@ def test_all():
     # 프롬프트 목록: 기본 3개, 새로 만들기, 실행할 때 고르기(작업별 기억), 기본은 못 지우고 되돌리기
     from app.prompt_default import DEFAULT_TEXT
     pl = ok(api.prompt_list())
-    assert [x["id"] for x in pl["prompts"]][:3] == ["default", "refine", "polish"] and pl["picks"] == {"synth": "default", "refine": "refine", "polish": "polish"}
+    assert [x["id"] for x in pl["prompts"]][:3] == ["default", "refine", "polish"] and pl["picks"] == {"synth": "default", "refine": "refine", "polish": "polish", "trait": "trait"}
     ok(api.ai_synth(hr, "career", "20301", [r1], None))
     assert SENT[-1][0].startswith("# 역할") and "50% 이상 다르게" in SENT[-1][0]
     nid = ok(api.prompt_save({"name": "내 종합", "prompt": "내 지침", "example": "내 예시"}))["id"]

@@ -1173,6 +1173,209 @@ class Api:
         self._rec().unconfirm_record(rid)
         return {}
 
+    # ---------- v0.22 행특 설계 카드 ----------
+    def _names(self):
+        return [x["name"] for x in self._db().q("SELECT name FROM students")]
+
+    @safe
+    def trait_dict_get(self):
+        from . import trait_dict
+        return {"dict": trait_dict.load(), "is_default": trait_dict.is_default(), "has_prev": bool(config.load().get("trait_dict_prev")),
+                "areas": trait_dict.AREA_NAMES}
+
+    @safe
+    def trait_dict_save(self, d):
+        from . import trait_dict
+        return {"dict": trait_dict.save(d)}
+
+    @safe
+    def trait_dict_add(self, area, kw, desc="", tname=""):
+        """설계 카드에서 직접 입력한 키워드(area) 또는 성격 설명(area='type', kw=유형, desc=설명)을 사전에 더한다."""
+        from . import trait_dict
+        d = trait_dict.load()
+        kw = " ".join(str(kw or "").split())[:30]
+        if not kw:
+            raise db.DbError("더할 글이 비어 있습니다.")
+        if area == "type":
+            t = next((x for x in d["types"] if x["name"] == kw), None)
+            if not t:
+                t = {"name": kw, "descs": []}
+                d["types"].append(t)
+            desc = " ".join(str(desc or "").split())[:120]
+            if desc and desc not in t["descs"]:
+                t["descs"].append(desc)
+        elif area in trait_dict.AREAS:
+            if not any(e["kw"] == kw for e in d["areas"][area]):
+                d["areas"][area].append({"kw": kw, "desc": " ".join(str(desc or "").split())[:200], "types": [tname] if tname else []})
+        else:
+            raise db.DbError("영역이 올바르지 않습니다.")
+        return {"dict": trait_dict.save(d)}
+
+    @safe
+    def trait_dict_reset(self):
+        from . import trait_dict
+        return {"dict": trait_dict.reset()}
+
+    @safe
+    def trait_dict_undo(self):
+        from . import trait_dict
+        return {"dict": trait_dict.undo()}
+
+    @safe
+    def trait_dict_export(self):
+        from . import trait_dict
+        res = self._window.create_file_dialog(webview.SAVE_DIALOG, save_filename=f"행특_설계_사전_{time.strftime('%Y%m%d')}.xlsx", file_types=("Excel 파일 (*.xlsx)",))
+        if not res:
+            return {"ok": False, "cancelled": True}
+        path = res[0] if isinstance(res, (list, tuple)) else res
+        if not path.lower().endswith(".xlsx"):
+            path += ".xlsx"
+        try:
+            trait_dict.to_xlsx(trait_dict.load(), path)
+        except PermissionError:
+            raise db.DbError("저장하지 못했습니다. 같은 파일이 Excel에서 열려 있으면 닫고 다시 시도해 주세요.")
+        return {"path": path}
+
+    @safe
+    def trait_dict_import_check(self, path=None):
+        """사전 엑셀 고르기 → 바뀌는 수(아직 바꾸지 않음). 바꾸기는 trait_dict_import_apply."""
+        from . import trait_dict
+        if path is None:
+            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
+            if not res:
+                return {"ok": False, "cancelled": True}
+            path = res[0] if isinstance(res, (list, tuple)) else res
+        new = trait_dict.from_xlsx(path)
+        self._trait_dict_new = new
+        return {"diff": trait_dict.diff(trait_dict.load(), new), "types": len(new["types"]),
+                "kws": {a: len(new["areas"][a]) for a in trait_dict.AREAS}, "name": Path(path).name}
+
+    @safe
+    def trait_dict_import_apply(self):
+        from . import trait_dict
+        new = getattr(self, "_trait_dict_new", None)
+        if not new:
+            raise db.DbError("먼저 엑셀 파일을 골라 주세요.")
+        self._trait_dict_new = None
+        return {"dict": trait_dict.save(new)}
+
+    @safe
+    def trait_save(self, gid, sno, design):
+        """설계 카드 저장(자동 저장). 인적사항처럼 보이는 글은 경고로 알린다(저장은 함)."""
+        from . import trait
+        self._editable()
+        rec = self._rec()
+        rid = rec.trait_save(gid, sno, design)
+        d = trait.normalize(design)
+        return {"id": rid, "warnings": trait.pii_warnings(d, self._names()), "summary": trait.summary(d)}
+
+    @safe
+    def trait_targets(self, gid):
+        """[🧩 행특 설계 일괄 변환]: 이 반 학생마다 설계 상태(마감·비활성은 빼고 수만)."""
+        d = self._db()
+        rec = Records(d)
+        rec.slot(gid, "behavior")
+        st = rec.trait_status(gid)
+        closed = {f["student_no"] for f in d.q("SELECT student_no FROM finals WHERE group_id=? AND item='behavior' AND closed=1", (int(gid),))}
+        out, sk_closed, sk_inactive = [], 0, 0
+        for m in d.members(gid):
+            x = st.get(m["student_no"])
+            if not m["active"]:
+                sk_inactive += 1
+                continue
+            if m["student_no"] in closed:
+                sk_closed += 1
+                continue
+            out.append({"student_no": m["student_no"], "name": m["name"], **(x or {"rid": None, "filled": False, "results": 0, "confirmed": False, "summary": ""})})
+        return {"students": out, "skipped_closed": sk_closed, "skipped_inactive": sk_inactive}
+
+    @safe
+    def trait_template(self, gid):
+        """설계 엑셀 양식(학번·이름 채움, 이미 있는 설계도 채움, 드롭다운·사전 시트)."""
+        from . import trait, trait_dict
+        d = self._db()
+        rec = Records(d)
+        g, _ = rec.slot(gid, "behavior")
+        members = [m for m in d.members(gid) if m["active"]]
+        designs = {}
+        for r in d.q("SELECT student_no, design FROM records WHERE group_id=? AND item='behavior' AND kind='trait'", (int(gid),)):
+            designs.setdefault(r["student_no"], trait.parse(r["design"]))
+        res = self._window.create_file_dialog(webview.SAVE_DIALOG, save_filename=f"행특_설계_{g.get('label') or g.get('name') or ''}.xlsx".replace(" ", "_"), file_types=("Excel 파일 (*.xlsx)",))
+        if not res:
+            return {"ok": False, "cancelled": True}
+        path = res[0] if isinstance(res, (list, tuple)) else res
+        if not path.lower().endswith(".xlsx"):
+            path += ".xlsx"
+        try:
+            trait.template(path, members, designs, trait_dict.load())
+        except PermissionError:
+            raise db.DbError("저장하지 못했습니다. 같은 파일이 Excel에서 열려 있으면 닫고 다시 시도해 주세요.")
+        return {"path": path}
+
+    @safe
+    def trait_import_check(self, gid, path=None):
+        """설계 엑셀 고르기 → 학생 찾기 결과(아직 넣지 않음). 넣기는 trait_import_apply."""
+        from . import trait
+        d = self._db()
+        rec = Records(d)
+        rec.slot(gid, "behavior")
+        if path is None:
+            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
+            if not res:
+                return {"ok": False, "cancelled": True}
+            path = res[0] if isinstance(res, (list, tuple)) else res
+        rows = trait.read_xlsx(path)
+        mem = d.members(gid)
+        by_no = {m["student_no"]: m for m in mem}
+        by_name = {}
+        for m in mem:
+            by_name.setdefault(m["name"], []).append(m)
+        st = rec.trait_status(gid)
+        closed = {f["student_no"] for f in d.q("SELECT student_no FROM finals WHERE group_id=? AND item='behavior' AND closed=1", (int(gid),))}
+        out = []
+        names = self._names()
+        for x in rows:
+            m = by_no.get(x["sno"]) or (by_name[x["name"]][0] if len(by_name.get(x["name"], [])) == 1 else None)
+            item = {"row": x["row"], "sno": m["student_no"] if m else x["sno"], "name": m["name"] if m else x["name"]}
+            if x.get("error"):
+                item["state"], item["why"] = "error", x["error"]
+            elif not m:
+                item["state"], item["why"] = "error", "명렬에서 학생을 찾지 못함"
+            elif not m["active"]:
+                item["state"], item["why"] = "error", "비활성 학생"
+            elif m["student_no"] in closed:
+                item["state"], item["why"] = "error", "마감됨"
+            else:
+                cur = st.get(m["student_no"])
+                item["state"] = "over" if cur and cur["filled"] else "new"
+                item["design"] = x["design"]
+                item["summary"] = trait.summary(x["design"])
+                item["warnings"] = trait.pii_warnings(x["design"], names)
+            out.append(item)
+        self._trait_import = {"gid": int(gid), "rows": out}
+        return {"rows": [{k: v for k, v in r.items() if k != "design"} for r in out], "name": Path(path).name}
+
+    @safe
+    def trait_import_apply(self, gid, rows):
+        """고른 줄(엑셀 행 번호)만 설계로 넣는다(이미 있으면 덮어씀). 하나라도 실패하면 알린다."""
+        self._editable()
+        imp = getattr(self, "_trait_import", None)
+        if not imp or imp["gid"] != int(gid):
+            raise db.DbError("먼저 엑셀 파일을 골라 주세요.")
+        want = {int(x) for x in rows or []}
+        rec = self._rec()
+        done, fail = 0, []
+        for r in imp["rows"]:
+            if r["row"] not in want or "design" not in r:
+                continue
+            try:
+                rec.trait_save(gid, r["sno"], r["design"])
+                done += 1
+            except db.DbError as e:
+                fail.append(f"{r['row']}행 {r['name']}: {e}")
+        self._trait_import = None
+        return {"done": done, "failed": fail}
+
     @safe
     def confirm_many(self, pairs, year=None):
         """[최신 결과로 확정]: [[기록 id, 글], ...]. 되돌리기 표(token)는 이 실행 동안만 남는다."""
@@ -1480,15 +1683,19 @@ class Api:
         rec.require_open(r["group_id"], r["item"], r["student_no"])
         rec.check_room(r["group_id"], r["item"], r["student_no"], r["id"])
         cfg, model = self._model(model_index)
-        op = "polish" if r["kind"] == "existing" else "refine"
+        op = "trait" if r["kind"] == "trait" else "polish" if r["kind"] == "existing" else "refine"
         pr = self._prompt(op)
-        target = rec.ai_target(r["group_id"], r["item"], r["student_no"]) if op == "polish" else 0
+        target = rec.ai_target(r["group_id"], r["item"], r["student_no"]) if op in ("polish", "trait") else 0
         system = prompts.build_system(pr["prompt"], pr["example"], target)
         key = ("record", r["id"])
         self._guard(key)
         try:
-            # 결과 묶음은 원문에서 만든다(확정본이 있어도 원문 기준)
-            src = r["original"] if r["original"] is not None else r["content"]
+            # 결과 묶음은 원문에서 만든다(확정본이 있어도 원문 기준). 행특 설계 카드는 설계(성격·키워드·사례)로
+            if op == "trait":
+                from . import trait, trait_dict
+                src = trait.ai_user(trait.parse(r["design"]), trait_dict.load())
+            else:
+                src = r["original"] if r["original"] is not None else r["content"]
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, src, cfg["privacy_block"])
             meta = {"model": model, "op": op, "prompt_name": pr["name"], "prompt": pr["prompt"], "example": pr["example"], "record_ids": [r["id"]]}
             nid, dropped = rec.add_result(r["group_id"], r["item"], r["student_no"], op, text, self._xm(meta), cost, record_id=r["id"])

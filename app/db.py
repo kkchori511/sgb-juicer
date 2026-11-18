@@ -21,7 +21,7 @@ from contextlib import contextmanager
 
 from .paths import data_dir
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 KINDS = ("homeroom", "subject", "club")
 ROLES = ("homeroom", "subject")  # 담임 / 비담임
 
@@ -82,7 +82,8 @@ CREATE TABLE IF NOT EXISTS records (
     tags_ver INTEGER DEFAULT 0,      -- 태그가 바뀔 때마다 1씩(v9)
     content_ver INTEGER DEFAULT 0,   -- 내용·소속이 바뀔 때마다 1씩(v12, 트리거)
     confirmed INTEGER DEFAULT 0,     -- 기록 확정(v13): 1이면 content가 확정본, 최종안 이어 붙이기 대상
-    confirmed_at TEXT
+    confirmed_at TEXT,
+    design TEXT                      -- v15 행특 설계 카드(kind='trait')의 선택·사례 JSON
 );
 CREATE INDEX IF NOT EXISTS ix_records_slot ON records(group_id, item, student_no);
 CREATE TABLE IF NOT EXISTS record_tags (
@@ -357,6 +358,8 @@ class YearDb:
         if "confirmed" not in cols:  # v13: 기록 확정
             self._conn.execute("ALTER TABLE records ADD COLUMN confirmed INTEGER DEFAULT 0")
             self._conn.execute("ALTER TABLE records ADD COLUMN confirmed_at TEXT")
+        if "design" not in cols:  # v15: 행특 설계 카드
+            self._conn.execute("ALTER TABLE records ADD COLUMN design TEXT")
         self._conn.execute(
             "CREATE TRIGGER IF NOT EXISTS tr_records_content_ver AFTER UPDATE OF content, group_id, item, student_no ON records "
             "WHEN NEW.content IS NOT OLD.content OR NEW.group_id IS NOT OLD.group_id OR NEW.item IS NOT OLD.item OR NEW.student_no IS NOT OLD.student_no "
