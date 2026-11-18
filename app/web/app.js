@@ -2530,35 +2530,57 @@
     toast('행특을 만들었습니다. 설계 카드 아래 결과 묶음 맨 위에 있습니다.');
     loadStudent(true);
   }
-  // 키워드 고르기: 이 성격유형 추천이 위, 찾기, 설명, 직접 쓰기(+ 사전에 추가)
+  // 키워드 찾기: 띄어쓰기 무시, 여러 단어는 하나라도 맞으면. 기본은 키워드 이름만(withDesc면 설명도)
+  const kwTerms = (q) => String(q || '').trim().split(/\s+/).map((t) => t.replace(/\s/g, '')).filter(Boolean);
+  // 맞은 정도: 띄어쓰기 뺀 전체가 키워드에 들어 있으면 가장 위, 그다음 맞은 단어 수
+  const kwScore = (e, terms) => { const k = e.kw.replace(/\s/g, ''); return (terms.length > 1 && k.includes(terms.join('')) ? 100 : 0) + terms.filter((t) => k.includes(t)).length; };
+  const kwSort = (arr, terms) => (terms.length ? arr.map((e, i) => [e, i]).sort((x, y) => kwScore(y[0], terms) - kwScore(x[0], terms) || x[1] - y[1]).map((x) => x[0]) : arr);
+  const kwHit = (e, terms, withDesc) => !terms.length || terms.some((t) => e.kw.replace(/\s/g, '').includes(t) || (withDesc && String(e.desc || '').replace(/\s/g, '').includes(t)));
+  function kwMark(kw, terms) { // 키워드 안에서 찾은 글자를 강조
+    const idx = new Array(kw.length).fill(false);
+    terms.forEach((t) => { let from = 0; let i; while (t && (i = kw.indexOf(t, from)) >= 0) { for (let k = i; k < i + t.length; k += 1) idx[k] = true; from = i + 1; } });
+    const out = []; let buf = '', on = false;
+    [...kw].forEach((ch, i) => { if (idx[i] !== on && buf) { out.push(on ? el('mark', { text: buf }) : buf); buf = ''; } on = idx[i]; buf += ch; });
+    if (buf) out.push(on ? el('mark', { text: buf }) : buf);
+    return out;
+  }
+  // 키워드 고르기: 고른 키워드 → 이 성격유형 추천 → 그 밖, 찾기(키워드 이름 위주), 설명, 직접 쓰기(+ 사전에 추가)
   function openTraitKw(a, label, d, done) {
     const x = d.areas[a];
     const list = (TD ? TD.dict.areas[a] : []) || [];
     openSheet((box) => {
       box.style.width = 'min(720px, 94vw)'; box.style.height = 'min(80vh, 760px)';
-      const find = el('input', { type: 'search', placeholder: '키워드·설명 찾기', 'aria-label': '키워드 찾기' });
+      const find = el('input', { type: 'search', placeholder: '🔎 키워드 찾기 — 단어로 (예: 집중, 문제 해결, 협력 배려)', 'aria-label': '키워드 찾기' });
+      const clear = el('button', { type: 'button', class: 'tr-clear', title: '찾기 지우기', 'aria-label': '찾기 지우기', text: '✕', hidden: true });
+      const withDesc = el('input', { type: 'checkbox' });
+      const found = el('span', { class: 'muted' });
       const body = el('div', { class: 'tr-kw-list' });
       const count = el('b', {});
       const pick = new Set(x.kws);
       const upd = () => { count.textContent = `${pick.size}/3 고름`; };
+      let terms = [];
       const row = (e) => {
         const cb = el('input', { type: 'checkbox', checked: pick.has(e.kw) });
-        cb.addEventListener('change', () => { if (cb.checked && pick.size >= 3) { cb.checked = false; toast('키워드는 3개까지 고를 수 있습니다.'); return; } cb.checked ? pick.add(e.kw) : pick.delete(e.kw); upd(); });
-        return el('label', { class: 'tr-kw' }, [cb, el('b', { text: e.kw }), el('span', { class: 'muted', text: e.desc || '' })]);
+        cb.addEventListener('change', () => { if (cb.checked && pick.size >= 3) { cb.checked = false; toast('키워드는 3개까지 고를 수 있습니다.'); return; } cb.checked ? pick.add(e.kw) : pick.delete(e.kw); upd(); draw(); });
+        return el('label', { class: 'tr-kw' }, [cb, el('b', {}, kwMark(e.kw, terms)), el('span', { class: 'muted', text: e.desc || '' })]);
       };
       const draw = () => {
-        const q = find.value.trim();
-        const hit = (e) => !q || e.kw.includes(q) || (e.desc || '').includes(q);
+        terms = kwTerms(find.value);
+        clear.hidden = !find.value;
+        const hit = (e) => kwHit(e, terms, withDesc.checked);
         body.innerHTML = '';
-        const rec = d.type ? list.filter((e) => (e.types || []).includes(d.type) && hit(e)) : [];
-        const rest = list.filter((e) => !rec.includes(e) && hit(e));
-        const extra = [...pick].filter((k) => !list.some((e) => e.kw === k)).map((k) => ({ kw: k, desc: '(직접 쓴 키워드)' }));
-        if (extra.length) body.append(el('div', { class: 'tr-kw-sec', text: '직접 쓴 키워드' }), ...extra.map(row));
+        const chosen = [...pick].map((k) => list.find((e) => e.kw === k) || { kw: k, desc: '(직접 쓴 키워드)' });
+        const rec = kwSort(d.type ? list.filter((e) => !pick.has(e.kw) && (e.types || []).includes(d.type) && hit(e)) : [], terms);
+        const rest = kwSort(list.filter((e) => !pick.has(e.kw) && !rec.includes(e) && hit(e)), terms);
+        found.textContent = terms.length ? `찾은 키워드 ${rec.length + rest.length}개` : `키워드 ${list.length}개`;
+        if (chosen.length) body.append(el('div', { class: 'tr-kw-sec', text: '고른 키워드' }), ...chosen.map(row));
         if (rec.length) body.append(el('div', { class: 'tr-kw-sec', text: `'${d.type}' 추천` }), ...rec.map(row));
-        body.append(el('div', { class: 'tr-kw-sec', text: rec.length ? '그 밖의 키워드' : '키워드' }), ...rest.map(row));
-        if (!rec.length && !rest.length) body.appendChild(el('p', { class: 'muted', text: '찾는 키워드가 없습니다. 아래에서 직접 쓰세요.' }));
+        if (rest.length) body.append(el('div', { class: 'tr-kw-sec', text: rec.length ? '그 밖의 키워드' : '키워드' }), ...rest.map(row));
+        if (!rec.length && !rest.length) body.appendChild(el('p', { class: 'muted', text: `찾는 키워드가 없습니다.${withDesc.checked ? '' : ' [설명까지 찾기]를 켜거나'} 아래에서 직접 쓰세요.` }));
       };
       find.addEventListener('input', draw);
+      clear.addEventListener('click', () => { find.value = ''; draw(); find.focus(); });
+      withDesc.addEventListener('change', draw);
       const own = el('input', { type: 'text', maxlength: 30, placeholder: '직접 쓰기(예: 나눔실천)', 'aria-label': '키워드 직접 쓰기' });
       const ownDesc = el('input', { type: 'text', maxlength: 200, placeholder: '(선택) 설명', 'aria-label': '키워드 설명' });
       const toDict = el('input', { type: 'checkbox' });
@@ -2571,7 +2593,7 @@
       };
       own.addEventListener('keydown', (e) => { if (e.key === 'Enter') addOwn(); });
       box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `${label} 키워드` }), el('span', { class: 'muted', text: '3개까지 · 설명은 AI에 함께 보냅니다' }), el('span', { class: 'spacer' }), count]),
-        el('div', { class: 'tr-find' }, [find]),
+        el('div', { class: 'tr-findbar' }, [el('div', { class: 'tr-find-in' }, [find, clear]), el('label', { class: 'inline', style: 'margin:0', title: '키워드 설명 글까지 찾습니다' }, [withDesc, '설명까지 찾기']), found]),
         el('div', { class: 'sheet-body' }, [body]),
         el('div', { class: 'tw-row tr-own' }, [own, ownDesc, el('label', { class: 'inline', style: 'margin:0' }, [toDict, '사전에 추가']), el('button', { type: 'button', class: 'small', text: '넣기', onclick: addOwn })]),
         el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }),
@@ -2661,14 +2683,15 @@
           return;
         }
         const lst = d.areas[tab];
-        const find = el('input', { type: 'search', placeholder: '찾기', 'aria-label': '키워드 찾기' });
+        const find = el('input', { type: 'search', placeholder: '🔎 키워드 찾기(단어)', 'aria-label': '키워드 찾기' });
+        const withDesc = el('input', { type: 'checkbox' });
         const table = el('div', { class: 'td-kws' });
         const drawRows = () => {
           table.innerHTML = '';
           table.appendChild(el('div', { class: 'td-kw head' }, ['키워드', '설명(AI에 함께 보냄)', '추천 성격유형', ''].map((h) => el('b', { text: h }))));
-          const q = find.value.trim();
+          const terms = kwTerms(find.value);
           lst.forEach((e, i) => {
-            if (q && !e.kw.includes(q) && !(e.desc || '').includes(q)) return;
+            if (!kwHit(e, terms, withDesc.checked)) return;
             const k = el('input', { type: 'text', maxlength: 30, value: e.kw, 'aria-label': '키워드' });
             k.addEventListener('change', () => { const n = k.value.trim(); if (!n || (n !== e.kw && lst.some((y) => y.kw === n))) { k.value = e.kw; toast('키워드가 비었거나 겹칩니다.'); return; } e.kw = n; mark(); });
             const ds = el('input', { type: 'text', maxlength: 200, value: e.desc || '', 'aria-label': '설명' });
@@ -2683,9 +2706,11 @@
           });
         };
         find.addEventListener('input', drawRows);
+        withDesc.addEventListener('change', drawRows);
         const nk = el('input', { type: 'text', maxlength: 30, placeholder: '새 키워드' });
         const nd = el('input', { type: 'text', maxlength: 200, placeholder: '설명(선택)' });
-        body.append(el('div', { class: 'td-add' }, [find, nk, nd, el('button', { type: 'button', class: 'small', text: '+ 추가', onclick: () => {
+        body.append(el('div', { class: 'tr-findbar' }, [el('div', { class: 'tr-find-in' }, [find]), el('label', { class: 'inline', style: 'margin:0' }, [withDesc, '설명까지 찾기'])]),
+          el('div', { class: 'td-add' }, [nk, nd, el('button', { type: 'button', class: 'small', text: '+ 추가', onclick: () => {
           const n = nk.value.trim(); if (!n) return; if (lst.some((y) => y.kw === n)) { toast('이미 있는 키워드입니다.'); return; }
           lst.unshift({ kw: n, desc: nd.value.trim(), types: [] }); nk.value = ''; nd.value = ''; mark(); drawRows(); } })]), table);
         drawRows();
