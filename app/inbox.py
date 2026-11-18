@@ -1,4 +1,4 @@
-"""자료 인박스: 묶음(batch) 단위로 가져오기 → 학생 매칭 → (선택) AI 정제 → 보내기.
+"""자료 Inbox: 묶음(batch) 단위로 가져오기 → 학생 매칭 → (선택) AI 정제 → 보내기.
 
 - 학번·이름은 이 PC 안에서만 매칭에 쓰고, 행의 content에는 내용만 둔다.
 - 매칭은 규칙으로만 한다(AI 쓰지 않음). 학번+이름 일치는 자동 확정, 그 밖은 '추천'으로 두고 선생님이 확정.
@@ -94,7 +94,7 @@ def detect(raw: list[list[str]]) -> dict:
     return out
 
 
-# 인박스 열 역할(화면에서 고르는 것). 학번·학년·반·번호·반/번호·이름은 학생 찾기, 내용은 기록, 학적변동은 안내.
+# Inbox 열 역할(화면에서 고르는 것). 학번·학년·반·번호·반/번호·이름은 학생 찾기, 내용은 기록, 학적변동은 안내.
 ROLES = ("student_no", "grade", "class_no", "number", "clsnum", "name", "change", "date", "content")  # date: 줄마다 일자(v0.23, 누가기록)
 ID_ROLES = ("student_no", "grade", "class_no", "number", "clsnum", "name")
 
@@ -835,7 +835,7 @@ class Inbox:
         return self._migrate(bid)
 
     def reorder(self, bid, row_ids):
-        """인박스 행 순서를 화면에서 끈 순서로."""
+        """Inbox 행 순서를 화면에서 끈 순서로."""
         ids = [int(x) for x in row_ids or []]
         with self.d.tx() as c:
             have = {r[0] for r in c.execute("SELECT id FROM inbox_rows WHERE batch_id=? AND state<>'sent'", (int(bid),))}

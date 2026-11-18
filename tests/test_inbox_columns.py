@@ -1,4 +1,4 @@
-"""인박스 열 역할·나이스 파일 자동 인식·반/번호 나누기·엑셀 시트 고르기(가짜 자료)."""
+"""Inbox 열 역할·나이스 파일 자동 인식·반/번호 나누기·엑셀 시트 고르기(가짜 자료)."""
 import os, sys, tempfile
 DATA = tempfile.mkdtemp()
 os.environ["SGB_DATA_DIR"] = DATA

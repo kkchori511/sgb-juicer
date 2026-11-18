@@ -1,12 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 706 246" width="100%" role="img" aria-labelledby="summary_2-title summary_2-desc" style="font-family: inherit">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 706 184" width="100%" role="img" aria-labelledby="summary_2-title summary_2-desc" style="font-family: inherit">
 <title id="summary_2-title">전체 워크플로우 요약</title>
-<desc id="summary_2-desc">1 자료 넣기, 2 기록 쌓기, 3 AI 변환, 4 기록 확정, 5 최종안, 6 마감, 7 내보내기 순으로 왼쪽에서 오른쪽으로 진행합니다. 아래쪽 점선은 마감 해제 후 5단계로 돌아가는 경로입니다.</desc>
+<desc id="summary_2-desc">1 자료 넣기, 2 기록 쌓기, 3 AI 변환, 4 기록 확정, 5 최종안, 6 마감, 7 내보내기 순으로 왼쪽에서 오른쪽으로 진행합니다.</desc>
 <style>text{font-family:inherit}path{stroke-linecap:round;stroke-linejoin:round}</style>
 <rect x="8" y="10" width="90" height="164" rx="10" fill="var(--surface, #f4f7fa)" stroke="var(--border, #c9d3de)"/>
 <circle cx="53" cy="32" r="13" fill="var(--accent, #2563eb)"/>
 <text x="53" y="37" text-anchor="middle" font-size="16" font-weight="750" fill="#fff">1</text>
 <text x="53" y="66" text-anchor="middle" font-size="15" font-weight="750" fill="var(--text, #17202b)">자료 넣기</text>
-<text x="53" y="95" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">📥 자료 인박스</text>
+<text x="53" y="95" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">📥 자료 Inbox</text>
 <text x="53" y="116" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">가져오기·매칭</text>
 <text x="53" y="137" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">정제·보내기</text>
 <text x="53" y="158" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">📝 직접 입력</text>
@@ -52,7 +52,6 @@
 <text x="553" y="37" text-anchor="middle" font-size="16" font-weight="750" fill="#fff">6</text>
 <text x="553" y="66" text-anchor="middle" font-size="15" font-weight="750" fill="var(--text, #17202b)">마감</text>
 <text x="553" y="95" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">마감</text>
-<text x="553" y="116" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">마감 해제</text>
 <path d="M 599 63 H 607" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
 <path d="M 602.61 65.40 L 607.0 63.0 L 602.61 60.60" fill="none" stroke="var(--accent, #2563eb)" stroke-width="1.5"/>
 <rect x="608" y="10" width="90" height="164" rx="10" fill="var(--surface, #f4f7fa)" stroke="var(--border, #c9d3de)"/>
@@ -62,7 +61,4 @@
 <text x="653" y="95" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">검토·내보내기</text>
 <text x="653" y="116" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">xlsx·복사</text>
 <text x="653" y="137" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #445264)">NEIS 붙여넣기</text>
-<path d="M 553 175 V 200 Q 553 208 545 208 H 461 Q 453 208 453 200 V 175" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5" stroke-dasharray="4 4"/>
-<path d="M 455.40 179.39 L 453.0 175.0 L 450.60 179.39" fill="none" stroke="var(--orange, #f08c00)" stroke-width="1.5"/>
-<text x="503" y="230" text-anchor="middle" font-size="12" font-weight="600" fill="var(--flow-return-text, #995000)">마감 해제</text>
 </svg>

@@ -2,11 +2,11 @@
 
 v1: 역할·담당(학급/과목/동아리)·학생·소속(명렬)·일정.
 v2: 태그·학생관찰기록·AI 결과 후보·최종안(마감). 기록 다루는 함수는 records.py.
-v3: 자료 인박스(묶음·행·정제 후보). 다루는 함수는 inbox.py.
-v4: 인박스 행에 원본 페이지 번호(pages) — 스캔 PDF 원본 보기용.
+v3: 자료 Inbox(묶음·행·정제 후보). 다루는 함수는 inbox.py.
+v4: Inbox 행에 원본 페이지 번호(pages) — 스캔 PDF 원본 보기용.
 v5: 과목별 성취기준(standards).
 v6: 기록 순서(records.pos). v7: 선택과목 수업(memberships.section). v8: 1·2학기 합산 과목(groups.pair_id·pair_total).
-v9: 기록 태그 버전(records.tags_ver). v10: 자율·진로·동아리 활동 개요(outlines). v11: 인박스 행 열 역할(inbox_rows.ext).
+v9: 기록 태그 버전(records.tags_ver). v10: 자율·진로·동아리 활동 개요(outlines). v11: Inbox 행 열 역할(inbox_rows.ext).
 v12: 태그 AI 변환(tag_works·tag_cands·tag_runs·tag_applies), 기록 내용 버전(records.content_ver, 트리거로 증가).
 v13: 기록 확정(records.confirmed·confirmed_at). 확정본=content, 원문=original(없으면 content).
 v14: 기록당 태그 하나(태그 = 한 묶음). 여러 개면 태그 관리 순서상 앞 태그만 남기고, 뗀 목록은 meta 'tag_single_removed'에 남긴다.
@@ -315,7 +315,7 @@ class YearDb:
             if r["record_id"] in seen:
                 removed.append({"record_id": r["record_id"], "tag_id": r["tag_id"], "tag": r["name"]})
             seen.add(r["record_id"])
-        batches = []  # 인박스 묶음도 태그 하나로
+        batches = []  # Inbox 묶음도 태그 하나로
         order = {r["id"]: k for k, r in enumerate(self._conn.execute("SELECT id FROM tags ORDER BY sort_order, name").fetchall())}
         for b in self._conn.execute("SELECT id, tag_ids FROM inbox_batches").fetchall():
             try:
@@ -346,7 +346,7 @@ class YearDb:
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(inbox_rows)")}
         if "pages" not in cols:
             self._conn.execute("ALTER TABLE inbox_rows ADD COLUMN pages TEXT DEFAULT ''")
-        if "ext" not in cols:  # v11: 인박스 열 역할(학년·반·번호·반/번호·학적변동)
+        if "ext" not in cols:  # v11: Inbox 열 역할(학년·반·번호·반/번호·학적변동)
             self._conn.execute("ALTER TABLE inbox_rows ADD COLUMN ext TEXT DEFAULT '{}'")
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(records)")}
         if "pos" not in cols:
@@ -673,7 +673,7 @@ class YearDb:
 
     def remove_members(self, gid, student_nos, all_groups=False):
         """학생을 소속에서 지운다(전출 삭제). 그 소속의 기록·후보·최종안도 지우고,
-        보내지 않은 인박스 행은 학생 연결만 푼다. all_groups=True면 이 학년도의 모든 소속에서."""
+        보내지 않은 Inbox 행은 학생 연결만 푼다. all_groups=True면 이 학년도의 모든 소속에서."""
         nos = [str(n) for n in student_nos or []]
         if not nos:
             return 0
@@ -695,7 +695,7 @@ class YearDb:
     def edit_members(self, gid, rows):
         """등록된 학생 고치기. rows: [{orig_no, student_no, name, grade, class_no, number, section(없으면 None)}] — 검사를 통과한 행.
         이름·학년·반·번호는 학생 정보라 모든 소속에 반영된다. 학번이 바뀌면 이 학년도의 모든 담당에서
-        소속·기록·AI 결과·최종안·인박스 연결을 새 학번으로 옮긴다(학번끼리 맞바꾸기도 되게 임시 학번을 거친다)."""
+        소속·기록·AI 결과·최종안·Inbox 연결을 새 학번으로 옮긴다(학번끼리 맞바꾸기도 되게 임시 학번을 거친다)."""
         rows = [{**r, "orig_no": str(r["orig_no"]), "student_no": str(r["student_no"])} for r in rows]
         olds = {r["orig_no"] for r in rows}
         news = [r["student_no"] for r in rows]

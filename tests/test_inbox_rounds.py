@@ -1,4 +1,4 @@
-"""자료 인박스: 보낸 뒤에도 같은 묶음에 자료를 더 넣어 안 보낸 행만 보낸다(회차별 기록·태그 이어받기·회차별 지우기·예전 묶음 이어 쓰기)."""
+"""자료 Inbox: 보낸 뒤에도 같은 묶음에 자료를 더 넣어 안 보낸 행만 보낸다(회차별 기록·태그 이어받기·회차별 지우기·예전 묶음 이어 쓰기)."""
 import json, os, sys, tempfile
 os.environ["SGB_DATA_DIR"] = tempfile.mkdtemp()
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

@@ -1,5 +1,5 @@
 """v13 시험 파일(더미)을 v14로 열기: 형식변경전 백업, 기록당 태그 하나(태그 관리 순서상 앞 태그만 남김),
-인박스 묶음 태그도 하나로, 뗀 목록은 meta에 남김. 다른 자료는 그대로."""
+Inbox 묶음 태그도 하나로, 뗀 목록은 meta에 남김. 다른 자료는 그대로."""
 import json, os, shutil, sqlite3, sys, tempfile
 DATA = tempfile.mkdtemp()
 os.environ["SGB_DATA_DIR"] = DATA

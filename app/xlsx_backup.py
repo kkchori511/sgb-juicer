@@ -1,7 +1,7 @@
 """엑셀 전체 백업·복구(설정 › 백업, 버튼을 누를 때만). 만일을 위한 것 — 평소 백업은 backup.py(자료 파일 통째로).
 
 저장(save): 한 학년도를 xlsx 하나로.
-  - 보는 시트: 안내 · 명렬 · 항목별(자율활동/진로활동/행동특성 및 종합의견/세특_과목/동아리_이름) · AI 결과 · 태그 · 기준 자료 · 자료 인박스 · 일정 · 프롬프트
+  - 보는 시트: 안내 · 명렬 · 항목별(자율활동/진로활동/행동특성 및 종합의견/세특_과목/동아리_이름) · AI 결과 · 태그 · 기준 자료 · 자료 Inbox · 일정 · 프롬프트
   - 숨김 복구용 시트: 자료 표마다 '_복구_표이름'(열 이름 + 값을 JSON으로), '_복구정보'(형식·버전·학년도·표별 행 수), '_복구_긴글'(엑셀 칸 한도를 넘는 글 조각)
   - only_final: 최종안·마감 결과만(항목별 시트에 학생별 최종안). 복구용 시트는 넣지 않는다(이 파일로는 복구 불가).
 복구(build_db): 숨김 복구용 시트만 읽어 새 자료 파일(sqlite)을 만든다. 보는 시트를 고쳐도 복구에는 반영되지 않는다.
@@ -128,7 +128,7 @@ def save(year, path, only_final=False):
         else:
             lines += [("복구", "설정 › 백업 › [엑셀 파일로 복구]에서 이 파일로 이 학년도 자료를 되살릴 수 있습니다."),
                       ("주의", "복구는 숨김 시트(_복구_…)만 읽습니다. 보이는 시트를 엑셀에서 고쳐도 복구에는 반영되지 않습니다. 숨김 시트가 조금이라도 바뀌면(지문 확인) 복구를 멈춥니다."),
-                      ("보기 시트 밖", "태그 AI 변환 작업·시험 후보·반영 이력, 인박스 정제 후보, 기록 순서·내부 번호 등은 보이는 시트에는 없고 숨김 시트에만 있습니다(복구하면 모두 돌아옴)."),
+                      ("보기 시트 밖", "태그 AI 변환 작업·시험 후보·반영 이력, Inbox 정제 후보, 기록 순서·내부 번호 등은 보이는 시트에는 없고 숨김 시트에만 있습니다(복구하면 모두 돌아옴)."),
                       ("들어 있지 않은 것", "스캔 PDF 원본과 설정(API 키·모델·프롬프트 목록 저장본)은 들어 있지 않습니다. 프롬프트 시트는 보기용입니다.")]
         lines += [("", ""), ("시트", "내용")]
         info_row = len(lines) + 1
@@ -211,8 +211,8 @@ def save(year, path, only_final=False):
             rows = [[gl.get(x["group_id"], ""), "성취기준", x["text"], x["source"] or "", x["updated_at"]] for x in q("SELECT * FROM standards")]
             rows += [[gl.get(x["group_id"], ""), f"활동 개요 · {prompts.ITEM_NAMES.get(x['item'], x['item'])}", x["text"], x["source"] or "", x["updated_at"]] for x in q("SELECT * FROM outlines")]
             _table(ws, ["담당", "종류", "내용", "가져온 곳", "고친 때"], rows, [18, 22, 90, 18, 17], wrap=(3,))
-            # 자료 인박스
-            ws = wb.create_sheet(_sheet_name("자료 인박스", used))
+            # 자료 Inbox
+            ws = wb.create_sheet(_sheet_name("자료 Inbox", used))
             listing.append((ws.title, "묶음과 행(보낸 것·안 보낸 것)"))
             bt = {b["id"]: b for b in q("SELECT * FROM inbox_batches")}
             rows = [[bt.get(x["batch_id"], {}).get("title", ""), x["ord"], x["source_ref"] or "", x["ext_no"] or "", x["ext_name"] or "", x["student_no"] or "",

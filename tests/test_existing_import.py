@@ -82,7 +82,7 @@ def test_api_and_reorder():
     assert sent[-1].index("기록2") < sent[-1].index("기록0") < sent[-1].index("기록1"), sent[-1]
     ok(api.add_record(hr, "career", "20101", {"content": "새 기록"}))  # 새 기록은 맨 뒤
     assert ok(api.student_view(hr, "career", "20101"))["records"][-1]["content"] == "새 기록"
-    # 인박스 행 순서
+    # Inbox 행 순서
     bid = ok(api.inbox_create("순서", hr, "career"))["id"]
     s = ok(api.inbox_source_text(bid, "학번\t이름\t내용\n20101\t김철수\t첫째\n20102\t이영희\t둘째"))
     ok(api.inbox_import(bid, {"structure": "multi", **s["opts"]}))

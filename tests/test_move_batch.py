@@ -72,14 +72,14 @@ def test():
     info = {s["student_no"]: s for s in ok(api.batch_info(hr, "career"))["students"]}
     assert info["20301"]["records"] == 2 and not info["20301"]["all_locked"]
     assert info["20302"]["all_locked"] and info["20303"]["records"] == 0
-    # 현황판: 인박스 할 일
+    # 현황판: Inbox 할 일
     b = ok(api.inbox_create("자료", hr, "career"))["id"]
     s = ok(api.inbox_source_text(b, "20301\t김철수\t내용"))
     ok(api.inbox_import(b, {"structure": "multi", **s["opts"]}))
     labels = [t["label"] for t in ok(api.dashboard())["todo"]]
-    assert not any("인박스 확인 필요" in l for l in labels)  # 모두 확정된 매칭 대기는 '확인 필요' 아님
+    assert not any("Inbox 확인 필요" in l for l in labels)  # 모두 확정된 매칭 대기는 '확인 필요' 아님
     ok(api.inbox_stage(b, "review"))
-    assert any("인박스 보내기 대기 1묶음" == l for l in [t["label"] for t in ok(api.dashboard())["todo"]])
+    assert any("Inbox 보내기 대기 1묶음" == l for l in [t["label"] for t in ok(api.dashboard())["todo"]])
     print("MOVE/BATCH OK")
 
 if __name__ == "__main__":

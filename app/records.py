@@ -179,7 +179,7 @@ class Records:
             return c.execute("INSERT INTO tags(name) VALUES(?)", (name,)).lastrowid
 
     def inbox_tag_names(self):
-        """인박스 묶음 이름 목록(같은 이름은 하나로). 이미 태그로 있는지, 보내기 전 묶음 수."""
+        """Inbox 묶음 이름 목록(같은 이름은 하나로). 이미 태그로 있는지, 보내기 전 묶음 수."""
         have = {r["name"] for r in self.d.q("SELECT name FROM tags")}
         out = {}
         for b in self.d.q("SELECT id, title, stage FROM inbox_batches ORDER BY updated_at DESC, id DESC"):
@@ -220,7 +220,7 @@ class Records:
             c.execute("UPDATE tags SET name=? WHERE id=?", (name, int(tid)))
 
     def delete_tag(self, tid):
-        """태그 사전 정리는 마감과 관계없이 전체에 반영한다(결정 27). 인박스의 태그 지정도 함께 뺀다."""
+        """태그 사전 정리는 마감과 관계없이 전체에 반영한다(결정 27). Inbox의 태그 지정도 함께 뺀다."""
         with self.d.tx() as c:
             c.execute("UPDATE records SET tags_ver=COALESCE(tags_ver,0)+1 WHERE id IN (SELECT record_id FROM record_tags WHERE tag_id=?)", (int(tid),))
             c.execute("DELETE FROM record_tags WHERE tag_id=?", (int(tid),))

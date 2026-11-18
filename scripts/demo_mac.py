@@ -123,13 +123,13 @@ def seed():
     ok(api.outline_save(hr, "autonomy", "3월 학급 자치회 구성 — 학급 규칙 정하기, 1인 1역할 정하기\n4월 과학의 날 행사 — 탐구 포스터 제작, 발표\n6월 학교 축제 — 학급 부스 기획·운영\n9월 학교폭력 예방 캠페인 — 표어 만들기, 캠페인 활동", "붙여넣기"), "활동 개요")
     ok(api.outline_save(hr, "career", "3월 진로 검사 — 흥미·적성 검사 후 결과 해석\n5월 진로 체험의 날 — 관심 직업 탐색 보고서 작성\n10월 학과 탐색 — 관심 학과 교육과정 조사·발표", "붙여넣기"), "활동 개요")
     ok(api.standards_save(math, "[10공수1-01-01] 다항식의 사칙연산을 할 수 있다.\n[10공수1-01-02] 항등식의 성질과 나머지정리를 이해한다.\n성취수준 A: 다항식의 연산을 능숙하게 하고 원리를 설명한다.\n성취수준 C: 간단한 다항식의 연산을 할 수 있다.", "붙여넣기"), "성취기준")
-    # 자료 인박스 묶음 하나(보내기 전)
-    bid = ok(api.inbox_create("과학의 날 행사", hr, "autonomy"), "인박스")["id"]
-    src = ok(api.inbox_source_text(bid, "학번\t이름\t내용\n20301\t김철수\t과학의 날 포스터 제작에 참여함.\n20306\t한별\t과학 퀴즈 진행을 도움."), "인박스")
-    ok(api.inbox_import(bid, {"structure": "multi", **src["opts"]}), "인박스")
-    ok(api.inbox_create("공통수학1 세특(나이스 파일)", math, "subject"), "인박스")
+    # 자료 Inbox 묶음 하나(보내기 전)
+    bid = ok(api.inbox_create("과학의 날 행사", hr, "autonomy"), "Inbox")["id"]
+    src = ok(api.inbox_source_text(bid, "학번\t이름\t내용\n20301\t김철수\t과학의 날 포스터 제작에 참여함.\n20306\t한별\t과학 퀴즈 진행을 도움."), "Inbox")
+    ok(api.inbox_import(bid, {"structure": "multi", **src["opts"]}), "Inbox")
+    ok(api.inbox_create("공통수학1 세특(나이스 파일)", math, "subject"), "Inbox")
     # 한 문서 → 여러 학생: 학번 없는 모둠 보고서를 3명에게(역할 메모), ② 매칭 단계에서 보임
-    sb = ok(api.inbox_create("", hr, "autonomy"), "인박스")["id"]
+    sb = ok(api.inbox_create("", hr, "autonomy"), "Inbox")["id"]
     ok(api.inbox_shared(sb, {"text": "기후 위기 대응 방안을 조사한 모둠 보고서. 우리 지역의 탄소 배출 통계를 분석하고 학교에서 실천할 수 있는 방안 세 가지를 제안하였다.",
                              "label": "기후 위기 모둠 보고서", "date": f"{year}-05-10",
                              "picks": [{"student_no": "20301", "role": "자료 조사"}, {"student_no": "20302", "role": "통계 분석"}, {"student_no": "20303", "role": "발표"}]}), "공동 문서")

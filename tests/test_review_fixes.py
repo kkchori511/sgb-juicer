@@ -161,7 +161,7 @@ def test_m01_m02_m03_m04(api, hr):
     im = ok(api.group_impact(sub)); assert im["batches"] == 1 and im["results"] == 1 and im["standards"] == 1
     d = ok(api.delete_group(sub)); assert d["backup"]
     assert not any(x["id"] == b for x in ok(api.inbox_list())["batches"])
-    # M04: 인박스에서 쓰던 태그를 지워도 보낼 수 있음
+    # M04: Inbox에서 쓰던 태그를 지워도 보낼 수 있음
     tag = ok(api.add_tag("임시"))["id"]
     b2 = ok(api.inbox_create("태그", hr, "career"))["id"]
     s = ok(api.inbox_source_text(b2, "20301\t김철수\t태그 시험"))

@@ -140,7 +140,7 @@ def test_flow():
     ok(api.inbox_update(b3, {"group_id": sub, "item": "subject"}))
     assert ok(api.inbox_view(b3))["rows"][0]["state"] == "none"  # 수학 명렬 비어 있음
     lst = ok(api.inbox_list())["batches"]; assert lst[-1]["stage"] == "sent" and any(b["pending"] for b in lst)
-    # 인박스 묶음 이름 → 태그(보내기 전 묶음에는 붙이고, 보낸 묶음은 그대로, 이미 있는 태그는 건너뜀)
+    # Inbox 묶음 이름 → 태그(보내기 전 묶음에는 붙이고, 보낸 묶음은 그대로, 이미 있는 태그는 건너뜀)
     ok(api.add_tag("관찰"))
     names = {n["name"]: n for n in ok(api.inbox_tag_names())["names"]}
     assert names["관찰"]["exists"] and not names["x"]["exists"] and names["x"]["open"] == 1 and names["독서 기록"]["open"] == 0

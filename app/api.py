@@ -111,7 +111,7 @@ class Api:
         self._ai_extra = ""  # 이번 실행에만 쓰는 추가 요구 사항(ai_extra_set)
         self._ai_lock = threading.Lock()
         self._ocr_stop = threading.Event()
-        self._jobs = 0  # 화면에서 진행 중인 일괄 작업(일괄 종합·인박스 정제 등)
+        self._jobs = 0  # 화면에서 진행 중인 일괄 작업(일괄 종합·Inbox 정제 등)
         self._maint = ""  # 진행 중인 관리 작업(복원·학년도 전환·업데이트 등). 이때는 새 작업·쓰기를 막는다
         self._halted = ""  # 실행 잠금을 잃은 경우: 더 쓰지 않고 다시 켜 달라고 안내
         self._close_ok = False
@@ -247,6 +247,7 @@ class Api:
             "data_dir": str(data_dir()),
             "config_path": str(config.config_path()),
             "today": dt.date.today().isoformat(),
+            "os": f"{platform.system()} {platform.release()}" + (f" ({platform.version()})" if platform.system() == "Windows" else ""),
         }
 
     @safe
@@ -760,7 +761,7 @@ class Api:
                 "rows": rows,
                 "summary": {"students": len(active), "item_total": len(active) * len(items), **counts},
             })
-        # 순서: 명렬 → 인박스 매칭 → 인박스 보내기 → 채택 후 변경 → 최종안 만들기 → 마감 검토
+        # 순서: 명렬 → Inbox 매칭 → Inbox 보내기 → 채택 후 변경 → 최종안 만들기 → 마감 검토
         todo = []
         empty = [g for g in out if g["total"] == 0]
         if empty:
@@ -769,9 +770,9 @@ class Api:
         need = [b for b in ib if b["stage"] in ("import", "match") and (b["pending"] or b["stage"] == "import")]
         ready = [b for b in ib if b["stage"] in ("refine", "review") or (b["stage"] == "match" and not b["pending"] and b["n"])]
         if need:
-            todo.append({"kind": "inbox", "label": f"인박스 확인 필요 {len(need)}묶음", "batch_id": need[0]["id"]})
+            todo.append({"kind": "inbox", "label": f"Inbox 확인 필요 {len(need)}묶음", "batch_id": need[0]["id"]})
         if ready:
-            todo.append({"kind": "inbox", "label": f"인박스 보내기 대기 {len(ready)}묶음", "batch_id": ready[0]["id"]})
+            todo.append({"kind": "inbox", "label": f"Inbox 보내기 대기 {len(ready)}묶음", "batch_id": ready[0]["id"]})
         # v0.21: 옛 태그 AI 변환(①②③) 진행 상황은 할 일에 넣지 않음(AI 변환은 결과 묶음 방식)
         for kind, n, label, flt in (("stale", todo_stale, "채택 후 기록 변경", "stale"), ("final", todo_final, "최종안 만들기", "progress"),
                                     ("close", todo_close, "마감 검토", "final")):
@@ -2611,7 +2612,7 @@ class Api:
             self._finals_undo = None
         return {"count": done, "skipped": len(skipped)}
 
-    # ---------- 자료 인박스 ----------
+    # ---------- 자료 Inbox ----------
     def _ib(self) -> Inbox:
         return Inbox(self._db())
 
@@ -2824,7 +2825,7 @@ class Api:
 
     @safe
     def ai_inbox_row(self, row_id, model_index=None):
-        """인박스 행 한 건 정제. 학번·이름 없이 내용만 보낸다."""
+        """Inbox 행 한 건 정제. 학번·이름 없이 내용만 보낸다."""
         self._editable()
         ib = self._ib()
         r = ib._row(row_id)

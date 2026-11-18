@@ -16,7 +16,7 @@
   let runCost = 0;
 
   const PANEL_TITLES = {
-    dashboard: '현황판', inbox: '자료 인박스', records: '항목별 기록', tagrec: '태그별 기록', export: '검토·내보내기',
+    dashboard: '현황판', inbox: '자료 Inbox', records: '항목별 기록', tagrec: '태그별 기록', export: '검토·내보내기',
     roster: '명렬·담당 관리', tags: '태그 관리', prompts: '프롬프트', standards: '성취기준·활동 개요', settings: '설정', notice: '유의 사항', guide: '사용 안내',
   };
   const HELP = { dashboard: 'g-dashboard', inbox: 'g-inbox', records: 'g-records', tagrec: 'g-tagrec', export: 'g-export',
@@ -30,6 +30,79 @@
     document.querySelectorAll('#guideToc a').forEach((a) => a.classList.toggle('on', a.getAttribute('href') === `#${anchor}`));
     target.classList.add('flash');
     setTimeout(() => target.classList.remove('flash'), 1400);
+  }
+  // 사용 안내 찾기: 맞는 장만 남기고 찾은 글자 강조(띄어쓰기 무시)
+  function guideSections() {
+    const body = $('guideBody');
+    const secs = [];
+    let cur = null, parent = null;
+    [...body.children].forEach((n) => {
+      if (n.classList.contains('guide-empty')) return;
+      if (/^H[23]$/.test(n.tagName) && n.id) {
+        cur = { id: n.id, head: n, els: [n], parent: n.tagName === 'H3' ? parent : null };
+        if (n.tagName === 'H2') parent = cur;
+        secs.push(cur);
+      } else if (cur) cur.els.push(n);
+    });
+    return secs;
+  }
+  function guideUnmark() {
+    document.querySelectorAll('#guideBody mark.gmark').forEach((m) => m.replaceWith(document.createTextNode(m.textContent)));
+    $('guideBody').normalize();
+  }
+  function guideMark(root, rx) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (t) => (t.parentElement.closest('svg, mark') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    let n = 0;
+    nodes.forEach((t) => {
+      const s = t.textContent;
+      rx.lastIndex = 0;
+      if (!rx.test(s)) return;
+      rx.lastIndex = 0;
+      const frag = document.createDocumentFragment();
+      let last = 0, m;
+      while ((m = rx.exec(s))) {
+        if (!m[0]) { rx.lastIndex++; continue; }
+        frag.append(s.slice(last, m.index), el('mark', { class: 'gmark', text: m[0] }));
+        last = m.index + m[0].length; n++;
+      }
+      frag.append(s.slice(last));
+      t.replaceWith(frag);
+    });
+    return n;
+  }
+  function guideSearch(q) {
+    const body = $('guideBody');
+    guideUnmark();
+    const key = (q || '').replace(/\s+/g, '').toLowerCase();
+    const secs = guideSections();
+    const toc = [...document.querySelectorAll('#guideToc a')];
+    toc.forEach((a) => { a.hidden = false; a.querySelector('.gcount')?.remove(); });
+    body.querySelector('.guide-empty')?.remove();
+    secs.forEach((s) => s.els.forEach((e) => { e.hidden = false; }));
+    if (!key) return;
+    const rx = new RegExp([...key].map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*'), 'gi');
+    const hits = {};
+    secs.forEach((s) => {
+      const text = s.els.map((e) => e.textContent).join(' ').replace(/\s+/g, '').toLowerCase();
+      if (!text.includes(key)) return;
+      hits[s.id] = s.els.reduce((a, e) => a + guideMark(e, rx), 0) || 1;
+    });
+    secs.forEach((s) => {
+      const show = !!hits[s.id];
+      s.els.forEach((e) => { e.hidden = !show; });
+      if (!show && secs.some((c) => c.parent === s && hits[c.id])) s.head.hidden = false; // 하위 장만 맞으면 큰 제목은 보임
+    });
+    toc.forEach((a) => {
+      const id = a.getAttribute('href').slice(1);
+      a.hidden = !hits[id];
+      if (hits[id]) a.append(el('span', { class: 'gcount', text: ` (${hits[id]})` }));
+    });
+    if (!Object.keys(hits).length) body.prepend(el('p', { class: 'guide-empty hint', text: `'${q.trim()}'에 맞는 내용이 없습니다. 다른 낱말로 찾아 보세요.` }));
+    body.scrollTop = 0;
   }
   const ITEM_LABELS = { autonomy: '자율', career: '진로', behavior: '행특', subject: '세특', club: '동아리' };
   const ITEM_FULL = { autonomy: '자율활동', career: '진로활동', behavior: '행동특성 및 종합의견', subject: '과목 세특(기본)', club: '동아리활동(기본)' };
@@ -171,6 +244,22 @@
     } finally { saveInflight -= 1; refreshSaveState(); }
   }
 
+  // 진단 정보용 최근 오류(이번 실행 중, 메모리에만, 5개)
+  const ERRLOG = [];
+  function logErr(where, msg) {
+    const t = new Date();
+    const hm = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+    ERRLOG.push(`${hm} [${where}] ${String(msg).slice(0, 300)}`);
+    if (ERRLOG.length > 5) ERRLOG.shift();
+  }
+  window.addEventListener('error', (e) => logErr('화면', e.message));
+  window.addEventListener('unhandledrejection', (e) => logErr('화면', (e.reason && e.reason.message) || e.reason));
+  // 제안 설문지 주소: 받으면 여기만 바꾼다. {ver}·{os}는 미리 채울 값(구글 폼 미리 채우기 링크의 자리에 넣기)
+  const SUGGEST_URL = '';
+  function diagInfo() {
+    return [`앱: ${info.name} v${info.version}`, `운영체제: ${info.os || navigator.userAgent}`,
+      `최근 오류: ${ERRLOG.length ? '' : '없음'}`, ...ERRLOG.map((x) => `- ${x}`)].join('\n');
+  }
   function toast(msg, ms) {
     const t = $('toast');
     t.textContent = msg;
@@ -184,6 +273,7 @@
     try { r = await api[method](...args); } catch (e) { r = { ok: false, error: String(e) }; }
     if (!r || r.ok === false) {
       if (r && r.cancelled) return null;
+      logErr(method, (r && r.error) || '처리하지 못했습니다.');
       await alertBox((r && r.error) || '처리하지 못했습니다.');
       return null;
     }
@@ -334,7 +424,7 @@
     $('crumb').textContent = `${ys.year ? ys.year + '학년도 › ' : ''}${PANEL_TITLES[name] || ''}`;
     $('main').scrollTop = 0;
     $('helpBtn').hidden = name === 'guide';
-    if (name === 'guide') putSvg($('guideFlow'), 'guide_flow.svg');
+    if (name === 'guide') putSvg($('guideFlow'), 'ib_flow.svg');
     if (name === 'dashboard') loadDashboard();
     if (name === 'roster') renderRoster();
     if (name === 'settings') renderSettings();
@@ -602,7 +692,7 @@
     const g = groups.find((x) => x.id === rosterSel);
     $('crumb').textContent = `${ys.year}학년도 › 명렬·담당 관리 › ${g.label}`;
     if (returnTo) {
-      body.appendChild(el('div', { class: 'return-bar' }, ['📥 자료 인박스에서 학생 매칭 중이었습니다. 명렬을 반영한 뒤 돌아가세요.', el('span', { class: 'spacer' }),
+      body.appendChild(el('div', { class: 'return-bar' }, ['📥 자료 Inbox에서 학생 매칭 중이었습니다. 명렬을 반영한 뒤 돌아가세요.', el('span', { class: 'spacer' }),
         el('button', { type: 'button', class: 'primary', text: '매칭으로 돌아가기', onclick: async () => {
           const back = returnTo;
           returnTo = null;
@@ -647,7 +737,7 @@
       const im = await call('group_impact', g.id);
       if (!im) return;
       const parts = [`명렬 ${im.members}명`, im.records && `학생관찰기록 ${im.records}건`, im.finals && `최종안 ${im.finals}건(마감 ${im.closed})`,
-        im.results && `AI 후보 ${im.results}건`, im.batches && `인박스 묶음 ${im.batches}개`, im.standards && '성취기준', im.outlines && `활동 개요 ${im.outlines}개`].filter(Boolean).join(', ');
+        im.results && `AI 후보 ${im.results}건`, im.batches && `Inbox 묶음 ${im.batches}개`, im.standards && '성취기준', im.outlines && `활동 개요 ${im.outlines}개`].filter(Boolean).join(', ');
       if (!(await typedConfirm(`'${g.label}' 담당을 지우면 함께 지워집니다:\n${parts}\n\n지우기 전에 자동으로 백업합니다(설정 > 백업·자료에서 그 백업으로 복원하는 방법만 있음).`, '삭제'))) return;
       const r = await mutate('delete_group', g.id);
       if (r) { ys.groups = r.groups; rosterSel = null; renderRoster(); toast(`지웠습니다. 백업: ${r.backup}`); }
@@ -787,7 +877,7 @@
       }
       const im = await call('member_impact', g.id, nos, choice.all);
       if (!im) return;
-      const parts = [im.records && `학생관찰기록 ${im.records}건`, im.finals && `최종안 ${im.finals}건`, im.results && `AI 후보 ${im.results}건`, im.inbox && `인박스 연결 ${im.inbox}건(연결만 풂)`].filter(Boolean).join(', ');
+      const parts = [im.records && `학생관찰기록 ${im.records}건`, im.finals && `최종안 ${im.finals}건`, im.results && `AI 후보 ${im.results}건`, im.inbox && `Inbox 연결 ${im.inbox}건(연결만 풂)`].filter(Boolean).join(', ');
       if (!(await typedConfirm(`${nos.length}명을 ${choice.all ? '모든 소속' : `'${g.label}'`}에서 지웁니다.${parts ? `\n함께 지워지는 자료: ${parts}` : '\n함께 지워지는 기록은 없습니다.'}\n\n지우기 전에 자동으로 백업합니다(되돌리려면 그 백업으로 복원).`, '삭제'))) return;
       const r = await mutate('remove_members', g.id, nos, choice.all);
       if (r) { ys.groups = r.groups; toast(`${nos.length}명을 지웠습니다. 백업: ${r.backup}`); renderRoster(); }
@@ -913,7 +1003,7 @@
       const moves = rows.filter((r) => r.student_no !== r.orig_no);
       if (moves.length) {
         const list = moves.slice(0, 8).map((r) => `${r.orig_no} ${r.orig_name} → ${r.student_no}`).join('\n') + (moves.length > 8 ? `\n외 ${moves.length - 8}명` : '');
-        if (!(await confirmBox(`학번을 바꿉니다(${moves.length}명).\n${list}\n\n이 학년도의 모든 담당(담임반·과목·동아리)에서 기록·AI 결과·최종안·인박스 연결을 새 학번으로 옮깁니다. 바꾸기 전에 자동으로 백업합니다.`, '학번 바꾸기'))) return;
+        if (!(await confirmBox(`학번을 바꿉니다(${moves.length}명).\n${list}\n\n이 학년도의 모든 담당(담임반·과목·동아리)에서 기록·AI 결과·최종안·Inbox 연결을 새 학번으로 옮깁니다. 바꾸기 전에 자동으로 백업합니다.`, '학번 바꾸기'))) return;
       }
       const r = await mutate('roster_edit_apply', g.id, rows.map(plain));
       if (!r) return;
@@ -929,7 +1019,7 @@
       saveBtn = el('button', { type: 'button', class: 'primary', text: '저장', onclick: save });
       bulk = rosterBulkBar(isSub, () => { const c = rows.filter((r) => r._sel); return { rows: c.length ? c : rows, checked: !!c.length, total: rows.length }; }, () => { dirty = true; draw(); revalidate(); });
       box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `학생 정보 고치기 · ${g.label}` })]),
-        el('div', { class: 'hint', text: '칸을 눌러 바로 고칩니다. 이름·학년·반·번호는 이 학생이 속한 모든 담당에 함께 반영됩니다. 학번을 바꾸면 모든 담당의 기록·AI 결과·최종안·인박스 연결을 새 학번으로 옮깁니다(바꾸기 전에 자동 백업).' }),
+        el('div', { class: 'hint', text: '칸을 눌러 바로 고칩니다. 이름·학년·반·번호는 이 학생이 속한 모든 담당에 함께 반영됩니다. 학번을 바꾸면 모든 담당의 기록·AI 결과·최종안·Inbox 연결을 새 학번으로 옮깁니다(바꾸기 전에 자동 백업).' }),
         bulk, tableBox,
         el('div', { class: 'sheet-foot' }, [summary, el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: async () => {
           if (dirty && !(await confirmBox('고친 내용을 버리고 닫습니다.', '닫기'))) return;
@@ -1353,6 +1443,7 @@
     if (name === 'year') renderRoleCards($('roleCardsSettings'), ys.role, changeRole);
     if (name === 'sched') { renderTargets(); renderSchedTable(); }
     if (name === 'trait') renderTraitDictSettings();
+    if (name === 'suggest') $('diagText').value = diagInfo();
   }
   function renderSettings() {
     $('cfgPath').textContent = info.config_path;
@@ -2362,7 +2453,7 @@
       ], '고르기·태그·이동'); })(),
     ]));
     if (!v.records.length) {
-      box.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: R.slot.item === 'behavior' ? '관찰기록은 아직 없습니다(위 🧩 행특 설계 카드만으로도 만들 수 있습니다).' : '아직 기록이 없습니다.' }), BASIS_ITEMS.includes(R.slot.item) ? el('button', { type: 'button', class: 'primary ai-btn', disabled: locked, text: `기록 없이 ${basisWord(R.slot.item)}만으로 생성`, onclick: () => openBasisGen(R.sno) }) : null, el('p', { class: 'hint', text: '[+ 학생관찰기록]으로 활동을 하나씩 쌓거나, 이미 쓴 생기부를 넣어 다듬을 수 있습니다. 여러 학생의 엑셀 자료는 자료 인박스에서 학생별로 나눠 한 번에 보낼 수 있습니다.' })]));
+      box.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: R.slot.item === 'behavior' ? '관찰기록은 아직 없습니다(위 🧩 행특 설계 카드만으로도 만들 수 있습니다).' : '아직 기록이 없습니다.' }), BASIS_ITEMS.includes(R.slot.item) ? el('button', { type: 'button', class: 'primary ai-btn', disabled: locked, text: `기록 없이 ${basisWord(R.slot.item)}만으로 생성`, onclick: () => openBasisGen(R.sno) }) : null, el('p', { class: 'hint', text: '[+ 학생관찰기록]으로 활동을 하나씩 쌓거나, 이미 쓴 생기부를 넣어 다듬을 수 있습니다. 여러 학생의 엑셀 자료는 자료 Inbox에서 학생별로 나눠 한 번에 보낼 수 있습니다.' })]));
       return;
     }
     // 기록 순서: ⠿ 끌기·▲▼ (종합할 때 AI에 보내는 순서)
@@ -2373,7 +2464,7 @@
   }
   function sourceLabel(src) {
     src = src || '';
-    if (src.startsWith('inbox:')) return '인박스에서';
+    if (src.startsWith('inbox:')) return 'Inbox에서';
     if (src.startsWith('moved:')) return `${ITEM_LABELS[src.split(':')[1]] || '다른 항목'}에서 이동`;
     return { manual: '직접 입력', existing: '이미 쓴 생기부', 'existing-bulk': '일괄 넣기', 'record-bulk': '일괄 입력' }[src] || '직접 입력';
   }
@@ -2710,7 +2801,7 @@
         toast(`${label} 사례에 ${picked.size}건을 붙였습니다. 사례 칸에서 고칠 수 있습니다.`);
       });
       box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `${label} 사례 — 누가기록에서 불러오기` })]),
-        el('p', { class: 'hint', text: '이 학생 행특의 기록(자료 인박스로 들인 누가기록 포함)을 날짜순으로 보여 줍니다. 여러 건을 골라 사례 칸 끝에 한 줄씩 붙입니다(날짜는 시기 참고용, 결과 글에는 쓰지 않음). 사례 글은 AI에 그대로 가니 인적사항·민감 정보가 없는지 확인하세요.' }),
+        el('p', { class: 'hint', text: '이 학생 행특의 기록(자료 Inbox로 들인 누가기록 포함)을 날짜순으로 보여 줍니다. 여러 건을 골라 사례 칸 끝에 한 줄씩 붙입니다(날짜는 시기 참고용, 결과 글에는 쓰지 않음). 사례 글은 AI에 그대로 가니 인적사항·민감 정보가 없는지 확인하세요.' }),
         q, list, el('div', { class: 'sheet-foot' }, [info, el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }), go]));
       draw();
       setTimeout(() => q.focus(), 50);
@@ -4950,7 +5041,7 @@
     await alertBox('프롬프트 초안이나 고친 결과를 저장하지 못했습니다. 글은 화면에 남아 있습니다.\n잠시 뒤 다시 시도하거나, 필요하면 글을 복사해 두세요.');
     return false;
   }
-  // 다른 화면에서 태그 AI 변환으로 바로 가기(인박스 보내기 뒤·현황판)
+  // 다른 화면에서 태그 AI 변환으로 바로 가기(Inbox 보내기 뒤·현황판)
   async function goTagWork(tagId, slot, step, scope) {
     if (!(await leaveOk())) return;
     if (TV.year !== ys.year) { TV.year = ys.year; TV.data = null; TV.rec.clear(); TV.sel.clear(); TV.out.clear(); TV.undo.clear(); TV.bulk = null; TV.anchor = null; }
@@ -5720,18 +5811,18 @@
     r.tags.forEach((tg) => {
       const name = el('input', { type: 'text', value: tg.name, disabled: !!ys.archived });
       name.addEventListener('change', async () => { if (await mutate('rename_tag', tg.id, name.value)) { toast('이름을 바꿨습니다. 모든 기록에 반영됩니다.'); renderTags(); } else name.value = tg.name; });
-      t.appendChild(el('tr', {}, [el('td', { class: 'tag-name-cell' }, [el('span', { class: 'tdot' + tagC(tg.id) }), name]), el('td', { text: `${tg.used}건${tg.used_closed ? ` (마감 ${tg.used_closed})` : ''}${tg.used_inbox ? ` · 인박스 ${tg.used_inbox}` : ''}` }), el('td', {}, [el('button', { type: 'button', class: 'link danger-text edit-only', text: '삭제', onclick: async () => {
-        if ((tg.used || tg.used_inbox) && !(await typedConfirm(`'${tg.name}' 태그를 지우면 기록 ${tg.used}건${tg.used_closed ? `(마감된 기록 ${tg.used_closed}건 포함)` : ''}${tg.used_inbox ? `과 보내기 전 인박스 묶음 ${tg.used_inbox}개` : ''}에서 빠집니다. 태그 정리는 마감과 관계없이 반영됩니다. 이 태그로 한 AI 변환의 반영 기록은 남고, 태그별 기록 왼쪽 '지운 태그의 AI 변환'에서 되돌릴 수 있습니다.`, '삭제'))) return;
+      t.appendChild(el('tr', {}, [el('td', { class: 'tag-name-cell' }, [el('span', { class: 'tdot' + tagC(tg.id) }), name]), el('td', { text: `${tg.used}건${tg.used_closed ? ` (마감 ${tg.used_closed})` : ''}${tg.used_inbox ? ` · Inbox ${tg.used_inbox}` : ''}` }), el('td', {}, [el('button', { type: 'button', class: 'link danger-text edit-only', text: '삭제', onclick: async () => {
+        if ((tg.used || tg.used_inbox) && !(await typedConfirm(`'${tg.name}' 태그를 지우면 기록 ${tg.used}건${tg.used_closed ? `(마감된 기록 ${tg.used_closed}건 포함)` : ''}${tg.used_inbox ? `과 보내기 전 Inbox 묶음 ${tg.used_inbox}개` : ''}에서 빠집니다. 태그 정리는 마감과 관계없이 반영됩니다. 이 태그로 한 AI 변환의 반영 기록은 남고, 태그별 기록 왼쪽 '지운 태그의 AI 변환'에서 되돌릴 수 있습니다.`, '삭제'))) return;
         if (await mutate('delete_tag', tg.id)) renderTags();
       } })])]));
     });
   }
 
-  // 인박스 묶음 이름 → 태그. 만든 태그는 같은 이름의 보내기 전 묶음에도 붙인다.
+  // Inbox 묶음 이름 → 태그. 만든 태그는 같은 이름의 보내기 전 묶음에도 붙인다.
   async function tagsFromInbox() {
     const r = await call('inbox_tag_names');
     if (!r) return;
-    if (!r.names.length) { alertBox('자료 인박스에 묶음이 없습니다.'); return; }
+    if (!r.names.length) { alertBox('자료 Inbox에 묶음이 없습니다.'); return; }
     const picks = new Set();
     openSheet((box) => {
       const okBtn = el('button', { type: 'button', class: 'primary', disabled: true, text: '태그로 만들기' });
@@ -5746,10 +5837,10 @@
         const res = await mutate('tags_from_inbox', [...picks]);
         if (!res) return;
         closeSheet(); renderTags();
-        toast(`태그 ${res.made}개를 만들었습니다${res.attached ? ` · 인박스 묶음 ${res.attached}개에 붙임` : ''}.`);
+        toast(`태그 ${res.made}개를 만들었습니다${res.attached ? ` · Inbox 묶음 ${res.attached}개에 붙임` : ''}.`);
       };
       box.append(
-        el('div', { class: 'sheet-head' }, [el('h2', { text: '인박스 묶음 이름을 태그로' })]),
+        el('div', { class: 'sheet-head' }, [el('h2', { text: 'Inbox 묶음 이름을 태그로' })]),
         el('p', { class: 'hint', text: '고른 이름으로 태그를 만듭니다. 보내기 전 묶음에는 그 태그를 바로 붙여, 보낼 때 기록에 함께 붙습니다. 이미 보낸 묶음은 바꾸지 않습니다.' }),
         list,
         el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }), okBtn]));
@@ -6168,7 +6259,7 @@
   }
 
   // =====================================================================
-  // v0.3: 자료 인박스 — ① 가져오기 → ② 학생 매칭 → ③ AI 정제(선택) → ④ 보내기 검토
+  // v0.3: 자료 Inbox — ① 가져오기 → ② 학생 매칭 → ③ AI 정제(선택) → ④ 보내기 검토
   // =====================================================================
   const IB = { list: [], bid: null, view: null, raw: null, opts: null, preview: [], onlyPending: false, sel: new Set(), stop: false };
   const STAGE_NAME = { import: '① 가져오기', match: '② 매칭 대기', refine: '③ 정제', review: '④ 보내기 대기', sent: '✔ 보냄' };
@@ -6209,7 +6300,7 @@
     if (!IB.list.length) box.appendChild(el('p', { class: 'hint', text: '묶음이 없습니다. 학습지·엑셀 자료를 [+ 새 자료 묶음]으로 가져오세요.' }));
     IB.list.forEach((b) => box.appendChild(item(b)));
   }
-  // 어디서 하면 좋을까요? — 인박스·항목별 기록·태그별 기록의 역할 안내(메인은 펼침, 묶음 화면은 접힌 한 줄)
+  // 어디서 하면 좋을까요? — Inbox·항목별 기록·태그별 기록의 역할 안내(메인은 펼침, 묶음 화면은 접힌 한 줄)
   function ibGuide(folded) {
     const goRec = () => { if (!R.slot && R.slots.length) R.slot = R.slots[0]; showPanel('records'); };
     const card = (icon, title, desc, btn) => el('div', { class: 'ib-guide-card' }, [el('div', { class: 'ib-guide-t', text: `${icon} ${title}` }), el('p', { text: desc }), btn]);
@@ -6223,14 +6314,14 @@
     ]);
     if (!folded) return el('div', { class: 'ib-guide' }, [el('h3', { text: '어디서 하면 좋을까요?' }), cards]);
     const d = el('details', { class: 'ib-guide folded', open: localStorage.getItem('sgb_ib_guide_open') === '1' },
-      [el('summary', { text: '💡 어디서 하면 좋을까요? — 인박스는 여러 학생 자료 나눠 넣기, 한 학생씩은 항목별 기록, 같은 종류 일괄 AI 변환은 태그별 기록' }), cards]);
+      [el('summary', { text: '💡 어디서 하면 좋을까요? — Inbox는 여러 학생 자료 나눠 넣기, 한 학생씩은 항목별 기록, 같은 종류 일괄 AI 변환은 태그별 기록' }), cards]);
     d.addEventListener('toggle', () => { try { localStorage.setItem('sgb_ib_guide_open', d.open ? '1' : '0'); } catch (e) { /* 무시 */ } });
     return d;
   }
   function renderInboxEmpty() {
     const m = $('ibMain');
     m.innerHTML = '';
-    m.append(el('div', { class: 'ib-home-head' }, [el('h2', { text: '📥 자료 인박스' }),
+    m.append(el('div', { class: 'ib-home-head' }, [el('h2', { text: '📥 자료 Inbox' }),
       el('p', { text: '어떤 활동 자료든 여기로 가져와 학생별로 나눈 뒤 항목에 보냅니다.' })]),
       ibGuide(false),
       el('div', { class: 'ib-flow', id: 'ibFlow' }, [el('h3', { text: '전체 흐름 — 자료 넣기부터 내보내기까지' })]));
@@ -6435,7 +6526,7 @@
       go.disabled = !r.rows.length || (o.structure === 'single' && !o.student_no);
     })();
   }
-  // 인박스 열 역할: 열(한 열이 한 학생이면 행)마다 학번·학년·반·번호·반/번호·이름·학적변동·내용·안 씀
+  // Inbox 열 역할: 열(한 열이 한 학생이면 행)마다 학번·학년·반·번호·반/번호·이름·학적변동·내용·안 씀
   const IB_ROLE = { student_no: '학번', grade: '학년', class_no: '반', number: '번호', clsnum: '반/번호', name: '이름', change: '학적변동', date: '일자', content: '내용' };
   const IB_ID_ROLES = ['student_no', 'grade', 'class_no', 'number', 'clsnum', 'name', 'change'];
   function renderRoles(box, o, lines, rows) {
@@ -6629,7 +6720,7 @@
     const rowHandle = sortable(sortItems, async (ids) => { if (await mutate('inbox_reorder', b.id, ids)) loadBatch(); }, IB.onlyPending || sortItems.length < 2);
     sortItems.forEach((x) => x.holder.appendChild(rowHandle(x.id)));
     body.appendChild(t);
-    body.appendChild(el('p', { class: 'hint', text: '학번과 이름이 모두 명렬과 맞으면 자동 확정, 이름만 맞거나 비슷하면 "추천"입니다. 추천은 원본과 대조한 뒤 확정하세요. 백지·다른 반 자료처럼 보내지 않을 행은 [제외]하면 인박스에 남습니다.' }));
+    body.appendChild(el('p', { class: 'hint', text: '학번과 이름이 모두 명렬과 맞으면 자동 확정, 이름만 맞거나 비슷하면 "추천"입니다. 추천은 원본과 대조한 뒤 확정하세요. 백지·다른 반 자료처럼 보내지 않을 행은 [제외]하면 Inbox에 남습니다.' }));
     body.appendChild(el('div', { class: 'sheet-foot' }, [
       el('button', { type: 'button', text: '← 가져오기 다시', onclick: async () => { if (!(await confirmBox('가져오기 단계로 돌아가면 지금 매칭 결과는 다시 만들어집니다.', '돌아가기'))) return; if (await mutate('inbox_stage', b.id, 'import')) { SC.starts = null; loadBatch(); } } }),
       el('span', { class: 'spacer' }),
@@ -6719,7 +6810,7 @@
     if (!rows.length) return;
     const b = IB.view.batch;
     // 스캔 PDF 묶음은 처음 값이 '스캔 내용 정리', 묶음마다 마지막에 고른 프롬프트를 기억
-    const conf = await aiConfirm('인박스 자료 정제', [['묶음', `${b.title} → ${slotLabel(b.group_id, b.item)}`], ['대상', `${rows.length}건 (${new Set(rows.map((r) => r.student_no)).size}명)`], ['모델', modelLabel || '-']],
+    const conf = await aiConfirm('Inbox 자료 정제', [['묶음', `${b.title} → ${slotLabel(b.group_id, b.item)}`], ['대상', `${rows.length}건 (${new Set(rows.map((r) => r.student_no)).size}명)`], ['모델', modelLabel || '-']],
       '원문은 그대로 남습니다. 정제 후보는 행마다 최근 3개까지 보관하고, 넘으면 가장 오래된 후보를 지웁니다. 새 정제 결과를 보낼 내용으로 바로 골라 둡니다.', 'refine', ibPromptPref(b));
     if (conf && ibPromptKeyUse(b)) localStorage.setItem(ibPromptKey(b), conf.prompt || '');
     if (!conf) return;
@@ -6728,7 +6819,7 @@
     let out;
     try {
       const failedIds = [];
-      out = await aiRun({ title: '인박스 자료 정제', skipConfirm: true, extra: conf.extra, prompt: conf.prompt, kind: 'refine', remember: !ibPromptKeyUse(b),
+      out = await aiRun({ title: 'Inbox 자료 정제', skipConfirm: true, extra: conf.extra, prompt: conf.prompt, kind: 'refine', remember: !ibPromptKeyUse(b),
         jobs: rows.map((r) => ({ label: `${r.name || r.student_no || ''} ${(r.content || '').slice(0, 16)}`.trim(), run: () => api.ai_inbox_row(r.id, modelIndex), onFail: () => failedIds.push(r.id) })),
         after: (o) => { out = o; o.retry = [...failedIds, ...o.notRun.map((i) => rows[i].id)]; } });
     } finally { await jobEnd(); if (btn && btn.isConnected) { btn.disabled = false; btn.classList.remove('busy-btn'); } }
@@ -6926,8 +7017,8 @@
         el('button', { type: 'button', class: 'ai-btn', text: '🤖 태그로 AI 변환', title: '이 묶음 기록에 붙은 태그로 태그별 기록의 AI 변환을 엽니다', onclick: () => sentTagWork(b) }),
         el('span', { class: 'spacer' }),
         el('button', { type: 'button', class: 'danger-text', text: '보낸 기록 모두 삭제', onclick: () => sentDelete(b) }),
-        el('button', { type: 'button', class: 'link danger-text', text: '이력에서 지우기', title: '인박스 이력만 지웁니다(항목에 들어간 기록은 그대로)', onclick: async () => {
-          const msg = `'${b.title}' 묶음을 인박스 이력에서 지웁니다.\n· 지우는 것: 가져온 원본 표, 매칭·정제 결과\n· 남는 것: 항목에 들어간 기록(그대로 남음)\n· 지운 뒤에는 이 묶음 단위로 태그 지정·모두 삭제를 할 수 없습니다. 기록까지 지우려면 먼저 [보낸 기록 모두 삭제]를 쓰세요.`;
+        el('button', { type: 'button', class: 'link danger-text', text: '이력에서 지우기', title: 'Inbox 이력만 지웁니다(항목에 들어간 기록은 그대로)', onclick: async () => {
+          const msg = `'${b.title}' 묶음을 Inbox 이력에서 지웁니다.\n· 지우는 것: 가져온 원본 표, 매칭·정제 결과\n· 남는 것: 항목에 들어간 기록(그대로 남음)\n· 지운 뒤에는 이 묶음 단위로 태그 지정·모두 삭제를 할 수 없습니다. 기록까지 지우려면 먼저 [보낸 기록 모두 삭제]를 쓰세요.`;
           if (!(await typedConfirm(msg, '이력에서 지우기'))) return;
           if (await mutate('inbox_delete', b.id)) { IB.bid = null; await refreshInboxBadge(); renderInboxList(); renderInboxEmpty(); toast('이력에서 지웠습니다. 보낸 기록은 그대로입니다.'); }
         } }),
@@ -8122,6 +8213,22 @@
       api.close_app();
     };
     document.querySelectorAll('#guideToc a').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openGuide(a.getAttribute('href').slice(1)); }));
+    {
+      let gt = null;
+      const gq = $('guideSearch');
+      gq.addEventListener('input', () => { clearTimeout(gt); gt = setTimeout(() => guideSearch(gq.value), 150); });
+      gq.addEventListener('keydown', (e) => { if (e.key === 'Escape') { gq.value = ''; guideSearch(''); } });
+    }
+    $('suggestBtn').addEventListener('click', () => {
+      if (!SUGGEST_URL) { toast('제안 설문지를 준비하고 있습니다. 다음 업데이트에서 열립니다.', 3500); return; }
+      const enc = encodeURIComponent;
+      api.open_url(SUGGEST_URL.replace('{ver}', enc(info.version)).replace('{os}', enc(info.os || '')));
+    });
+    $('diagCopyBtn').addEventListener('click', async () => {
+      const r = await rawCall('copy_text', $('diagText').value);
+      if (r && r.ok !== false) toast('진단 정보를 복사했습니다. 설문지에 붙여 넣어 주세요.');
+      else await alertBox('복사하지 못했습니다. 칸의 내용을 직접 복사해 주세요.');
+    });
     $('wNext').addEventListener('click', wizardNext);
     $('wPrev').addEventListener('click', wizardPrev);
     // 바깥 링크는 기본 브라우저로
