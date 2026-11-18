@@ -210,11 +210,11 @@ def test_update_warning():
         assert updater._warning_text("v9.0.2", "").startswith(updater.INCOMPLETE[:20])
     finally:
         updater.requests.get = old_get
-    # 경고가 있는 업데이트는 '확인했어요'를 입력해야 진행
+    # 경고가 있는 업데이트는 '확인'을 입력해야 진행
     api = Api()
     api._update_info = {"version": "9.0.2", "warning": "- B", "sha256": "0" * 64}
-    r = api.update_apply("확인")
-    assert not r["ok"] and "확인했어요" in r["error"], r
+    r = api.update_apply("확인함")
+    assert not r["ok"] and "확인" in r["error"], r
 
 
 def test_publish_locked():

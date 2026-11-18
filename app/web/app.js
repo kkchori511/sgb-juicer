@@ -246,8 +246,8 @@
     const v = await rawCall('student_view', ctx.gid, ctx.item, ctx.sno);
     return v && v.ok ? { text: v.final ? v.final.text || '' : '', target: v.target } : null;
   }
-  // 되돌릴 수 없는(치명적인) 작업: 안내를 읽고 '확인했어요'를 직접 쳐야 [확인] 버튼이 눌린다.
-  const TYPED_WORD = '확인했어요';
+  // 되돌릴 수 없는(치명적인) 작업: 안내를 읽고 '확인'을 직접 쳐야 [확인] 버튼이 눌린다.
+  const TYPED_WORD = '확인';
   function typedConfirm(msg, okText) {
     const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const html = `<div class="typed-conf"><div>${esc(msg).replace(/\n/g, '<br>')}</div>`
@@ -1466,9 +1466,9 @@
       `<span class="muted">학교 보안 프로그램이 새 파일 실행을 막으면, 보안 프로그램에서 <b>생기부착즙기.exe</b>를 예외(허용)로 등록해 주세요.</span>`, true, true, '지금 종료', '나중에');
     if (quit) window.__beforeClose();
   }
-  // 화면을 없애거나 합쳐 자료 위치가 바뀌는 업데이트: 안내를 읽고 '확인했어요'를 직접 쳐야 [업데이트]가 눌린다.
+  // 화면을 없애거나 합쳐 자료 위치가 바뀌는 업데이트: 안내를 읽고 '확인'을 직접 쳐야 [업데이트]가 눌린다.
   function updateWarnSheet(info) {
-    const word = info.confirm_word || '확인했어요';
+    const word = info.confirm_word || '확인';
     return new Promise((resolve) => openSheet((box) => {
       box.style.height = 'auto'; box.style.width = 'min(640px, 94vw)';
       const inp = el('input', { type: 'text', placeholder: word, autocomplete: 'off' });
@@ -4602,7 +4602,7 @@
     tvRenderBulk();
     if (on) toast(`${TV.sel.size}건을 골랐습니다. 아래 줄에서 태그를 더하거나 빼거나 지울 수 있습니다.`);
   }
-  // 고른 기록 지우기(되돌릴 수 없음 → '확인했어요')
+  // 고른 기록 지우기(되돌릴 수 없음 → '확인')
   async function tvBulkDelete(recs, n) {
     if (!(await leaveOk())) return;
     const msg = [`고른 기록 ${n}명 ${recs.length}건을 지웁니다.`,
@@ -6618,7 +6618,7 @@
     }
     goTagWork(tid, slot, 'trial', scope);
   }
-  // 보낸 묶음: 이 묶음으로 넣은 기록을 모든 학생에서 지우기(되돌릴 수 없음 → '확인했어요' 입력)
+  // 보낸 묶음: 이 묶음으로 넣은 기록을 모든 학생에서 지우기(되돌릴 수 없음 → '확인' 입력)
   // 이미 보낸 행: 접어 두고 고칠 수 없게(회차·학생·보낸 내용만)
   function sentFold(open) {
     const v = IB.view;
@@ -7664,7 +7664,7 @@
     });
     $('openDataBtn').addEventListener('click', () => call('open_data_dir'));
     $('backupNowBtn').addEventListener('click', async () => { const r = await mutate('backup_now'); if (r) { toast('백업했습니다.'); loadBackups(); } });
-    // 엑셀 백업(버튼을 누를 때만): 전체 / 최종안·마감 결과만, 엑셀로 복구('확인했어요' 입력)
+    // 엑셀 백업(버튼을 누를 때만): 전체 / 최종안·마감 결과만, 엑셀로 복구('확인' 입력)
     const xlsxSave = async (onlyFinal, btn) => {
       btn.disabled = true;
       try {

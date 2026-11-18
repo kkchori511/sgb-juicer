@@ -1143,7 +1143,7 @@ class Api:
 
     @safe
     def delete_records(self, record_ids, confirm=None, year=None):
-        """태그별 기록에서 고른 기록 여러 건 삭제(되돌릴 수 없음 → '확인했어요' 입력)."""
+        """태그별 기록에서 고른 기록 여러 건 삭제(되돌릴 수 없음 → '확인' 입력)."""
         self._editable(year)
         if (confirm or "").strip() != updater.CONFIRM_WORD:
             raise db.DbError(f"'{updater.CONFIRM_WORD}'를 입력해야 지웁니다.")
@@ -2723,7 +2723,7 @@ class Api:
 
     @safe
     def inbox_delete_sent(self, bid, confirm=None, rnd=None):
-        """되돌릴 수 없는 삭제: 화면에서 '확인했어요'를 입력해야 한다(서버에서도 확인). rnd면 그 회차만."""
+        """되돌릴 수 없는 삭제: 화면에서 '확인'을 입력해야 한다(서버에서도 확인). rnd면 그 회차만."""
         self._editable()
         if (confirm or "").strip() != updater.CONFIRM_WORD:
             raise db.DbError(f"'{updater.CONFIRM_WORD}'를 입력해야 지웁니다.")
@@ -2838,8 +2838,8 @@ class Api:
     def xlsx_restore_run(self, typed):
         """고른 엑셀로 그 학년도 자료를 바꾼다. 복원 전 자동 백업 → 바꾸기(실패하면 되돌림). 스캔 원본은 지금 것을 그대로 둔다."""
         from . import xlsx_backup
-        if (typed or "").strip() != "확인했어요":
-            raise db.DbError("확인 칸에 '확인했어요'를 정확히 입력해 주세요.")
+        if (typed or "").strip() != "확인":
+            raise db.DbError("확인 칸에 '확인'을 정확히 입력해 주세요.")
         path = getattr(self, "_xlsx_restore", None)
         if not path:
             raise db.DbError("먼저 복구할 엑셀 파일을 고르세요.")

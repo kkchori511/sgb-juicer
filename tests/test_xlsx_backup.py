@@ -85,8 +85,8 @@ def test_all():
     ok(api.add_record(hr, "career", "20302", {"content": "나중에 더한 기록"}))
     assert dump(2026) != before
     api._xlsx_restore = full
-    assert not api.xlsx_restore_run("확인")["ok"]
-    out = ok(api.xlsx_restore_run("확인했어요"))
+    assert not api.xlsx_restore_run("확인함")["ok"]
+    out = ok(api.xlsx_restore_run("확인"))
     assert out["year"] == 2026 and out["safety"]
     after = dump(2026)
     for t in before:
@@ -101,7 +101,7 @@ def test_all():
     bad = os.path.join(DATA, "고친것.xlsx")
     wb.save(bad)
     api._xlsx_restore = bad
-    r = api.xlsx_restore_run("확인했어요")
+    r = api.xlsx_restore_run("확인")
     assert not r["ok"] and "맞지 않습니다" in r["error"], r
     assert dump(2026) == after
 
@@ -112,7 +112,7 @@ def test_all():
         out = os.path.join(DATA, name)
         wb.save(out)
         api._xlsx_restore = out
-        r = api.xlsx_restore_run("확인했어요")
+        r = api.xlsx_restore_run("확인")
         assert not r["ok"] and "복구를 멈췄습니다" in r["error"], (name, r)
         assert dump(2026) == after, name
     # X2: 열 이름 바꿈 / X4: 값 깨짐 / X3: 긴 글 조각 빠짐 / 복구 정보에서 표 빠짐
@@ -134,7 +134,7 @@ def test_all():
     seqfile = os.path.join(DATA, "seq.xlsx")
     xlsx_backup.save(2026, seqfile)
     api._xlsx_restore = seqfile
-    ok(api.xlsx_restore_run("확인했어요"))
+    ok(api.xlsx_restore_run("확인"))
     new = ok(api.add_record(hr, "career", "20302", {"content": "복구 뒤 새 기록"}))["id"]
     assert new > gone, (new, gone)
 

@@ -122,12 +122,12 @@ def test_flow():
     assert str(t2) not in ok(api.inbox_sent_info(bid))["tag_counts"]
     ok(api.set_closed(hr, "career", "20303", True))  # 마감된 학생 기록은 지우지 않음
     info = ok(api.inbox_sent_info(bid)); assert info["closed"] == 1 and len(info["deletable"]) == 2
-    assert not api.inbox_delete_sent(bid, "확인")["ok"]  # '확인했어요'를 쳐야 함
-    d1 = ok(api.inbox_delete_sent(bid, "확인했어요"))
+    assert not api.inbox_delete_sent(bid, "확인함")["ok"]  # '확인'을 쳐야 함
+    d1 = ok(api.inbox_delete_sent(bid, "확인"))
     assert d1["deleted"] == 2 and not d1["reopened"] and ok(api.inbox_view(bid))["batch"]["stage"] == "sent"
     assert [r["source"] for r in ok(api.student_view(hr, "career", "20301"))["records"]] == []
     ok(api.set_closed(hr, "career", "20303", False))
-    d2 = ok(api.inbox_delete_sent(bid, "확인했어요"))
+    d2 = ok(api.inbox_delete_sent(bid, "확인"))
     assert d2["deleted"] == 1 and d2["reopened"]
     vb = ok(api.inbox_view(bid))["batch"]; assert vb["stage"] == "review" and not vb["sent_at"]
     assert ok(api.inbox_send(bid))["records"] == 3  # 다시 보내기

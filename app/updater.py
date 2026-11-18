@@ -25,9 +25,9 @@ API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 ASSET_NAME = "SGB-Juicer.exe"
 API_LIST = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=30"
 # 릴리스 노트에 이 제목의 절(## ⚠ 업데이트 전 꼭 읽기)이 있으면, 화면을 없애거나 합쳐 자료 위치가 바뀌는 업데이트다.
-# 앱은 [지금 업데이트]를 누를 때 이 절을 보여 주고 '확인했어요'를 직접 쳐야 진행한다.
+# 앱은 [지금 업데이트]를 누를 때 이 절을 보여 주고 '확인'을 직접 쳐야 진행한다.
 WARN_HEAD = "업데이트 전 꼭 읽기"
-CONFIRM_WORD = "확인했어요"
+CONFIRM_WORD = "확인"
 # 예비 경로: 일부 학교·통신사 망은 GitHub 릴리스 파일 서버(release-assets.githubusercontent.com)를 막는다.
 # 릴리스 때 CI가 같은 exe를 GitHub Pages(gh-pages 브랜치, 최신 1개)에도 올린다. 어디서 받든 SHA-256으로 같은 파일인지 확인한다.
 MIRROR = f"https://{GITHUB_REPO.split('/')[0]}.github.io/{GITHUB_REPO.split('/')[1]}/SGB-Juicer-{{version}}.exe"
@@ -118,7 +118,7 @@ def can_apply() -> bool:
 
 
 def _warning_text(tag, body):
-    """확인할 경고 글. 끝까지 확인하지 못했으면 그 사실도 경고로 넣어 '확인했어요' 입력을 받는다(경고 없음과 구분)."""
+    """확인할 경고 글. 끝까지 확인하지 못했으면 그 사실도 경고로 넣어 '확인' 입력을 받는다(경고 없음과 구분)."""
     text, complete = warnings_between(tag, body)
     if complete:
         return text

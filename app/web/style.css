@@ -815,7 +815,7 @@ button.ai-btn::before { content: ''; flex: none; width: 1.45em; height: 1.45em; 
 .dg-bar { display: inline-block; width: 56px; height: 6px; margin: 0; }
 .dg-bar .bar-fill { display: block; height: 100%; }
 
-/* 되돌릴 수 없는 작업 확인('확인했어요' 입력) */
+/* 되돌릴 수 없는 작업 확인('확인' 입력) */
 .typed-conf { display: flex; flex-direction: column; gap: 8px; }
 .typed-warn { color: var(--danger); font-weight: 700; margin: 4px 0 0; }
 #typedConfInp { width: 100%; }
