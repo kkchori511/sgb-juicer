@@ -71,7 +71,7 @@ def test_api_and_reorder():
     assert [r["state"] for r in b["rows"]] == ["confirmed", "confirmed"] and len(b["members"]) == 2
     assert ok(api.existing_apply(hr, "behavior", b["rows"]))["count"] == 2
     # 학생관찰기록 순서 바꾸기 → 종합 때 그 순서로 보냄
-    ids = [ok(api.add_record(hr, "career", "20101", {"content": f"기록{i}"}))["id"] for i in range(3)]
+    ids = [ok(api.add_record(hr, "career", "20101", {"content": f"기록{i} " + "가나다라함. " * 100}))["id"] for i in range(3)]
     ok(api.reorder_records(hr, "career", "20101", [ids[2], ids[0], ids[1]]))
     got = [r["id"] for r in ok(api.student_view(hr, "career", "20101"))["records"]]
     assert got == [ids[2], ids[0], ids[1]], got

@@ -54,7 +54,7 @@ def test():
     v = ok(api.student_view(sub, "subject", "20301")); assert v["standards"]["level_scale"] == 3 and v["standards"]["text"] == t
 
     # 기록 + 성취기준 + 수준
-    rid = ok(api.add_record(sub, "subject", "20301", {"content": "인수분해 풀이를 친구에게 설명함"}))["id"]
+    rid = ok(api.add_record(sub, "subject", "20301", {"content": "인수분해 풀이를 친구에게 설명함. " * 40}))["id"]
     r = ok(api.ai_synth(sub, "subject", "20301", [rid], None, None, None, {"text": t, "level": "A"}))
     sys_, user = SENT[-1]
     assert "[성취기준 — 반드시 참고]" in sys_ and "3단계 중 A" in sys_ and "관점에서 해석" in sys_

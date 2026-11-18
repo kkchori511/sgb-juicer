@@ -95,7 +95,7 @@ def detect(raw: list[list[str]]) -> dict:
 
 
 # 인박스 열 역할(화면에서 고르는 것). 학번·학년·반·번호·반/번호·이름은 학생 찾기, 내용은 기록, 학적변동은 안내.
-ROLES = ("student_no", "grade", "class_no", "number", "clsnum", "name", "change", "content")
+ROLES = ("student_no", "grade", "class_no", "number", "clsnum", "name", "change", "date", "content")  # date: 줄마다 일자(v0.23, 누가기록)
 ID_ROLES = ("student_no", "grade", "class_no", "number", "clsnum", "name")
 
 
@@ -220,6 +220,7 @@ def interpret(raw, opts, school_year):
         get = lambda j: (line[j].strip() if j is not None and j < len(line) else "")
         ext_no = re.sub(r"\s", "", get(first("student_no")))
         ext_name = re.sub(r"\s", "", get(first("name")))
+        row_date = row_date_of(get(first("date")))
         ext = {k: v for k, v in (("grade", num(get(first("grade")))), ("class_no", num(get(first("class_no")))),
                                  ("number", num(get(first("number")))), ("cls", get(first("clsnum"))),
                                  ("change", get(first("change")))) if v}
@@ -230,8 +231,14 @@ def interpret(raw, opts, school_year):
             lab = (labels[j] if j < len(labels) else "").strip()
             ref = f"{col_name(j)}{i + 1}" if orient == "rows" else f"{col_name(i)}{j + 1}"
             out.append({"line": li + 1, "source_ref": ref, "ext_no": ext_no, "ext_name": ext_name, "ext": ext, "ext_cls": cls_text(ext),
-                        "label": lab or f"{k}회", "date": label_date(lab, school_year), "content": v})
+                        "label": lab or f"{k}회", "date": row_date or label_date(lab, school_year), "content": v})
     return out
+
+
+def row_date_of(v):
+    """줄마다 적힌 일자(2026.03.05. / 2026-03-05) → YYYY-MM-DD. 아니면 ''."""
+    m = re.match(r"^\s*(\d{4})\s*[.\-/]\s*(\d{1,2})\s*[.\-/]\s*(\d{1,2})", v or "")
+    return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}" if m else ""
 
 
 def match_ext(ext_no, ext_name, ext, members):
@@ -399,11 +406,12 @@ class Inbox:
             p.unlink()
 
     # ---------- ① 가져오기 ----------
-    def set_source(self, bid, raw, source, filename=""):
+    def set_source(self, bid, raw, source, filename="", preset=None):
+        """preset: 알아본 파일(누가기록 등)의 해석 설정 — 짐작 대신 그대로 쓴다."""
         b = self.batch(bid)
         meta = b["meta"]
         meta.update(raw=raw, filename=filename)
-        meta["opts"] = {"structure": b["structure"], **detect(raw)}
+        meta["opts"] = {"structure": b["structure"], **detect(raw), **(preset or {})}
         with self.d.tx() as c:
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False), source=source)
         return meta["opts"]
@@ -435,18 +443,34 @@ class Inbox:
         meta = b["meta"]
         meta["opts"] = opts
         members = self.d.members(b["group_id"])
+        nuga_on = structure == "multi" and bool(opts.get("nuga"))
+        if nuga_on:  # 누가기록: 입력 받을 때부터 민감 기록 제외·이름 가리기·경고
+            from . import nuga
+            names = [m["name"] for m in members]
+            cut = [k for k in (opts.get("sens") if opts.get("sens") is not None else nuga.CAT_KEYS) if k in nuga.CATS]
         with self.d.tx() as c:
             base = self._clear_unsent(c, bid)
             for k, r in enumerate(recs, base):
+                why = ""
+                if nuga_on:
+                    r["content"], masked = nuga.mask_names(r["content"], names + [r["ext_name"]])
+                    hit = [x for x in nuga.categories(r["content"]) if x in cut]
+                    why = "민감 정보(" + "·".join(nuga.CATS[x][0] for x in hit) + ")" if hit else ""
+                    warn = nuga.warnings(r["content"], names) + ([f"이름 {masked}곳을 ○○으로 가림"] if masked else [])
+                    r["warn"] = " · ".join(warn)
                 if structure == "single":
                     sno, state, note = str(opts["student_no"]), "confirmed", "고른 학생"
                 else:
                     sno, state, note = match_ext(r["ext_no"], r["ext_name"], r.get("ext"), members)
+                if r.get("warn"):
+                    note = (note + " · " if note else "") + "⚠ " + r["warn"]
+                if why:
+                    state = "excluded"
                 c.execute(
-                    """INSERT INTO inbox_rows(batch_id, ord, source_ref, ext_no, ext_name, ext, student_no, state, note, line, label, date, content)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    """INSERT INTO inbox_rows(batch_id, ord, source_ref, ext_no, ext_name, ext, student_no, state, exclude_reason, note, line, label, date, content)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (int(bid), k, r["source_ref"], r["ext_no"], r["ext_name"], json.dumps(r.get("ext") or {}, ensure_ascii=False),
-                     sno, state, note, r["line"], r["label"], r["date"], r["content"]),
+                     sno, state, why, note, r["line"], r["label"], r["date"], r["content"]),
                 )
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False), structure=structure, stage="match")
         return len(recs)

@@ -583,6 +583,56 @@ class Api:
         result = d.apply_roster(gid, checked["rows"], replace=not add)
         return {**result, "groups": d.groups()}
 
+    def _edit_check(self, d, gid, rows):
+        """등록된 학생 고치기 확인: 명렬 입력과 같은 검사 + 학번을 바꾸면 이미 쓰는 학번인지."""
+        g = d.group(gid)
+        for r in rows:
+            r["orig_no"] = str(r.get("orig_no") or "").strip()
+            r["student_no"] = str(r.get("student_no") or "").strip()
+            r["name"] = str(r.get("name") or "").strip()
+            for k in ("grade", "class_no", "number"):
+                r[k] = roster._digits(r.get(k))
+            r["level"] = ""
+            if g["kind"] == "subject":
+                r["section"] = str(r.get("section") or "").strip()[:40]
+            else:
+                r.pop("section", None)
+        known = d.known_names([r["student_no"] for r in rows if r["student_no"]])
+        olds = {r["orig_no"] for r in rows}
+        out = roster.validate(rows, g, {}, None)
+        for r in out:
+            r.pop("rename", None)
+            no = r["student_no"]
+            if no and no != r["orig_no"]:
+                if no in known and no not in olds:
+                    r["issues"].append(f"이미 있는 학번({known[no]})")
+                else:
+                    r["notes"].append(f"학번 바꿈 {r['orig_no']} → {no}: 기록·결과·최종안을 모든 담당에서 옮김")
+        return out
+
+    @safe
+    def roster_edit_validate(self, gid, rows):
+        return {"rows": self._edit_check(self._db(), gid, rows)}
+
+    @safe
+    def roster_edit_apply(self, gid, rows):
+        """등록된 학생 고치기 저장. 학번이 바뀌는 학생이 있으면 먼저 백업한다."""
+        self._editable()
+        d = self._db()
+        rows = self._edit_check(d, gid, rows)
+        bad = [r for r in rows if r["issues"]]
+        if bad:
+            raise db.DbError(f"확인이 필요한 행 {len(bad)}개를 먼저 고쳐 주세요.")
+        if any(r["orig_no"] != r["student_no"] for r in rows):
+            with self._maintenance("학번 바꾸기"):
+                name = backup.make("학번변경전")
+                res = d.edit_members(gid, rows)
+                self._last_undo = None
+            res["backup"] = name
+        else:
+            res = d.edit_members(gid, rows)
+        return {**res, "groups": d.groups()}
+
     @safe
     def set_section(self, gid, student_nos, section):
         """선택과목: 고른 학생의 수업 이름(비우면 학년-반으로 묶음)."""
@@ -885,7 +935,7 @@ class Api:
             else:
                 sysm, hist, user = step_system(chain, 0), [], src_text
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, sysm, user,
-                                       cfg["privacy_block"], extra=False, temperature=TAG_TEMP, history=hist)
+                                       cfg["privacy_block"], extra=False, temperature=TAG_TEMP, history=hist, item=r["item"])
             nid, dropped = tw.add_trial(w["id"], r, chain, int(parent_id) if parent_id else None, input_src, src_text, text, model, cost, meta,
                                         base=base, alive=self._alive(gen))
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
@@ -1001,7 +1051,7 @@ class Api:
                     else:  # 대화 누적: 원문 → 결과1 → 요청2 … (시험 때와 같은 방식)
                         sysm, hist, user = chat_messages({**chain, "steps": chain["steps"][: i + 1]}, first, outs[:i])
                     text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, sysm, user,
-                                               cfg["privacy_block"], extra=False, temperature=TAG_TEMP, history=hist)
+                                               cfg["privacy_block"], extra=False, temperature=TAG_TEMP, history=hist, item=r["item"])
                     total += cost
                     outs.append(text)
             except openrouter.Cancelled:
@@ -1627,7 +1677,10 @@ class Api:
         x = getattr(self, "_ai_extra", "")
         return {**(meta or {}), "extra": x} if x else meta
 
-    def _call_ai(self, key, model, system, user, privacy, extra=True, temperature=None, history=None):
+    def _call_ai(self, key, model, system, user, privacy, extra=True, temperature=None, history=None, item=None):
+        """item='behavior'(행동특성 및 종합의견)면 고정 지침(부정 표현 → 긍정·변화 가능성, 민감 정보·날짜 빼기)을 늘 붙인다(v0.23)."""
+        if item == "behavior":
+            system = system + prompts.BEHAVIOR_RULE
         x = getattr(self, "_ai_extra", "") if extra else ""
         if x:
             system = (system + "\n\n[이번 추가 요구 사항 — 교사가 이번 실행에만 준 요청]\n<요청>\n" + x + "\n</요청>\n"
@@ -1697,7 +1750,7 @@ class Api:
                 src = trait.ai_user(trait.parse(r["design"]), trait_dict.load(), target)
             else:
                 src = r["original"] if r["original"] is not None else r["content"]
-            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, src, cfg["privacy_block"])
+            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, src, cfg["privacy_block"], item=r["item"])
             meta = {"model": model, "op": op, "prompt_name": pr["name"], "prompt": pr["prompt"], "example": pr["example"], "record_ids": [r["id"]]}
             if op == "trait":  # 문단 사이 빈 줄 정리, 목표를 넘으면 한 번만 줄이기
                 text = re.sub(r"\n\s*\n+", "\n", text.strip())
@@ -1705,7 +1758,7 @@ class Api:
                 for _ in range(2):  # 넘으면 줄이기(그래도 넘으면 한 번 더)
                     if not target or count_bytes(text) <= target:
                         break
-                    short, c2 = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.trait_shrink_system(target, text), text, cfg["privacy_block"], extra=False)
+                    short, c2 = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.trait_shrink_system(target, text), text, cfg["privacy_block"], extra=False, item=r["item"])
                     short = re.sub(r"\n\s*\n+", "\n", short.strip())
                     cost += c2
                     if not short or count_bytes(short) >= count_bytes(text):
@@ -1741,17 +1794,93 @@ class Api:
         cfg, model = self._model(model_index)
         check = cfg["weight_sum_check"] if sum_check is None else bool(sum_check)
         ratios = weights.compute([{"bytes": r["bytes"], "weight": r["weight"]} for r in chosen], check)
+        if not std_rule:  # 비중으로 분량 맞추기(v0.23): 원문을 덜어내 비율·목표에 맞춘다(고정 지침, 넘으면 최대 2번 더 줄이기)
+            return self._fit(rec, gid, item, sno, cfg, model, chosen, ratios, target, check)
         pr = self._prompt("synth")
         system = prompts.build_system(pr["prompt"] + std_rule + prompts.SYNTH_RULE, pr["example"], target)
         user = prompts.build_synth_user([{"text": r["content"], "ratio": q} for r, q in zip(chosen, ratios)], target)
         key = ("slot", int(gid), item, str(sno))
         self._guard(key)
         try:
-            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, user, cfg["privacy_block"])
+            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, user, cfg["privacy_block"], item=item)
             meta = {"model": model, "op": "synth", "prompt_name": pr["name"], "prompt": pr["prompt"], "example": pr["example"], "target": target,
                     "record_ids": [r["id"] for r in chosen], "ratios": [round(q * 100, 1) for q in ratios], "sum_check": check, **std_meta}
             nid, dropped = rec.add_result(gid, item, sno, "synth", text, self._xm(meta), cost)
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost, "ratios": meta["ratios"]})
+        finally:
+            self._release(key)
+
+    def _fit(self, rec, gid, item, sno, cfg, model, chosen, ratios, target, check):
+        """비중으로 분량 맞추기: 기록마다 몫(목표×비율)만큼 원문을 덜어낸다. 한 번에 보내 기록별 태그로 받고,
+        기록마다 바이트를 재서 몫을 3% 넘게 넘은 기록은 그 기록만 줄이고, 몫의 85%에 못 미치면 그 기록만 원문에서 다시 한다(최대 2번).
+        그래도 전체가 목표를 넘으면 전체를 한 번 줄인다."""
+        plan = prompts.fit_plan([{"text": r["content"], "ratio": q} for r, q in zip(chosen, ratios)], target)
+        key = ("slot", int(gid), item, str(sno))
+        self._guard(key)
+        try:
+            k, priv = cfg["openrouter_key"].strip(), cfg["privacy_block"]
+            if all(p["keep"] for p in plan):  # 모두 몫 안: 줄일 것이 없으니 AI 없이 원문을 잇는다
+                text = "\n".join(p["text"] for p in plan)
+                meta = {"model": "", "op": "synth", "mode": "fit", "prompt_name": prompts.FIT_NAME + " · AI 없이 원문 그대로", "prompt": "", "example": "", "target": target,
+                        "record_ids": [r["id"] for r in chosen], "ratios": [round(q * 100, 1) for q in ratios], "sum_check": check, "calls": 0}
+                nid, dropped = rec.add_result(gid, item, sno, "synth", text, self._xm(meta), 0)
+                return self._ai_out({"id": nid, "dropped": dropped, "cost": 0, "ratios": meta["ratios"], "bytes": count_bytes(text), "target": target})
+            raw, cost = self._call_ai(k, model, prompts.fit_system(), prompts.build_fit_user(plan, target), priv, extra=False, item=item)
+            parts = prompts.fit_parse(raw, len(plan))
+            meta = {"model": model, "op": "synth", "mode": "fit", "prompt_name": prompts.FIT_NAME, "prompt": prompts.FIT_RULE, "example": "", "target": target,
+                    "record_ids": [r["id"] for r in chosen], "ratios": [round(q * 100, 1) for q in ratios], "sum_check": check, "calls": 1}
+            if parts is not None:
+                first = [count_bytes(x) for x in parts]
+                for _ in range(2):
+                    fixed = False
+                    for i, p in enumerate(plan):
+                        if p["keep"]:
+                            continue
+                        b = count_bytes(parts[i])
+                        if b > p["share"] * 1.03:  # 조금(3%) 넘는 것은 둔다(전체가 넘으면 아래에서 전체를 줄임)
+                            new, c2 = self._call_ai(k, model, prompts.fit_shrink_system(p["share"], parts[i]), parts[i], priv, extra=False, item=item)
+                            new = prompts.fit_clean(new)
+                        elif b < p["share"] * 0.85:
+                            got, c2 = self._call_ai(k, model, prompts.fit_system(), prompts.build_fit_user(plan, 0, only=i, prev_c=len(parts[i])), priv, extra=False, item=item)
+                            new = (prompts.fit_parse(got, 1) or [prompts.fit_clean(got)])[0]
+                        else:
+                            continue
+                        cost += c2
+                        meta["calls"] += 1
+                        nb = count_bytes(new)
+                        if new and abs(nb - p["share"] * 0.95) < abs(b - p["share"] * 0.95):  # 더 가까우면 받음(넘으면 다음 번에 줄임)
+                            parts[i], fixed = new, True
+                    if not fixed:
+                        break
+                meta["parts"] = [{"share": p["share"], "first": f, "bytes": count_bytes(x), "keep": p["keep"]} for p, f, x in zip(plan, first, parts)]
+                text = "\n".join(x for x in parts if x)
+            else:
+                text = prompts.fit_clean(raw)
+                meta["parts_unread"] = True
+            over = count_bytes(text) - target if target else 0
+            if over > 0 and parts is not None:  # 조금 넘으면 몫을 가장 많이 넘은 기록 하나만 넘은 만큼 줄인다
+                i = max(range(len(plan)), key=lambda j: count_bytes(parts[j]) - plan[j]["share"])
+                goal = count_bytes(parts[i]) - over - 10
+                if not plan[i]["keep"] and goal > 0:
+                    new, c2 = self._call_ai(k, model, prompts.fit_shrink_system(goal, parts[i]), parts[i], priv, extra=False, item=item)
+                    new = prompts.fit_clean(new)
+                    cost += c2
+                    meta["calls"] += 1
+                    if new and count_bytes(new) < count_bytes(parts[i]):
+                        parts[i] = new
+                        meta["parts"][i]["bytes"] = count_bytes(new)
+                        meta["shrunk_from"] = count_bytes(text)
+                        text = "\n".join(x for x in parts if x)
+            if target and count_bytes(text) > target:
+                short, c2 = self._call_ai(k, model, prompts.fit_shrink_system(target, text), text, priv, extra=False, item=item)
+                short = prompts.fit_clean(short)
+                cost += c2
+                meta["calls"] += 1
+                if short and count_bytes(short) < count_bytes(text):
+                    meta["shrunk_from"] = count_bytes(text)
+                    text = short
+            nid, dropped = rec.add_result(gid, item, sno, "synth", text, self._xm(meta), cost)
+            return self._ai_out({"id": nid, "dropped": dropped, "cost": cost, "ratios": meta["ratios"], "bytes": count_bytes(text), "target": target})
         finally:
             self._release(key)
 
@@ -1962,7 +2091,7 @@ class Api:
         key = ("slot", int(gid), item, str(sno))
         self._guard(key)
         try:
-            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"], pr["example"], target), f["text"], cfg["privacy_block"])
+            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"], pr["example"], target), f["text"], cfg["privacy_block"], item=item)
             meta = {"model": model, "op": "polish", "prompt_name": pr["name"], "prompt": pr["prompt"], "example": pr["example"], "target": target, "from": "final"}
             nid, dropped = rec.add_result(gid, item, sno, "polish", text, self._xm(meta), cost)
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
@@ -2524,7 +2653,18 @@ class Api:
         if not raw:
             raise db.DbError("고른 시트에 내용이 없습니다.")
         name = os.path.basename(self._last_xlsx)
-        return {"opts": self._ib().set_source(bid, raw, "xlsx", name + (f" › {sheet}" if sheet else "")), "raw": raw}
+        label = name + (f" › {sheet}" if sheet else "")
+        from . import nuga
+        if nuga.is_nuga(raw):  # 나이스 행동특성 누가기록: 깨끗한 표로 바꿔 읽고 해석 설정을 정해 둔다
+            g = self._db().group(self._ib().batch(bid)["group_id"]) or {}
+            home = g.get("kind") == "homeroom"
+            table, info = nuga.convert(nuga.read_xlsx(self._last_xlsx, sheet), g.get("grade") if home else None, g.get("class_no") if home else None)
+            if len(table) < 2:
+                raise db.DbError("행동특성 누가기록에서 읽을 기록이 없습니다(내용이 모두 비어 있음).")
+            preset = {"structure": "multi", "orient": "rows", "header": True, "roles": dict(nuga.ROLES), "neis": False,
+                      "nuga": info, "sens": list(nuga.CAT_KEYS)}
+            return {"opts": self._ib().set_source(bid, table, "xlsx", label, preset), "raw": table}
+        return {"opts": self._ib().set_source(bid, raw, "xlsx", label), "raw": raw}
 
     def _read_xlsx(self, token, sheet):
         """파일 하나 고르기 → (rows, None) / 시트가 여럿이면 (None, 고르기 정보) / 취소면 (None, None)."""
@@ -2694,7 +2834,7 @@ class Api:
         key = ("inbox", r["id"])
         self._guard(key)
         try:
-            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"], pr["example"], 0), r["content"], cfg["privacy_block"])
+            text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"], pr["example"], 0), r["content"], cfg["privacy_block"], item=b["item"])
             cid = ib.add_cand(r["id"], text, self._xm({"model": model, "op": "refine", "prompt_name": pr["name"], "prompt": pr["prompt"], "example": pr["example"]}), cost)
             ib.use_cand(r["id"], cid)  # 새 후보를 바로 '보낼 내용'으로(다른 후보·원문으로 바꿀 수 있음)
             return {"id": cid, "cost": cost, "run_cost": self._run_cost}

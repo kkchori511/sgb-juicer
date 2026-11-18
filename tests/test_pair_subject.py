@@ -7,7 +7,7 @@ from app.api import Api
 from app.textutil import count_bytes
 
 SENT = []
-openrouter.chat = lambda key, model, system, user, privacy_block=False: (SENT.append(system) or "결과", 0.0)
+openrouter.chat = lambda key, model, system, user, privacy_block=False: (SENT.append(system + "\n" + user) or "결과", 0.0)
 openrouter.balance = lambda key: 1.0
 
 
@@ -49,7 +49,7 @@ def main():
     v1 = ok(api.student_view(s1, "subject", "10101"))
     assert v1["pair"]["role"] == "first" and v1["pair"]["total"] == 1500 and v1["target"] == v1["target"]
     # AI 종합은 학생별 남은 바이트를 목표로
-    rid = ok(api.add_record(s2, "subject", "10101", {"content": "2학기 활동"}))["id"]
+    rid = ok(api.add_record(s2, "subject", "10101", {"content": "2학기 활동함. " * 80}))["id"]
     ok(api.ai_synth(s2, "subject", "10101", [rid], {}))
     assert "900바이트" in SENT[-1], SENT[-1][-300:]
     # 일괄 종합·내보내기 표에 학생별 목표와 1학기 바이트

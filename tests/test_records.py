@@ -32,8 +32,8 @@ def test_all():
     # 기록·태그
     t1 = ok(api.add_tag("독서"))["id"]; t2 = ok(api.add_tag("탐구"))["id"]
     assert not api.add_tag("독서")["ok"]
-    r1 = ok(api.add_record(hr, "career", "20301", {"content": "진로 독서 감상문을 씀. " * 10, "title": "독서", "date": "2026-03-15", "tag_ids": [t1]}))["id"]
-    r2 = ok(api.add_record(hr, "career", "20301", {"content": "직업 탐색 발표", "title": "발표"}))["id"]
+    r1 = ok(api.add_record(hr, "career", "20301", {"content": "진로 독서 감상문을 씀. " * 80, "title": "독서", "date": "2026-03-15", "tag_ids": [t1]}))["id"]
+    r2 = ok(api.add_record(hr, "career", "20301", {"content": "직업 탐색 발표함. " * 80, "title": "발표"}))["id"]
     assert not api.add_record(hr, "career", "20301", {"content": " "})["ok"]
     assert not api.add_record(hr, "subject", "20301", {"content": "x"})["ok"]  # 담임반에 없는 항목
     v = ok(api.student_view(hr, "career", "20301"))
@@ -57,9 +57,9 @@ def test_all():
     sys_, user, priv = SENT[-1]
     for leak in ("20301", "김철수", "20302", "이영희"):
         assert leak not in sys_ and leak not in user, leak
-    assert "반영 비율 60%" in user and "약 1500바이트" in sys_
+    assert "반영 비율 60%" in user and "1500바이트" in user and "덜어내는 편집" in sys_
     # 학습 차단 옵션 전달
-    config.save({"privacy_block": True}); ok(api.ai_synth(hr, "career", "20301", [r1], None)); assert SENT[-1][2] is True
+    config.save({"privacy_block": True}); ok(api.ai_synth(hr, "career", "20301", [r2], {str(r2): 100})); assert SENT[-1][2] is True
     config.save({"privacy_block": False})
 
     # 최종안·마감
@@ -113,13 +113,13 @@ def test_all():
     from app.prompt_default import DEFAULT_TEXT
     pl = ok(api.prompt_list())
     assert [x["id"] for x in pl["prompts"]][:3] == ["default", "refine", "polish"] and pl["picks"] == {"synth": "default", "refine": "refine", "polish": "polish", "trait": "trait"}
-    ok(api.ai_synth(hr, "career", "20301", [r1], None))
-    assert SENT[-1][0].startswith("# 역할") and "50% 이상 다르게" in SENT[-1][0]
+    ok(api.ai_synth(hr, "career", "20301", [r2], {str(r2): 100}))
+    assert SENT[-1][0].startswith("다음은 한 학생의") and "덜어내는 편집" in SENT[-1][0]  # 분량 맞추기는 고정 지침(v0.23)
     nid = ok(api.prompt_save({"name": "내 종합", "prompt": "내 지침", "example": "내 예시"}))["id"]
-    ok(api.ai_extra_set("", nid, "synth")); ok(api.ai_synth(hr, "career", "20301", [r1], None)); ok(api.ai_extra_set("", "", ""))
-    assert SENT[-1][0].startswith("내 지침") and "내 예시" in SENT[-1][0] and "반드시" in SENT[-1][0]
+    ok(api.ai_extra_set("", nid, "synth")); ok(api.ai_synth(hr, "career", "20301", [r2], {str(r2): 100})); ok(api.ai_extra_set("", "", ""))
+    assert SENT[-1][0].startswith("다음은 한 학생의") and "내 지침" not in SENT[-1][0]  # 고른 프롬프트와 상관없음
     assert ok(api.prompt_list())["picks"]["synth"] == nid
-    ok(api.ai_synth(hr, "career", "20301", [r1], None)); assert SENT[-1][0].startswith("내 지침")  # 마지막에 고른 것을 기억
+    ok(api.ai_synth(hr, "career", "20301", [r2], {str(r2): 100})); assert SENT[-1][0].startswith("다음은 한 학생의")
     ok(api.lock_result(ids[0], False)); ok(api.ai_record(r1)); assert SENT[-1][0].startswith("# 역할") and "정제" in SENT[-1][0] and "고치지 않아도 되는 문장은 한 글자도 바꾸지 않습니다" in SENT[-1][0]  # 정제는 정제 기본(따로 기억)
     assert not api.prompt_delete("default")["ok"]
     ok(api.prompt_save({"id": "default", "name": "바꾼 이름", "prompt": "고친 기본", "example": ""}))

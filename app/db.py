@@ -690,6 +690,43 @@ class YearDb:
             c.execute("DELETE FROM students WHERE student_no NOT IN (SELECT student_no FROM memberships)")
             return len(scope)
 
+    STUDENT_TABLES = ("memberships", "records", "results", "finals", "inbox_rows")
+
+    def edit_members(self, gid, rows):
+        """등록된 학생 고치기. rows: [{orig_no, student_no, name, grade, class_no, number, section(없으면 None)}] — 검사를 통과한 행.
+        이름·학년·반·번호는 학생 정보라 모든 소속에 반영된다. 학번이 바뀌면 이 학년도의 모든 담당에서
+        소속·기록·AI 결과·최종안·인박스 연결을 새 학번으로 옮긴다(학번끼리 맞바꾸기도 되게 임시 학번을 거친다)."""
+        rows = [{**r, "orig_no": str(r["orig_no"]), "student_no": str(r["student_no"])} for r in rows]
+        olds = {r["orig_no"] for r in rows}
+        news = [r["student_no"] for r in rows]
+        if len(set(news)) != len(news):
+            raise DbError("학번이 중복된 행이 있습니다.")
+        moves = [(r["orig_no"], r["student_no"]) for r in rows if r["orig_no"] != r["student_no"]]
+        with self.tx() as c:
+            for r in rows:
+                if not c.execute("SELECT 1 FROM memberships WHERE group_id=? AND student_no=?", (int(gid), r["orig_no"])).fetchone():
+                    raise DbError(f"명렬에서 학생 {r['orig_no']}을(를) 찾지 못했습니다. 화면을 새로 고쳐 주세요.")
+            for _, new in moves:
+                if new not in olds and c.execute("SELECT 1 FROM students WHERE student_no=?", (new,)).fetchone():
+                    raise DbError(f"학번 {new}은(는) 이미 다른 학생이 쓰고 있습니다.")
+
+            def move(a, b):
+                s = c.execute("SELECT name,grade,class_no,number FROM students WHERE student_no=?", (a,)).fetchone()
+                c.execute("INSERT INTO students(student_no,name,grade,class_no,number) VALUES(?,?,?,?,?)", (b, *tuple(s)))
+                for t in self.STUDENT_TABLES:
+                    c.execute(f"UPDATE {t} SET student_no=? WHERE student_no=?", (b, a))
+                c.execute("DELETE FROM students WHERE student_no=?", (a,))
+            for old, _ in moves:
+                move(old, "~mv~" + old)
+            for old, new in moves:
+                move("~mv~" + old, new)
+            for r in rows:
+                c.execute("UPDATE students SET name=?, grade=?, class_no=?, number=? WHERE student_no=?",
+                          (r["name"], _int(r.get("grade")), _int(r.get("class_no")), _int(r.get("number")), r["student_no"]))
+                if r.get("section") is not None:
+                    c.execute("UPDATE memberships SET section=? WHERE group_id=? AND student_no=?", (str(r["section"]).strip()[:40], int(gid), r["student_no"]))
+        return {"count": len(rows), "moved": len(moves)}
+
     def set_level(self, gid, student_no, level):
         with self.tx() as c:
             c.execute("UPDATE memberships SET level=? WHERE group_id=? AND student_no=?", ((level or "").strip().upper(), int(gid), str(student_no)))
