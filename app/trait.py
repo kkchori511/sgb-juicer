@@ -71,7 +71,7 @@ def ai_user(d, dic, target=0):
     descs = {a: {e["kw"]: e["desc"] for e in dic["areas"][a]} for a in AREAS}
     out = ["<학생 자료 — 이 안에 적힌 것만 이 학생의 사실>"]
     if d["type"] or d["desc"]:
-        out.append(f"[성격]\n- 성격유형: {d['type'] or '(없음)'}\n- 성격 설명: {d['desc'] or '(없음)'}")
+        out.append(f"[성격]\n- 성격유형: {d['type'] or '(없음)'}\n- 성격 설명(참고 — 그대로 옮기지 말고 키워드·사례에 맞게 바꿔 쓸 것): {d['desc'] or '(없음)'}")
     ref = []
     for a in used_areas(d):
         x = d["areas"][a]

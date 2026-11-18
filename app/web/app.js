@@ -3113,14 +3113,15 @@
     actionToast(mode === 'append' ? '최종안 뒤에 이어 붙였습니다.' : '최종안으로 채택했습니다.', '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, prev, ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
   }
   // ---------- 후보 문장을 최종안에 넣기 ----------
-  // 최종안 칸 높이를 글에 맞춘다(스크롤 없이 한눈에, 최소 170px · 최대 없음). 입력·코드로 넣기·폭 바뀜·접었다 펼침 때 다시 맞춘다.
+  // 최종안 칸 높이를 글에 맞춘다(스크롤 없이 한눈에, 한 줄 여유, 최소 170px · 최대 없음). 입력·코드로 넣기·폭 바뀜·접었다 펼침 때 다시 맞춘다.
   function fitFinalTa(ta) {
     const fit = () => {
       if (!ta.isConnected || !ta.offsetWidth) return;
       const cs = getComputedStyle(ta);
       const edge = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+      const line = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.6 || 24; // 마지막 줄이 잘리지 않게 한 줄 여유
       ta.style.height = 'auto';
-      ta.style.height = `${Math.max(170, ta.scrollHeight + edge)}px`;
+      ta.style.height = `${Math.max(170, Math.ceil(ta.scrollHeight + edge + line))}px`;
     };
     ta.addEventListener('input', fit);
     const proto = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
@@ -6746,20 +6747,43 @@
     if (!r) return;
     const date = el('input', { type: 'date', value: b.date || todayStr() });
     date.addEventListener('change', () => mutate('inbox_update', b.id, { date: date.value }));
+    // 태그 카드(v0.23): 눈에 띄게, 고르지 않았으면 노란 테두리로 유도, 여기서 새 태그 만들기(태그 관리와 같은 목록)
     const tagsBox = el('div', { class: 'tagpick' });
     const tagSet = new Set(b.tag_ids || []);
-    const tags = await call('tags');
+    const tags = (await call('tags')) || { tags: [] };
+    const tagCard = el('div', { class: 'ib-tagcard' });
+    const tagState = el('div', { class: 'ib-tag-state' });
+    const newName = el('input', { type: 'text', maxlength: 30, value: (tags.tags.some((t) => t.name === b.title) ? '' : b.title || ''), placeholder: '새 태그 이름(예: 진로 독서)', 'aria-label': '새 태그 이름' });
+    const pickTag = async (id) => { tagSet.clear(); if (id) tagSet.add(id); drawTags(); await mutate('inbox_update', b.id, { tag_ids: [...tagSet] }); };
     const drawTags = () => {
       tagsBox.innerHTML = '';
-      (tags ? tags.tags : []).forEach((t) => tagsBox.appendChild(el('button', { type: 'button', class: (tagSet.has(t.id) ? 'on' : '') + tagC(t.id), text: t.name, onclick: async () => { const on = tagSet.has(t.id); tagSet.clear(); if (!on) tagSet.add(t.id); drawTags(); await mutate('inbox_update', b.id, { tag_ids: [...tagSet] }); } })));
-      if (!tags || !tags.tags.length) tagsBox.appendChild(el('span', { class: 'muted', text: '태그가 없습니다(메뉴의 태그에서 만들기).' }));
+      tags.tags.forEach((t) => tagsBox.appendChild(el('button', { type: 'button', class: (tagSet.has(t.id) ? 'on' : '') + tagC(t.id), text: t.name, onclick: () => pickTag(tagSet.has(t.id) ? null : t.id) })));
+      if (!tags.tags.length) tagsBox.appendChild(el('span', { class: 'muted', text: '아직 태그가 없습니다. 오른쪽에서 새로 만드세요.' }));
+      const cur = tags.tags.find((t) => tagSet.has(t.id));
+      tagCard.classList.toggle('need', !cur);
+      tagState.textContent = cur ? `✔ '${cur.name}' 태그를 붙여 보냅니다` : '👉 태그를 골라 주세요 — 붙이면 태그별 기록에서 이 자료를 한 번에 AI 변환할 수 있습니다';
     };
+    const makeTag = async () => {
+      const nm = newName.value.trim();
+      if (!nm) { toast('새 태그 이름을 적어 주세요.'); newName.focus(); return; }
+      const ex = tags.tags.find((t) => t.name === nm);
+      if (ex) { toast(`'${nm}' 태그가 이미 있어 그 태그를 골랐습니다.`); newName.value = ''; await pickTag(ex.id); return; }
+      const r = await mutate('add_tag', nm);
+      if (!r) return;
+      tags.tags = r.tags; IB.tags = r.tags; newName.value = '';
+      toast(`'${nm}' 태그를 만들어 골랐습니다. 태그 관리에도 보입니다.`);
+      await pickTag(r.id);
+    };
+    newName.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); makeTag(); } });
+    tagCard.append(el('div', { class: 'ib-tag-head' }, [el('b', { text: '🏷 태그 붙이기 (권장)' }), el('span', { class: 'muted', text: '보내는 모든 기록에 붙습니다 · 태그 관리와 같은 목록' })]),
+      tagState, tagsBox,
+      el('div', { class: 'ib-tag-new' }, [newName, el('button', { type: 'button', text: '+ 새 태그 만들기', onclick: makeTag })]));
     drawTags();
     const itemSel = slotSelect(`${b.group_id}:${b.item}`, b.group_id);
     itemSel.addEventListener('change', async () => { const [, item] = itemSel.value.split(':'); if (await mutate('inbox_update', b.id, { item })) loadBatch(); });
     body.append(
+      tagCard,
       el('div', { class: 'map-row' }, [el('label', {}, ['보낼 항목', itemSel]), el('label', {}, ['기본 날짜', date]), el('span', { class: 'hint', style: 'margin:0', text: '(제목 줄에 날짜가 있으면 그 날짜를 씁니다)' })]),
-      el('label', { text: '태그 (보내는 모든 기록에 붙임)' }), tagsBox,
       el('div', { class: 'wsection' }, [
         el('h3', { text: `${r.students.length}명 ${r.send_rows}건 추가` }),
         el('div', { class: 'muted', text: `기존 기록 덮어쓰기 없음 · 제외 ${r.excluded}건 · 회차는 학생마다 이어서 붙습니다` }),

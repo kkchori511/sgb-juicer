@@ -174,7 +174,6 @@ button.small { padding: 3px 9px; font-size: 13px; }
 .key-footer { display: flex; gap: 16px; align-items: center; }
 .key-footer .notice { flex: 1; }
 .key-footer .btn-danger { padding: 12px 20px; font-size: 15px; }
-.saved-note { font-size: 13px; text-align: right; color: var(--muted); }
 
 /* ---------- 탭 ---------- */
 .tab-bar { display: flex; gap: 2px; border-bottom: 2px solid var(--border); margin-bottom: 14px; flex-wrap: wrap; }
@@ -1257,3 +1256,12 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; d
 .tp-date { flex: none; width: 3.4em; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tp-text { flex: 1; line-height: 1.5; }
 .tp-row .badge { flex: none; }
+/* 인박스 보내기 검토 태그 카드(v0.23) */
+.ib-tagcard { display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; padding: 12px 14px; border: 2px solid var(--accent); border-radius: var(--radius); background: var(--accent-soft); }
+.ib-tagcard.need { border-color: var(--warn-border); background: var(--warn-bg); }
+.ib-tag-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.ib-tag-head b { font-size: 15px; }
+.ib-tag-state { font-weight: 700; color: var(--text); }
+.ib-tagcard.need .ib-tag-state { color: #8a5a00; }
+.ib-tag-new { display: flex; gap: 6px; align-items: center; }
+.ib-tag-new input { max-width: 260px; margin: 0; }
