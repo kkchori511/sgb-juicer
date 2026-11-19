@@ -10,6 +10,9 @@ v9: 기록 태그 버전(records.tags_ver). v10: 자율·진로·동아리 활�
 v12: 태그 AI 변환(tag_works·tag_cands·tag_runs·tag_applies), 기록 내용 버전(records.content_ver, 트리거로 증가).
 v13: 기록 확정(records.confirmed·confirmed_at). 확정본=content, 원문=original(없으면 content).
 v14: 기록당 태그 하나(태그 = 한 묶음). 여러 개면 태그 관리 순서상 앞 태그만 남기고, 뗀 목록은 meta 'tag_single_removed'에 남긴다.
+v15: 행특 설계 카드(records.design).
+v16: 최종안에 그대로 쓴 기록(최종안 출처가 그 기록이고 글이 최종안에 그대로 들어 있음)을 확정으로 표시(열 변경 없음).
+     바꾼 기록 id는 meta 'adopted_confirmed'에 남긴다.
 
 자료 형식 규칙: 표·열은 더하기만 한다(지우거나 이름을 바꾸지 않는다). 화면을 없애도 그 자료 표는 남긴다.
 형식이 바뀌는 첫 실행 때는 열기 전에 '형식변경전' 백업을 만든다(backup.before_migration).
@@ -21,7 +24,7 @@ from contextlib import contextmanager
 
 from .paths import data_dir
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 KINDS = ("homeroom", "subject", "club")
 ROLES = ("homeroom", "subject")  # 담임 / 비담임
 
@@ -300,6 +303,8 @@ class YearDb:
         old = _int(self.get_meta("schema_version")) or 0
         if 0 < old < 14:
             self._single_tag()
+        if 0 < old < 16:
+            self._confirm_adopted()
         if old < SCHEMA_VERSION:
             self.set_meta("schema_version", str(SCHEMA_VERSION))
 
@@ -336,6 +341,28 @@ class YearDb:
                 self._conn.execute("UPDATE records SET tags_ver=COALESCE(tags_ver,0)+1 WHERE id=?", (rid,))
             self._conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('tag_single_removed', ?)",
                                (json.dumps({"records": removed, "inbox_batches": [{"id": b, "before": ids} for b, _, ids in batches]}, ensure_ascii=False),))
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+
+    def _confirm_adopted(self):
+        """v16: [그대로 최종안으로]·[기존 완성문 → 최종안 일괄]로 최종안에 쓴 기록인데 확정 표시가 없던 것을 확정으로.
+        최종안 출처(source)가 'record:<id>'이고 그 기록 글이 최종안에 그대로 들어 있을 때만(뒤에 다른 글로 고쳤으면 그대로 둠).
+        글·마감·최종안은 건드리지 않는다(형식변경전 백업이 먼저 만들어짐)."""
+        import json
+        rows = self._conn.execute(
+            "SELECT r.id FROM finals f JOIN records r ON f.source = 'record:' || r.id "
+            "AND r.group_id=f.group_id AND r.item=f.item AND r.student_no=f.student_no "
+            "WHERE COALESCE(r.confirmed,0)=0 AND TRIM(COALESCE(r.content,''))<>'' AND instr(f.text, r.content) > 0 ORDER BY r.id").fetchall()
+        ids = [r["id"] for r in rows]
+        if not ids:
+            return
+        self._conn.execute("BEGIN")
+        try:
+            for rid in ids:
+                self._conn.execute("UPDATE records SET confirmed=1, confirmed_at=datetime('now','localtime') WHERE id=?", (rid,))
+            self._conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('adopted_confirmed', ?)", (json.dumps(ids),))
             self._conn.execute("COMMIT")
         except Exception:
             self._conn.execute("ROLLBACK")

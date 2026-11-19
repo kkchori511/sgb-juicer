@@ -1742,4 +1742,6 @@ button.is-next, .rec-final .sec-title > button.btn-join.is-next { box-shadow: no
 .st-chip.confirmed { background: var(--st-final-bg); }
 .st-chip.suggested { background: var(--st-progress-bg); }
 .st-chip.none { background: var(--danger-soft); }
-.st-chip.excluded { background: var(--surface-2); }
+.st-chip.excluded { background: var(--surface-2); }/* 자료 Inbox 옆 숫자: 스마트폰 알림처럼 빨간 원 + 흰 숫자 */
+.nav .nav-badge { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 20px; height: 20px; padding: 0 6px; margin-left: 6px;
+  border-radius: 999px; background: #e03131; color: #fff; border: none; font-size: 12px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; vertical-align: middle; }
