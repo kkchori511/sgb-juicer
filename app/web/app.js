@@ -341,8 +341,8 @@
     const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const pb = bytesOf(String(prev).trim()), ab = bytesOf(String(add || '').trim()), sum = bytesOf(appendFinal(prev, add));
     const over = target && sum > target;
-    const html = `<div class="fin-mode"><b>${label ? `${esc(label)}의 ` : ''}지금 최종안이 있습니다(${pb}(B)).</b> 새 글(${ab}(B))을 어떻게 넣을까요?`
-      + `<div class="fin-mode-btns"><button type="button" class="primary" id="finAppend">뒤에 이어 붙이기 → 합계 <span class="${over ? 'bytes over' : ''}">${sum}(B)${target ? ` / ${target}(B)` : ''}</span></button>`
+    const html = `<div class="fin-mode"><b>${label ? `${esc(label)}의 ` : ''}지금 최종안이 있습니다(${pb} Byte).</b> 새 글(${ab} Byte)을 어떻게 넣을까요?`
+      + `<div class="fin-mode-btns"><button type="button" class="primary" id="finAppend">뒤에 이어 붙이기 → 합계 <span class="${over ? 'bytes over' : ''}">${sum} Byte${target ? ` / ${target} Byte` : ''}</span></button>`
       + (withCursor ? ` <button type="button" id="finCursor" title="최종안 칸에서 마지막으로 커서를 둔 자리(없으면 맨 끝)에 끼워 넣습니다">커서 자리에 넣기</button>` : '') + `</div>`
       + `<p class="hint">이어 붙이기는 지금 최종안 뒤에 띄어쓰기 한 칸으로 붙입니다(줄바꿈 없음). ${withCursor ? '넣은 뒤 최종안 칸에서 Ctrl+Z로 되돌릴 수 있습니다.' : '어느 쪽이든 넣은 직후 [되돌리기]로 원래 최종안을 돌려놓을 수 있습니다.'}</p></div>`;
     let mode = 'replace';
@@ -395,7 +395,17 @@
     box.innerHTML = '';
     box.removeAttribute('style'); // 앞 창의 크기가 남지 않게
     build(box);
+    markDismiss(box);
+    watchDismiss();
     $('sheet').hidden = false;
+  }
+  // [닫기]는 늘 줄의 맨 오른쪽(CSS order). 창을 만든 뒤 글자가 '닫기'인 버튼에 표시를 붙인다
+  function markDismiss(root) { root.querySelectorAll('button').forEach((b) => { if (b.textContent.trim() === '닫기') b.classList.add('btn-dismiss'); }); }
+  let dismissWatch = null; // 창 안을 나중에 다시 그려도(닫기 버튼을 새로 만들어도) 표시가 붙게
+  function watchDismiss() {
+    if (dismissWatch || !window.MutationObserver) return;
+    dismissWatch = new MutationObserver(() => markDismiss($('sheetBox')));
+    dismissWatch.observe($('sheetBox'), { childList: true, subtree: true });
   }
   function closeSheet() { $('sheet').hidden = true; $('sheetBox').innerHTML = ''; }
 
@@ -597,10 +607,12 @@
     renderDashTable(groups.find((g) => g.id === dashSel), groups.length);
   }
   // 상태 칩: 모든 화면에서 같은 모양(테두리·같은 폭). label을 주면 글자만 바꾼다. iconOnly면 아이콘만(좁은 칸)
+  // 상태 아이콘: 고정 폭 칸 안에 가운데로, 아이콘마다 크기를 맞춰 뒤 글자 시작점이 같게(■는 글꼴에서 작게 나와 키움)
+  function stIco(s, extra) { return el('span', { class: `st st-ico i-${s.cls}${extra ? ` ${extra}` : ''}`, 'aria-hidden': 'true', text: s.icon }); }
   function stBadge(key, label, iconOnly) {
     const s = STATUS[key] || STATUS.none;
     return el('span', { class: `status-badge ${s.cls}${iconOnly ? ' icon-only' : ''}`, title: label || s.text },
-      iconOnly ? [el('span', { class: 'st', text: s.icon })] : [el('span', { class: 'st', text: s.icon }), ' ', label || s.text]);
+      iconOnly ? [stIco(s)] : [stIco(s), label || s.text]);
   }
   function stCell(key) {
     return el('td', { class: 'stcell' }, [stBadge(key)]);
@@ -675,7 +687,7 @@
     if (g.kind === 'homeroom') {
       t.appendChild(el('tr', {}, [th('학번'), th('이름'), th('자율(연간)'), th('진로(연간)'), th('행특(연간)'), th('내 과목·동아리'), th('확인 사항')]));
     } else {
-      t.appendChild(el('tr', {}, [th('학번'), th('이름'), th('학년-반'), th('상태'), th('기록 수'), th(`최종안 (목표 ${target}(B))`), th('확인 사항')]));
+      t.appendChild(el('tr', {}, [th('학번'), th('이름'), th('학년-반'), th('상태'), th('기록 수'), th(`최종안 (목표 ${target} Byte)`), th('확인 사항')]));
     }
     rows.sort((a, b) => (b.active - a.active) || a.student_no.localeCompare(b.student_no));
     rows.forEach((r) => {
@@ -710,7 +722,7 @@
     tabs.innerHTML = '';
     if (!groups.find((g) => g.id === rosterSel)) rosterSel = groups.length ? groups[0].id : null;
     groups.forEach((g) => {
-      tabs.appendChild(el('button', { type: 'button', class: 'gtab' + (g.id === rosterSel ? ' active' : '') + (g.total ? ' is-done' : ' empty'), title: g.total ? '명렬 등록됨' : '명렬 미등록', onclick: () => { rosterSel = g.id; renderRoster(); } }, [
+      tabs.appendChild(el('button', { type: 'button', 'data-item': g.kind === 'homeroom' ? 'autonomy' : g.kind, class: 'gtab' + (g.id === rosterSel ? ' active' : '') + (g.total ? ' is-done' : ' empty'), title: g.total ? '명렬 등록됨' : '명렬 미등록', onclick: () => { rosterSel = g.id; renderRoster(); } }, [
         g.label, el('span', { class: 'cnt', text: g.total ? `${g.active}명` : '미등록' }),
       ]));
     });
@@ -784,7 +796,7 @@
     const partnerOf = (ys.groups || []).find((x) => x.pair_id === g.id);
     if (g.semester !== 2) {
       row.append(el('b', { text: '1·2학기 합산' }), partnerOf
-        ? el('span', {}, [`2학기 ${partnerOf.label}와 세특 합산 ${partnerOf.pair_total}(B). 1학기를 먼저 쓰면 2학기에 남은 바이트가 학생별로 자동 계산됩니다.`])
+        ? el('span', {}, [`2학기 ${partnerOf.label}와 세특 합산 ${partnerOf.pair_total} Byte. 1학기를 먼저 쓰면 2학기에 남은 바이트가 학생별로 자동 계산됩니다.`])
         : el('span', { class: 'muted', text: '1학기와 2학기가 세특 바이트를 함께 쓰는 과목이면, 2학기 과목 설정에서 이 과목을 고르세요.' }));
       return row;
     }
@@ -1595,7 +1607,9 @@
     const r = await api.model_info(id);
     if (r && r.ok) {
       const f = (v) => (v === null || v === undefined ? '?' : v === 0 ? '무료' : v.toFixed(2));
-      main.textContent = r.name;
+      main.textContent = shortModelName(r.name);
+      main.title = r.name;
+      rememberModelName(id, r.name);
       sub.textContent = `100만 토큰당 입력 ${f(r.prompt_per_m)} / 출력 ${f(r.completion_per_m)} 크레딧`;
     } else {
       box.classList.add('error');
@@ -1986,14 +2000,41 @@
     for (const ch of t || '') { const c = ch.codePointAt(0); n += (c >= 0xac00 && c <= 0xd7a3) || (c >= 0x1100 && c <= 0x11ff) || (c >= 0x3130 && c <= 0x318f) || (c >= 0xa960 && c <= 0xa97f) || (c >= 0xd7b0 && c <= 0xd7ff) ? 3 : 1; }
     return n;
   }
+  // 바이트 칩: 2줄 고정 크기(윗줄 'Byte', 아랫줄 '0000/1500'). 앞 숫자 4자리 기준 폭이라 숫자가 바뀌어도 줄이 밀리지 않는다. 넘으면 빨강(넘은 양은 마우스 오버)
   function bytesEl(n, target) {
-    const over = target && n > target;
-    return el('span', { class: 'bytes' + (over ? ' over' : ''), text: target ? `${n} / ${target}(B)${over ? ` · ${n - target}(B) 초과` : ''}` : `${n}(B)` }); // 바이트 칩: 1500(B)
+    const node = el('span', {});
+    setBytes(node, n, target);
+    return node;
+  }
+  function setBytes(node, n, target) {
+    const over = !!target && n > target;
+    node.classList.add('bytes', 'b2');
+    node.classList.toggle('over', over);
+    node.title = target ? `${n} / 목표 ${target} Byte${over ? ` · ${n - target} Byte 초과` : ''}` : `${n} Byte`;
+    node.replaceChildren(el('span', { class: 'b-unit', text: 'Byte' }), el('span', { class: 'b-num', text: target ? `${n}/${target}` : `${n}` }));
+  }
+  // 모델 이름: 회사 이름('OpenAI: ' 등)은 빼고 모델 이름만. OpenRouter에서 찾은 이름을 기억해 두고, 모르면 ID의 '/' 뒤만 보인다
+  const MODEL_NAMES = (() => { try { return JSON.parse(localStorage.getItem('sgb.modelNames') || '{}') || {}; } catch (e) { return {}; } })();
+  const shortModelName = (name) => String(name || '').replace(/^[^:/]{1,40}:\s*/, '');
+  const modelLabel = (id) => MODEL_NAMES[id] || String(id).split('/').pop();
+  function rememberModelName(id, name) {
+    const nm = shortModelName(name);
+    if (!id || !nm || MODEL_NAMES[id] === nm) return;
+    MODEL_NAMES[id] = nm;
+    try { localStorage.setItem('sgb.modelNames', JSON.stringify(MODEL_NAMES)); } catch (e) { /* 저장 못 해도 이번 실행에는 씀 */ }
+    document.querySelectorAll('select[data-models]').forEach(fillModelSelect);
+    if (typeof TV !== 'undefined' && TV.modelSel) fillModelSelect(TV.modelSel);
+  }
+  async function prefetchModelNames() { // 시작할 때 이름을 모르는 모델만 조용히 찾아 둔다
+    for (const id of (cfg.models || []).filter((m) => m && !MODEL_NAMES[m])) {
+      try { const r = await api.model_info(id); if (r && r.ok) rememberModelName(id, r.name); } catch (e) { /* 인터넷이 없으면 ID로 보임 */ }
+    }
   }
   function fillModelSelect(sel) {
     const prev = sel.value;
     sel.innerHTML = '';
-    cfg.models.forEach((m, i) => { if (m) sel.appendChild(el('option', { value: i, text: `${i + 1}번 · ${m}`, selected: prev === '' ? i === cfg.default_model : String(i) === prev })); });
+    sel.dataset.models = '1';
+    cfg.models.forEach((m, i) => { if (m) sel.appendChild(el('option', { value: i, title: m, text: `${i + 1}번 · ${modelLabel(m)}`, selected: prev === '' ? i === cfg.default_model : String(i) === prev })); });
     if (!sel.options.length) sel.appendChild(el('option', { value: '', text: '모델 없음(설정에서 등록)' }));
   }
   // ---------- AI 작업: 확인 창 → 진행 창 → 결과 ----------
@@ -2320,7 +2361,7 @@
     function renderStu(parent, s) {
       const st = STATUS[s.status] || STATUS.none;
       parent.appendChild(el('button', { type: 'button', class: 'stu' + (s.student_no === R.sno ? ' active' : '') + (s.active ? '' : ' inactive'), title: st.text, onclick: async () => { if (s.student_no !== R.sno && !(await leaveOk())) return; R.sno = s.student_no; R.selected.clear(); renderStudentList(); loadStudent(); } }, [
-        el('span', { class: `st ${st.cls}`, text: st.icon }), el('span', { class: 'no', text: s.student_no }), el('span', { class: 'nm', text: s.name, title: s.name }),
+        stIco(st, st.cls), el('span', { class: 'no', text: s.student_no }), el('span', { class: 'nm', text: s.name, title: s.name }),
         el('span', { class: 'cnt', title: `확정 기록 ${s.confirmed || 0}건 / 전체 기록 ${s.records || 0}건`, text: (s.stale ? '! ' : '') + (s.records ? `${s.confirmed || 0}/${s.records}` : '') + (s.active ? '' : ' 비활성') }),
       ]));
     }
@@ -2337,7 +2378,7 @@
     const done = n('closed');
     const pct = act.length ? Math.round((done / act.length) * 100) : 0;
     const chip = (k, label) => el('button', { type: 'button', class: `stat-chip ${STATUS[k].cls}${R.filter === k ? ' on' : ''}`, title: `${label}만 보기`,
-      onclick: () => { R.filter = R.filter === k ? '' : k; renderStudentList(); } }, [el('span', { text: `${STATUS[k].icon} ${label}` }), el('b', { text: String(n(k)) })]);
+      onclick: () => { R.filter = R.filter === k ? '' : k; renderStudentList(); } }, [el('span', { class: 'st-lbl' }, [stIco(STATUS[k]), label]), el('b', { text: String(n(k)) })]);
     return el('div', { class: 'stat-box' }, [
       el('div', { class: 'stat-count', title: `마감 ${pct}%` }, [el('span', { class: 'stat-label', text: '마감' }), el('b', { class: 'stat-big', text: `${done}` }), el('span', { class: 'stat-unit', text: '명' }),
         el('span', { class: 'stat-sep', text: '/' }), el('b', { class: 'stat-big stat-all', text: `${act.length}` }), el('span', { class: 'stat-unit', text: '명' })]),
@@ -2580,7 +2621,7 @@
   function menuBox(label, items, title) {
     const list = items.filter(Boolean);
     if (!list.length) return null;
-    return el('details', { class: 'opt-menu menu-down' }, [el('summary', { text: label, title: title || '' }), el('div', { class: 'opt-list' }, list)]);
+    return el('details', { class: 'opt-menu menu-down' + (label === '⋯' ? ' dots-menu' : '') }, [el('summary', { text: label, title: title || '' }), el('div', { class: 'opt-list' }, list)]); // ⋯ 메뉴는 옆의 작은 버튼([수정] 등)과 같은 크기
   }
   // 태그 색 칩 메뉴: 지금 태그를 색 칩으로 보여 주고, 누르면 색 칩 목록에서 하나를 고른다(태그 = 한 묶음)
   function tagChipMenu(cur, tags, onPick, opt) {
@@ -2839,7 +2880,7 @@
     const aiBtn = el('button', { type: 'button', class: 'ai-btn' + (recNextAiId() === 'trait' ? ' is-next' : ''), disabled: locked, title: '고른 성격·키워드와 사례로 행동특성 및 종합의견을 만들어 아래 결과 묶음에 더합니다(확정은 따로)', text: 'AI 변환' });
     aiBtn.addEventListener('click', () => traitAi(aiBtn));
     card.append(
-      el('div', { class: 'rcard-head' }, [el('b', { text: '🧩 행특 설계' }), r && r.confirmed ? el('span', { class: 'badge conf-badge', text: '✔ 확정' }) : null, el('span', { class: 'muted', text: '성격유형 → 설명 → 영역별 키워드·사례 → AI 변환' }), el('span', { class: 'spacer' }), state, el('span', { class: 'muted', text: `목표 ${R.target}(B)` })].filter(Boolean)),
+      el('div', { class: 'rcard-head' }, [el('b', { text: '🧩 행특 설계' }), r && r.confirmed ? el('span', { class: 'badge conf-badge', text: '✔ 확정' }) : null, el('span', { class: 'muted', text: '성격유형 → 설명 → 영역별 키워드·사례 → AI 변환' }), el('span', { class: 'spacer' }), state, el('span', { class: 'muted', text: `목표 ${R.target} Byte` })].filter(Boolean)),
       el('div', { class: 'tr-pii', text: TRAIT_PII }),
       el('div', { class: 'tr-row' }, [el('b', { stepText: '① 성격유형' }), typeSel, el('span', { class: 'muted', text: TD && !TD.is_default ? '(내 사전)' : '' })]),
       el('div', { class: 'tr-row' }, [el('b', { stepText: '② 성격 설명' }), descSel]),
@@ -2920,7 +2961,7 @@
     const used = TRAIT_AREAS.filter(([a]) => !r.design.areas[a].off && (r.design.areas[a].kws.length || r.design.areas[a].case.trim())).map(([, l]) => l);
     const out = await busyRun(btn, `trait${r.id}`, () => aiRun({
       title: '행특 생성', kind: 'trait',
-      rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['자료', `성격 ${r.design.type || '-'} · 영역 ${used.join('·') || '없음'}`], ['목표', `${R.target}(B)`], ['모델', modelName($('recModel'))]],
+      rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['자료', `성격 ${r.design.type || '-'} · 영역 ${used.join('·') || '없음'}`], ['목표', `${R.target} Byte`], ['모델', modelName($('recModel'))]],
       warn: '결과는 설계 카드의 결과 묶음 맨 위에 더해집니다(설계는 그대로). 확정은 따로 합니다.',
       wiz: async () => { if (await flushFinal()) openWizardMenu(recWizCtx('trait', r.content || r.orig, r.id)); },
       jobs: [{ run: () => api.ai_record(r.id, $('recModel').value) }],
@@ -3408,7 +3449,7 @@
     const what = r.kind === 'existing' ? '기존 완성문 AI 변환(다듬기)' : '원문 AI 변환(정제)';
     const out = await busyRun(btn, `rec${r.id}`, () => aiRun({
       title: what, kind: r.kind === 'existing' ? 'polish' : 'refine',
-      rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['대상', `${r.kind === 'existing' ? '기존 완성문' : `${r.seq}회 기록 원문`}${r.title ? ` · ${r.title}` : ''} (${bytesOf(r.orig)}(B))`], ['모델', modelName($('recModel'))]],
+      rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['대상', `${r.kind === 'existing' ? '기존 완성문' : `${r.seq}회 기록 원문`}${r.title ? ` · ${r.title}` : ''} (${bytesOf(r.orig)} Byte)`], ['모델', modelName($('recModel'))]],
       warn: '결과는 이 기록의 결과 묶음 맨 위에 더해집니다(원문·이전 결과는 그대로). 확정은 따로 합니다.',
       wiz: async () => { if (await flushFinal()) openWizardMenu(recWizCtx(r.kind === 'existing' ? 'polish' : 'refine', r.orig, r.id)); },
       jobs: [{ run: () => api.ai_record(r.id, $('recModel').value) }],
@@ -3471,7 +3512,7 @@
       const title = el('input', { type: 'text', class: 'grow', placeholder: existing ? '예: 1학기 작성본' : '예: 진로 독서 감상문', value: r ? r.title : (existing ? '이미 쓴 생기부' : '') });
       const content = el('textarea', { rows: 12, placeholder: existing ? '이미 작성한 생기부 문장을 붙여넣으세요.' : '활동 내용, 학생 글, 관찰 메모 등을 적으세요. 학번·이름은 적지 않아도 됩니다.', value: r ? recText(r) : '' });
       const bc = el('span', { class: 'bytes' });
-      const upd = () => { bc.textContent = `${bytesOf(content.value)}(B)`; };
+      const upd = () => { setBytes(bc, bytesOf(content.value)); };
       content.addEventListener('input', upd);
       upd();
       const tags = tagPicker(r ? r.tags.map((t) => t.id) : []);
@@ -3549,7 +3590,7 @@
         const res = computeWeights(items, sumCheck);
         recs.forEach((r, i) => {
           const cell = t.querySelector(`[data-applied="${r.id}"]`);
-          cell.textContent = res.ratios ? `${(res.ratios[i] * 100).toFixed(1)}% · 약 ${Math.round(res.ratios[i] * R.target)}(B)` : '-';
+          cell.textContent = res.ratios ? `${(res.ratios[i] * 100).toFixed(1)}% · 약 ${Math.round(res.ratios[i] * R.target)} Byte` : '-';
           inputs[r.id].placeholder = res.ratios && inputs[r.id].value === '' ? `자동 ${(res.ratios[i] * 100).toFixed(0)}` : '';
         });
         sumLine.className = 'sum-line' + (res.error ? ' bad' : '');
@@ -3559,7 +3600,7 @@
       t.appendChild(el('tr', {}, ['기록', '길이', '비중(%)', '적용 비율 · 예상 분량'].map((h) => el('th', { text: h }))));
       recs.forEach((r) => {
         inputs[r.id] = el('input', { type: 'number', min: 0, step: 5, value: r.weight === null || r.weight === undefined ? '' : r.weight, oninput: redraw });
-        t.appendChild(el('tr', {}, [el('td', { text: `${r.kind === 'existing' ? '기존 완성문' : r.seq + '회'} ${r.title || ''}`.trim() }), el('td', { text: `${r.bytes}(B)` }), el('td', {}, [inputs[r.id]]), el('td', { 'data-applied': r.id, class: 'auto-w' })]));
+        t.appendChild(el('tr', {}, [el('td', { text: `${r.kind === 'existing' ? '기존 완성문' : r.seq + '회'} ${r.title || ''}`.trim() }), el('td', { text: `${r.bytes} Byte` }), el('td', {}, [inputs[r.id]]), el('td', { 'data-applied': r.id, class: 'auto-w' })]));
       });
       const chk = el('input', { type: 'checkbox', checked: sumCheck, onchange: (e) => { sumCheck = e.target.checked; redraw(); } });
       const model = el('select', {});
@@ -3576,12 +3617,12 @@
         const res = out.results[0];
         closeSheet();
         revealResults();
-        const size = res.bytes ? ` (${res.bytes}(B) / 목표 ${res.target}(B))` : '';
+        const size = res.bytes ? ` (${res.bytes} Byte / 목표 ${res.target} Byte)` : '';
         toast((res.dropped ? 'AI 분량 맞춤 후보를 만들고 가장 오래된 후보를 지웠습니다.' : 'AI 분량 맞춤 후보를 만들었습니다. 오른쪽 아래 [AI 분량 맞춤 후보]에서 확인하세요.') + size, 5000);
         loadStudent(true);
       });
       box.append(
-        el('div', { class: 'sheet-head' }, [el('h2', { text: `비중으로 분량 맞추기 · ${R.view.student.name}` }), el('span', { class: 'muted', text: `${R.slot.label} · 확정 기록 ${recs.length}건 · 목표 ${R.target}(B)` })]),
+        el('div', { class: 'sheet-head' }, [el('h2', { text: `비중으로 분량 맞추기 · ${R.view.student.name}` }), el('span', { class: 'muted', text: `${R.slot.label} · 확정 기록 ${recs.length}건 · 목표 ${R.target} Byte` })]),
         el('div', { class: 'sheet-body' }, [
           el('p', { class: 'hint', text: '확정 기록마다 비중만큼의 분량으로 원문을 덜어내 한 글로 잇습니다. 새로 쓰지 않고, 덜 중요한 문장·문단을 빼거나 문장을 짧게 하며, 뺀 자리가 어색한 곳만 조금 다듬습니다. 이미 자기 몫보다 짧은 기록은 그대로 둡니다. 결과가 목표를 넘으면 자동으로 한두 번 더 줄입니다. 결과는 최종안에 바로 들어가지 않고 [AI 분량 맞춤 후보]에 쌓입니다. 비중을 비워 두면 기록 길이에 비례해 나눕니다. 입력한 비중은 기록에 저장됩니다.' }),
           t, sumLine,
@@ -3605,7 +3646,7 @@
     try { fmeta = f ? JSON.parse(f.meta || '{}') : {}; } catch (e) { fmeta = {}; }
     const finSec = el('div', { class: 'final-sec' });
     box.appendChild(finSec);
-    finSec.appendChild(el('div', { class: 'sec-title' }, [foldBtn('final', finSec, '최종안'), el('span', { class: 'muted', text: `목표 ${R.target}(B)` }), stdBadge(fmeta)]));
+    finSec.appendChild(el('div', { class: 'sec-title' }, [foldBtn('final', finSec, '최종안'), el('span', { class: 'muted', text: `목표 ${R.target} Byte` }), stdBadge(fmeta)]));
     const pairBox = pairInfo(v.pair);
     if (pairBox) finSec.appendChild(pairBox);
     const fb = el('div', { class: 'final-box' + (f ? ' has' : '') + (closed ? ' closed' : '') });
@@ -3632,7 +3673,7 @@
       if (!(await flushFinal())) return;
       const out = await busyRun(polishBtn, `synth${R.sno}`, () => aiRun({
         title: '최종안 다듬기', kind: 'polish',
-        rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['최종안', `${bytesOf(ta.value)}(B) → 목표 ${R.target}(B)`], ['모델', modelName($('recModel'))]],
+        rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['최종안', `${bytesOf(ta.value)} Byte → 목표 ${R.target} Byte`], ['모델', modelName($('recModel'))]],
         warn: `${DROP_WARN} 최종안 자체는 바뀌지 않고 후보로 만듭니다.`,
         jobs: [{ run: () => api.ai_polish_final(R.slot.group_id, R.slot.item, R.sno, $('recModel').value) }],
       }));
@@ -3755,7 +3796,7 @@
           if (on) no += 1;
           const cb = el('input', { type: 'checkbox', checked: on, 'aria-label': `${recName(r)} 넣기`, title: '끄면 이번 최종안에서 뺍니다(확정은 그대로)',
             onchange: (e) => { if (e.target.checked) off.delete(r.id); else off.add(r.id); draw(); } });
-          return { id: r.id, el: el('div', { class: 'join-row' + (on ? '' : ' off') }, [cb, el('b', { text: on ? `${no}. ${recName(r)}` : `빼기 · ${recName(r)}` }), el('span', { class: 'muted', text: `${r.bytes}(B)` }),
+          return { id: r.id, el: el('div', { class: 'join-row' + (on ? '' : ' off') }, [cb, el('b', { text: on ? `${no}. ${recName(r)}` : `빼기 · ${recName(r)}` }), el('span', { class: 'muted', text: `${r.bytes} Byte` }),
             el('span', { class: 'spacer' })]) };
         });
         const handle = sortable(rows, (ids) => { order = ids.map((id) => order.find((r) => r.id === id)); draw(); }, order.length < 2);
@@ -3784,7 +3825,7 @@
         actionToast(`${pick.length < order.length ? `확정 기록 ${order.length}건 중 ${pick.length}건을` : `확정 기록 ${order.length}건을`} 이어 최종안${mode === 'append' ? ' 뒤에 붙였습니다' : '에 넣었습니다'}.`, '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, res.prev || '', ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
       });
       addTo(box,
-        el('div', { class: 'sheet-head' }, [el('h2', { text: `확정 기록 이어 붙이기 · ${v.student.name}` }), el('span', { class: 'muted', text: `${R.slot.label} · 목표 ${R.target}(B)` })]),
+        el('div', { class: 'sheet-head' }, [el('h2', { text: `확정 기록 이어 붙이기 · ${v.student.name}` }), el('span', { class: 'muted', text: `${R.slot.label} · 목표 ${R.target} Byte` })]),
         el('p', { class: 'hint', text: '이 순서대로 확정본을 내용 그대로 이어 최종안에 넣습니다(띄어쓰기 한 칸, 줄바꿈 없음). 체크를 끄면 이번 최종안에서만 빠집니다(확정은 그대로). 바꾼 순서는 기록 순서에도 저장됩니다.' }),
         list,
         unc.length ? el('p', { class: 'muted small-note', text: `확정 안 된 기록 ${unc.length}건은 빠집니다: ${unc.map(recName).join(', ')}` }) : null,
@@ -3861,7 +3902,7 @@
         loadSlotStudents();
       });
       addTo(box,
-        el('div', { class: 'sheet-head' }, [el('h2', { text: `전체 학생 이어 붙이기 · ${s.label}` }), el('span', { class: 'muted', text: `목표 ${R.target}(B)` })]),
+        el('div', { class: 'sheet-head' }, [el('h2', { text: `전체 학생 이어 붙이기 · ${s.label}` }), el('span', { class: 'muted', text: `목표 ${R.target} Byte` })]),
         el('p', { class: 'hint', text: '학생마다 확정 기록을 아래 활동(태그) 순서로 내용 그대로 이어 최종안에 넣습니다. 그 학생에게 없는 활동은 건너뜁니다. 같은 활동(태그) 안에서는 학생별 기록 순서를 따릅니다.' }),
         el('div', { class: 'col-label', text: '활동 순서 (끌거나 ▲▼)' }), list,
         el('div', { class: 'map-row' }, [el('label', {}, [onlyNew, ` 최종안 없는 학생만 (${eligible.length - withFinal.length}명)`]), el('label', {}, [over, ` 최종안 있는 학생도 바꾸기 (+${withFinal.length}명)`])]),
@@ -3878,22 +3919,22 @@
   function pairInfo(p) {
     if (!p) return null;
     if (p.role === 'first') {
-      return el('div', { class: 'pair-box' + (p.over ? ' over' : '') }, [el('b', { text: `1·2학기 합산 ${p.total}(B)` }),
-        ` · 2학기 ${p.other}${p.second_bytes !== null && p.second_bytes !== undefined ? ` 최종안 ${p.second_bytes}(B)` : ''}`,
+      return el('div', { class: 'pair-box' + (p.over ? ' over' : '') }, [el('b', { text: `1·2학기 합산 ${p.total} Byte` }),
+        ` · 2학기 ${p.other}${p.second_bytes !== null && p.second_bytes !== undefined ? ` 최종안 ${p.second_bytes} Byte` : ''}`,
         el('div', { class: 'muted', text: '여기(1학기)에서 쓴 바이트만큼 2학기 목표가 줄어듭니다.' }),
-        p.over ? el('div', { class: 'danger-text', text: `1학기 ${p.first_bytes}(B) + 2학기 최종안이 합산 ${p.total}(B)를 넘습니다. 2학기${(p.others || []).some((x) => x.second_closed) ? '(마감됨)' : ''}를 다시 확인하세요.` }) : null]);
+        p.over ? el('div', { class: 'danger-text', text: `1학기 ${p.first_bytes} Byte + 2학기 최종안이 합산 ${p.total} Byte를 넘습니다. 2학기${(p.others || []).some((x) => x.second_closed) ? '(마감됨)' : ''}를 다시 확인하세요.` }) : null]);
     }
     const over = p.remain !== null && p.remain !== undefined && p.remain <= 0;
     const box = el('div', { class: 'pair-box' + (over ? ' over' : '') });
     const add = (...xs) => box.append(...xs.filter((x) => x !== null && x !== undefined));
     if (p.first_bytes === null || p.first_bytes === undefined) {
-      add(el('b', { text: `1학기 ${p.other} 최종안 없음` }), ` · 합산 ${p.total}(B) → 우선 절반 `, el('b', { text: `${p.target}(B)` }), '를 목표로 씁니다.',
+      add(el('b', { text: `1학기 ${p.other} 최종안 없음` }), ` · 합산 ${p.total} Byte → 우선 절반 `, el('b', { text: `${p.target} Byte` }), '를 목표로 씁니다.',
         p.member ? null : el('div', { class: 'muted', text: '이 학생은 1학기 명렬에 없습니다.' }));
       return box;
     }
-    add(p.over ? el('div', { class: 'danger-text', style: 'font-weight:800', text: `⚠ 합산 초과: 1학기 ${p.first_bytes}(B) + 이번 학기 ${p.second_bytes}(B) = ${p.first_bytes + p.second_bytes}(B) > ${p.total}(B)${p.second_closed ? ' — 마감했지만 다시 확인이 필요합니다' : ''}` }) : null);
-    add(el('b', { text: `1학기 ${p.other} 최종안 ${p.first_bytes}(B)${p.first_closed ? ' (마감)' : ''}` }), ` · 합산 ${p.total}(B) → 이번 학기 남은 `,
-      el('b', { class: over ? 'danger-text' : '', text: `${p.remain}(B)` }),
+    add(p.over ? el('div', { class: 'danger-text', style: 'font-weight:800', text: `⚠ 합산 초과: 1학기 ${p.first_bytes} Byte + 이번 학기 ${p.second_bytes} Byte = ${p.first_bytes + p.second_bytes} Byte > ${p.total} Byte${p.second_closed ? ' — 마감했지만 다시 확인이 필요합니다' : ''}` }) : null);
+    add(el('b', { text: `1학기 ${p.other} 최종안 ${p.first_bytes} Byte${p.first_closed ? ' (마감)' : ''}` }), ` · 합산 ${p.total} Byte → 이번 학기 남은 `,
+      el('b', { class: over ? 'danger-text' : '', text: `${p.remain} Byte` }),
       over ? el('div', { class: 'danger-text', text: '1학기가 합산을 이미 채워 AI 종합·다듬기를 할 수 없습니다. 1학기 최종안을 줄이거나 합산 목표를 바꾸세요.' }) : null,
       el('details', {}, [el('summary', { text: '1학기 최종안 보기' }), el('div', { class: 'cmp-text', text: p.first_text })]));
     return box;
@@ -4175,7 +4216,7 @@
     const choice = new Map(); // 여러 개인 학생에서 직접 고른 기록 id
     const open = new Set(); // 전문 비교를 펼친 학생
     const when = (s) => (s || '').slice(5, 16).replace(' ', ' ');
-    const recInfo = (r) => `${r.title || '제목 없음'} · 추가 ${when(r.created_at)}${r.updated_at && r.updated_at !== r.created_at ? ` · 수정 ${when(r.updated_at)}` : ''} · ${r.bytes}(B)`;
+    const recInfo = (r) => `${r.title || '제목 없음'} · 추가 ${when(r.created_at)}${r.updated_at && r.updated_at !== r.created_at ? ` · 수정 ${when(r.updated_at)}` : ''} · ${r.bytes} Byte`;
     const clip = (t) => el('div', { class: 'clip', text: t || '-' });
     openSheet((box) => {
       const body = el('div', { class: 'sheet-body' });
@@ -4213,7 +4254,7 @@
           const chip = on ? (c.kind === 'new' ? ['confirmed', '새로 반영'] : ['suggested', '덮어쓰기']) : ['excluded', can ? '이번에는 제외' : '제외'];
           const verSel = isMulti(x) ? el('select', { class: 'ver-sel', onchange: (e) => { if (e.target.value) choice.set(x.student_no, +e.target.value); else choice.delete(x.student_no); draw(); } }, [
             el('option', { value: '', text: multi === 'latest' ? '(마지막으로 추가한 것)' : '보낼 것 고르기' }),
-            ...x.existing.map((r, i) => el('option', { value: r.id, selected: choice.get(x.student_no) === r.id, text: `${i + 1}번째 추가 · ${when(r.created_at)} · ${r.bytes}(B)${i === x.existing.length - 1 ? ' (마지막)' : ''}` }))]) : null;
+            ...x.existing.map((r, i) => el('option', { value: r.id, selected: choice.get(x.student_no) === r.id, text: `${i + 1}번째 추가 · ${when(r.created_at)} · ${r.bytes} Byte${i === x.existing.length - 1 ? ' (마지막)' : ''}` }))]) : null;
           t.appendChild(el('tr', { class: !on ? 'off' : c.kind === 'over' ? 'row-pending' : '' }, [
             el('td', {}, [chk]),
             el('td', { text: `${x.grade}-${x.class_no}-${x.number} ${x.name}` }),
@@ -4224,7 +4265,7 @@
           ]));
           if (c.rec && open.has(x.student_no)) {
             t.appendChild(el('tr', { class: 'cmp-row' }, [el('td', {}), el('td', { colspan: 5 }, [el('div', { class: 'cmp' }, [
-              el('div', {}, [el('div', { class: 'col-label', text: `지금 최종안${x.final ? ` · ${bytesOf(x.final)}(B)` : ''}` }), el('div', { class: 'cmp-text', text: x.final || '(없음)' })]),
+              el('div', {}, [el('div', { class: 'col-label', text: `지금 최종안${x.final ? ` · ${bytesOf(x.final)} Byte` : ''}` }), el('div', { class: 'cmp-text', text: x.final || '(없음)' })]),
               el('div', {}, [el('div', { class: 'col-label', text: `보낼 기존 완성문 · ${recInfo(c.rec)}` }), el('div', { class: 'cmp-text', text: c.rec.content })]),
             ])])]));
           }
@@ -4326,7 +4367,7 @@
     r.rows.forEach((x) => t.appendChild(el('tr', { class: x.closed ? '' : 'bad' }, [el('td', { text: x.grade ?? '' }), el('td', { text: x.class_no ?? '' }), el('td', { text: x.number ?? '' }), el('td', { text: x.name }),
       el('td', { title: `1학기 ${x.closed1 ? '마감' : x.text1 ? '미마감' : '최종안 없음'} · 2학기 ${x.closed2 ? '마감' : x.text2 ? '미마감' : '최종안 없음'}` }, ['1 ', stOf(x.closed1, x.text1), '  2 ', stOf(x.closed2, x.text2)]),
       el('td', {}, [el('div', { class: 'exp-text', text: x.text })]),
-      el('td', { class: x.bytes > r.total ? 'danger-text' : '', title: `1학기 ${x.bytes1}(B) + 2학기 ${x.bytes2}(B)`, text: `${x.bytes}/${r.total}(B)` })])));
+      el('td', { class: 'byte-cell' + (x.bytes > r.total ? ' danger-text' : ''), title: `1학기 ${x.bytes1} Byte + 2학기 ${x.bytes2} Byte`, text: `${x.bytes}/${r.total} Byte` })])));
     if (!r.rows.length) t.appendChild(el('tr', {}, [el('td', { colspan: 7, class: 'muted', text: '보여 줄 학생이 없습니다.' })]));
     box.appendChild(t);
     $('expCopyBtn').textContent = '클립보드 복사';
@@ -4355,7 +4396,7 @@
     r.rows.forEach((x) => t.appendChild(el('tr', { class: x.closed ? '' : 'bad' }, [el('td', { text: x.grade ?? '' }), el('td', { text: x.class_no ?? '' }), el('td', { text: x.number ?? '' }), el('td', { text: x.name }),
       el('td', {}, [stBadge(x.closed ? 'closed' : x.text ? 'final' : 'none', x.closed ? '마감' : x.text ? '최종안 있음' : '최종안 없음')]),
       el('td', {}, [el('div', { class: 'exp-text', text: x.text || '' })]), el('td', {}, [x.text ? bytesEl(x.bytes, x.target ?? r.target) : el('span', { class: 'muted', text: '-' })]),
-      ...(paired ? [el('td', { class: (x.first_bytes || 0) + x.bytes > x.pair_total ? 'danger-text' : '', text: x.pair_total ? `${x.first_bytes ?? 0}(B) · ${(x.first_bytes || 0) + x.bytes}/${x.pair_total}(B)` : '' })] : [])])));
+      ...(paired ? [el('td', { class: 'byte-cell' + ((x.first_bytes || 0) + x.bytes > x.pair_total ? ' danger-text' : ''), text: x.pair_total ? `${x.first_bytes ?? 0} Byte · ${(x.first_bytes || 0) + x.bytes}/${x.pair_total} Byte` : '' })] : [])])));
     if (!r.rows.length) t.appendChild(el('tr', {}, [el('td', { colspan: 7, class: 'muted', text: '내보낼 학생이 없습니다.' })]));
     box.appendChild(t);
     $('expCopyBtn').textContent = `클립보드 복사: ${r.rows.length}명`;
@@ -4367,7 +4408,7 @@
     const onlyClosed = $('expScopeRows').value === 'closed';
     const open = E.rows.filter((x) => !x.closed).length;
     const over = E.rows.filter((x) => x.pair_total && x.text && (x.first_bytes || 0) + x.bytes > x.pair_total && (!onlyClosed || x.closed));
-    if (over.length && !(await confirmBox(`1·2학기 합산 바이트를 넘는 학생이 ${over.length}명 있습니다.\n${over.slice(0, 10).map((x) => `${x.name} ${(x.first_bytes || 0) + x.bytes}/${x.pair_total}(B)`).join(', ')}${over.length > 10 ? ` 외 ${over.length - 10}명` : ''}\n\n그래도 내보낼까요?`, '그래도 내보내기'))) return;
+    if (over.length && !(await confirmBox(`1·2학기 합산 바이트를 넘는 학생이 ${over.length}명 있습니다.\n${over.slice(0, 10).map((x) => `${x.name} ${(x.first_bytes || 0) + x.bytes}/${x.pair_total} Byte`).join(', ')}${over.length > 10 ? ` 외 ${over.length - 10}명` : ''}\n\n그래도 내보낼까요?`, '그래도 내보내기'))) return;
     if (kind === 'copy') {
       const r = await call('export_copy', s.group_id, s.item, onlyClosed, $('expOrder').value, $('expCols').value, $('expHeader').checked);
       if (r) toast(`${r.count}명 최종안을 복사했습니다.${open ? ` (미마감 ${open}명 포함)` : ''}`);
@@ -4570,7 +4611,7 @@
     const b = st.ui.badges;
     b.innerHTML = '';
     if (TV.out.has(st.r.id)) b.append(el('span', { class: 'badge tv-out', text: TV.tag === 0 ? '태그를 붙임 · 다음 조회 때 목록에서 빠짐' : '이 태그를 뺌 · 다음 조회 때 목록에서 빠짐' }));
-    st.ui.bytes.textContent = `${bytesOf(st.draft.content)}(B)`;
+    setBytes(st.ui.bytes, bytesOf(st.draft.content));
   }
   function tvEditable(r) { return !ys.archived && !r.closed && r.active && !r.gone; }
   function tvLock(r) {
@@ -4931,7 +4972,7 @@
     if (!(await leaveOk())) return;
     const out = await busyRun(btn, `tvrec${r.id}`, () => aiRun({
       title: r.kind === 'existing' ? '기존 완성문 AI 변환(다듬기)' : '원문 AI 변환(정제)', kind: tvKind(r),
-      rows: [['학생', `${r.name} · ${tvSrcLabel(r)}`], ['대상', `${r.kind === 'existing' ? '기존 완성문' : `${r.seq || ''}회 기록 원문`}${r.title ? ` · ${r.title}` : ''} (${bytesOf(r.orig)}(B))`], ['모델', modelName(tvModel())]],
+      rows: [['학생', `${r.name} · ${tvSrcLabel(r)}`], ['대상', `${r.kind === 'existing' ? '기존 완성문' : `${r.seq || ''}회 기록 원문`}${r.title ? ` · ${r.title}` : ''} (${bytesOf(r.orig)} Byte)`], ['모델', modelName(tvModel())]],
       warn: '결과는 이 기록의 결과 묶음 맨 위에 더해집니다(원문·이전 결과는 그대로). 확정은 따로 합니다.',
       wiz: () => tvWizard(r),
       jobs: [{ run: () => api.ai_record(r.id, tvModel().value) }],
@@ -5320,7 +5361,7 @@
     const groups = [['학생관찰기록', recs.filter((x) => x.kind === 'record')], ['기존 완성문', recs.filter((x) => x.kind !== 'record')]];
     groups.forEach(([label, list]) => { if (list.length) sel.appendChild(el('optgroup', { label }, list.map((x) => el('option', { value: x.id, selected: x.id === TW.rid, disabled: !tvEditable(x), text: `${twRecLabel(x)} — ${twShort(x.content, 30)}${tvEditable(x) ? '' : ' (읽기 전용)'}` })))); });
     const rec = twRec(TW.rid);
-    body.appendChild(el('div', { class: 'tw-row' }, [el('label', { class: 'inline' }, ['시험할 기록', sel]), rec ? el('span', { class: 'muted', text: `${tvSrcLabel(rec)} · ${rec.bytes}(B)` }) : null]));
+    body.appendChild(el('div', { class: 'tw-row' }, [el('label', { class: 'inline' }, ['시험할 기록', sel]), rec ? el('span', { class: 'muted', text: `${tvSrcLabel(rec)} · ${rec.bytes} Byte` }) : null]));
     if (!rec) return;
     const trials = TW.trials.filter((t) => t.record_id === rec.id);
     const hasOrig = !!(rec.original && rec.original !== rec.content);
@@ -5391,7 +5432,7 @@
       conf ? el('span', { class: 'badge ok', text: '✔ 확정' }) : null,
       t.locked ? el('span', { class: 'badge', text: '🔒 잠김' }) : null]));
     card.appendChild(el('div', { class: 'tw-cand-text', text: t.text }));
-    card.appendChild(el('div', { class: 'muted tw-cand-meta', text: `${bytesOf(t.text)}(B) · ${t.model || ''} · ${fmtCredit(t.cost)} 크레딧 · ${t.created_at.slice(5, 16)}` }));
+    card.appendChild(el('div', { class: 'muted tw-cand-meta', text: `${bytesOf(t.text)} Byte · ${t.model || ''} · ${fmtCredit(t.cost)} 크레딧 · ${t.created_at.slice(5, 16)}` }));
     const foot = el('div', { class: 'tw-cand-foot' });
     if (TW.cont === t.id) {
       const rq = el('input', { type: 'text', placeholder: '이어서 고칠 요청: 예) 조금 더 짧게, 마지막 문장은 빼고', 'aria-label': '이어서 고칠 요청' });
@@ -7704,7 +7745,7 @@
       el('div', { class: 'card-head' }, [el('h2', { text: `활동 개요 · ${name} · ${g ? g.label : ''}` }), cnt, seg, el('span', { class: 'spacer' }),
         el('button', { type: 'button', class: 'ai-btn', text: '이 개요로 생성하러 가기', title: '항목별 기록에서 [활동 개요로 여러 명 생성]을 엽니다', onclick: async () => { if (!(await saveAllPending())) { alertBox(SAVE_FAIL_MSG); return; } await openRecords(gidNow, itemNow); openBasisGen(null); } })]),
       tools, body,
-      el('p', { class: 'hint', text: '학생관찰기록이 없는 학생을 [활동 개요로 생성]할 때 씁니다. 생성 창에서 학생마다 참여한 활동을 고를 수 있습니다(처음에는 모두). AI에는 고른 활동 줄만 보내고, 개요에 없는 사실은 지어내지 않도록 지시합니다(학번·이름은 보내지 않음).' }),
+      el('p', { class: 'hint', text: '학생관찰기록이 없는 학생을 [활동 개요로 생성]할 때 씁니다. 생성 창에서 공통 참여 활동을 목록에서 골라 넣고, 학생마다 다르게 바꿀 수도 있습니다. AI에는 고른 활동 줄만 보내고, 개요에 없는 사실은 지어내지 않도록 지시합니다(학번·이름은 보내지 않음).' }),
     );
     draw();
   }
@@ -7765,7 +7806,7 @@
             el('td', {}, [el('input', { type: 'checkbox', disabled: off, checked: sel.has(x.student_no), onchange: (e) => { if (e.target.checked) sel.add(x.student_no); else sel.delete(x.student_no); draw(); } })]),
             el('td', { text: x.student_no }), el('td', { text: x.name }),
             el('td', {}, [stBadge(x.status), why ? el('div', { class: 'muted small-note', text: why }) : null]),
-            el('td', { text: x.final_bytes ? `${x.final_bytes}/${x.target}(B)` : '-' }),
+            el('td', { class: 'byte-cell', text: x.final_bytes ? `${x.final_bytes}/${x.target} Byte` : '-' }),
             el('td', {}, x.notes.map((n) => el('span', { class: 'tag warn-tag', text: n }))),
           ]));
         });
@@ -7839,7 +7880,7 @@
     const blocked = (x) => (!x.active ? '비활성' : x.closed ? '마감' : x.all_locked ? '후보 3개 모두 잠김' : x.pair_total && x.target <= 0 ? '1학기 최종안이 합산을 다 씀' : '');
     const isEmpty = (x) => (x.status || 'none') === 'none'; // 공통 상태 '기록 없음'(기록·후보·최종안 없음)
     const sel = new Set(preselect && info.students.some((x) => x.student_no === preselect && !blocked(x)) ? [preselect] : []);
-    const common = new Set(lines.map((_, i) => i)); // 공통 참여 활동(처음에는 모두)
+    const common = new Set(); // 공통 참여 활동(콤보박스에서 골라 넣음, 처음에는 비어 있음)
     const own = {}; // 학번 → 이 학생만 다르게 고른 활동(없으면 공통을 따름)
     const pickOf = (sno) => own[sno] || common;
     const opened = new Set(); // 활동을 펼친 학생
@@ -7861,15 +7902,30 @@
       const head = el('div', { class: 'basis-acts' });
       const commonBox = el('div', { class: 'basis-common' });
       const stCellOf = (x) => stBadge(x.status);
+      // 활동 고르기: 콤보박스에서 하나씩 골라 넣으면 아래에 칩으로 차곡차곡 쌓이고, 칩의 ×로 뺀다(넣은 활동은 콤보박스에서 빠짐)
+      const actPicker = (set, wide) => {
+        const picked = [...set].sort((a, b) => a - b);
+        const rest = lines.map((_, i) => i).filter((i) => !set.has(i));
+        const combo = el('select', { class: 'act-combo', disabled: running || !rest.length, 'aria-label': '넣을 활동 고르기' }, [
+          el('option', { value: '', text: rest.length ? `＋ 활동 넣기 (남은 ${rest.length}개)` : '모든 활동을 넣었습니다' }),
+          ...rest.map((i) => el('option', { value: String(i), text: `${i + 1}. ${lines[i]}` }))]);
+        combo.addEventListener('change', () => { if (combo.value === '') return; set.add(+combo.value); draw(); });
+        const addAll = rest.length > 1 ? el('button', { type: 'button', class: 'small', disabled: running, text: '남은 활동 모두 넣기', onclick: () => { rest.forEach((i) => set.add(i)); draw(); } }) : null;
+        const clearAll = picked.length > 1 ? el('button', { type: 'button', class: 'small link', disabled: running, text: '모두 빼기', onclick: () => { set.clear(); draw(); } }) : null;
+        const chips = picked.length
+          ? picked.map((i) => el('span', { class: 'act-chip', title: lines[i] }, [el('span', { class: 'act-chip-t', text: `${i + 1}. ${lines[i]}` }),
+            el('button', { type: 'button', class: 'act-x', disabled: running, title: '이 활동 빼기', 'aria-label': `${i + 1}번 활동 빼기`, text: '×', onclick: () => { set.delete(i); draw(); } })]))
+          : [el('span', { class: 'muted', text: '아직 넣은 활동이 없습니다. 위 목록에서 골라 넣으세요.' })];
+        return el('div', { class: 'act-picker' + (wide ? ' wide' : '') }, [el('div', { class: 'act-add' }, [combo, addAll, clearAll]), el('div', { class: 'act-chips' }, chips)]);
+      };
       const draw = () => {
         const can = info.students.filter((x) => !blocked(x));
         [...sel].forEach((n) => { if (!can.some((x) => x.student_no === n)) sel.delete(n); });
         // ① 공통 참여 활동(활동 개요): 전체 이름으로 고르고, 학생별로 다른 점만 펼쳐 고친다
         commonBox.innerHTML = '';
         if (!isSub) {
-          commonBox.append(el('div', { class: 'col-label', stepText: '① 공통 참여 활동 — 고른 학생 모두에게 적용됩니다. 참여하지 않은 활동은 눌러서 빼세요.' }),
-            el('div', { class: 'basis-picks wide' }, lines.map((ln, i) => el('button', { type: 'button', class: 'small' + (common.has(i) ? ' on' : ''), disabled: running, text: `${i + 1}. ${ln}`,
-              onclick: () => { if (common.has(i)) common.delete(i); else common.add(i); draw(); } }))));
+          commonBox.append(el('div', { class: 'col-label', stepText: '① 공통 참여 활동 — 고른 학생 모두에게 적용됩니다. 목록에서 골라 넣고, 참여하지 않은 활동은 ×로 빼세요.' }),
+            actPicker(common, true));
         }
         tbl.innerHTML = '';
         tbl.appendChild(el('tr', {}, ['', '학번', '이름', '상태', isSub ? '성취수준' : '참여한 활동', '이번 생성'].map((h) => el('th', { text: h }))));
@@ -7892,8 +7948,7 @@
               onclick: () => { if (opened.has(x.student_no)) opened.delete(x.student_no); else { opened.add(x.student_no); if (!own[x.student_no]) own[x.student_no] = new Set(common); } draw(); } });
             const reset = !same ? el('button', { type: 'button', class: 'link small', disabled: running, text: '공통으로 되돌리기', onclick: () => { delete own[x.student_no]; opened.delete(x.student_no); draw(); } }) : null;
             basisCell = el('div', {}, [el('div', { class: 'basis-sum' }, [el('span', { class: same ? 'muted' : 'warn-text', style: 'cursor:default', text: summary }), toggle, reset]),
-              opened.has(x.student_no) ? el('div', { class: 'basis-picks' }, lines.map((ln, i) => el('button', { type: 'button', class: 'small' + (pk.has(i) ? ' on' : ''), disabled: running, title: ln,
-                text: `${i + 1}. ${ln.length > 16 ? ln.slice(0, 16) + '…' : ln}`, onclick: () => { const o = own[x.student_no]; if (o.has(i)) o.delete(i); else o.add(i); draw(); } }))) : null]);
+              opened.has(x.student_no) ? actPicker(own[x.student_no], false) : null]);
           }
           const r = res[x.student_no];
           const sm = sims[x.student_no];
@@ -7943,7 +7998,7 @@
         try {
           out = await aiRun({
             title: `${basisRo(s.item)} 생성`, kind: 'synth',
-            rows: [['담당', s.label], ['학생', `${students.length}명 (학생마다 AI를 한 번씩 부름)`], ['기준', isSub ? `성취기준 ${bytesOf(stdTa.value)}(B) · 학생별 성취수준` : `활동 개요 ${lines.length}개 중 공통 ${common.size}개${Object.keys(own).length ? ` · 따로 고른 학생 ${students.filter((x) => own[x.student_no]).length}명` : ''}`], ['모델', modelName(model)]],
+            rows: [['담당', s.label], ['학생', `${students.length}명 (학생마다 AI를 한 번씩 부름)`], ['기준', isSub ? `성취기준 ${bytesOf(stdTa.value)} Byte · 학생별 성취수준` : `활동 개요 ${lines.length}개 중 공통 ${common.size}개${Object.keys(own).length ? ` · 따로 고른 학생 ${students.filter((x) => own[x.student_no]).length}명` : ''}`], ['모델', modelName(model)]],
             warn: `학생관찰기록은 쓰지 않고 ${what}만으로 만듭니다. ${DROP_WARN} 같은 담당에서 먼저 만든 다른 학생 후보(최대 3개, 학번·이름 없음)도 함께 보내 표현이 겹치지 않게 합니다.${lvChanged.length ? ` 고른 성취수준(${lvChanged.length}명)은 실행할 때 명렬에도 저장됩니다.` : ''}`,
             before: async () => {
               await jobStart(); // 여러 명 생성 동안 학년도 전환·복원·업데이트와 겹치지 않게
@@ -7988,7 +8043,7 @@
           ? '고른 학생마다 성취기준과 학생의 성취수준만으로 세특 후보를 만듭니다. 기록이 있는 학생을 골라도 기록은 쓰지 않습니다. 결과에는 "관찰기록 없이 성취기준으로 생성" 표시가 남으니 실제 수업 모습과 맞는지 꼭 확인하세요.'
           : '고른 학생마다 참여한 활동만으로 후보를 만듭니다. 기록이 있는 학생을 골라도 기록은 쓰지 않습니다. 개요에 없는 사실은 지어내지 않도록 지시합니다. 학생마다 활동이 다르면 문장도 덜 겹칩니다.' }),
         isSub
-          ? el('details', {}, [el('summary', { text: `이번에 쓸 성취기준 (${bytesOf(basis.text)}(B), 필요한 부분만 남겨도 됩니다. 저장되지는 않음)` }), stdTa])
+          ? el('details', {}, [el('summary', { text: `이번에 쓸 성취기준 (${bytesOf(basis.text)} Byte, 필요한 부분만 남겨도 됩니다. 저장되지는 않음)` }), stdTa])
           : null,
         commonBox,
         el('div', { class: 'map-row' }, [head]),
@@ -8400,6 +8455,7 @@
     $('verText').textContent = 'v' + info.version.replace(/\.0$/, '');
     const c = await api.load_config();
     cfg = c.config;
+    setTimeout(() => prefetchModelNames(), 1500);
     dataDir = c.data_dir || info.data_dir;
     const prob = c.problem || {};
     // 설정 파일이 있는데 읽지 못함: 처음 사용처럼 시작 설정을 띄우지 않고 알린 뒤 다시 시도

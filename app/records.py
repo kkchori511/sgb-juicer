@@ -103,7 +103,7 @@ class Records:
         """AI에 줄 목표. 1학기가 합산을 이미 다 쓰면 막는다."""
         t, pi = self.target_for(gid, item, sno)
         if pi and pi["role"] == "second" and t <= 0:
-            raise DbError(f"1학기({pi['other']}) 최종안이 {pi['first_bytes']}(B)로 합산 {pi['total']}(B)를 이미 채웠습니다. 1학기 최종안을 줄이거나 합산 목표를 바꿔 주세요.")
+            raise DbError(f"1학기({pi['other']}) 최종안이 {pi['first_bytes']} Byte로 합산 {pi['total']} Byte를 이미 채웠습니다. 1학기 최종안을 줄이거나 합산 목표를 바꿔 주세요.")
         return t
 
     def _member(self, gid, sno):
