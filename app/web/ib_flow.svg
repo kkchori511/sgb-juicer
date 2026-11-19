@@ -58,7 +58,7 @@
 <circle cx="653" cy="32" r="13" fill="var(--accent, #7132f5)"/>
 <text x="653" y="37" text-anchor="middle" font-size="16" font-weight="750" fill="#fff">7</text>
 <text x="653" y="66" text-anchor="middle" font-size="15" font-weight="750" fill="var(--text, #0a1317)">내보내기</text>
-<text x="653" y="95" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #444950)">검토·내보내기</text>
+<text x="653" y="95" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #444950)">검토 / 내보내기</text>
 <text x="653" y="116" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #444950)">xlsx·복사</text>
 <text x="653" y="137" text-anchor="middle" font-size="12" font-weight="400" fill="var(--text-2, #444950)">NEIS 붙여넣기</text>
 </svg>

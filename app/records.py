@@ -129,10 +129,12 @@ class Records:
 
     # ---------- 상태 ----------
     def status_map(self, gid, item):
-        """{학번: {status, records, final_bytes, stale}}"""
+        """{학번: {status, records, confirmed, final_bytes, stale}}"""
         out = {}
-        for r in self.d.q("SELECT student_no, COUNT(*) n FROM records WHERE group_id=? AND item=? GROUP BY student_no", (int(gid), item)):
-            out.setdefault(r["student_no"], {})["records"] = r["n"]
+        for r in self.d.q("SELECT student_no, COUNT(*) n, SUM(CASE WHEN confirmed=1 THEN 1 ELSE 0 END) k FROM records WHERE group_id=? AND item=? GROUP BY student_no", (int(gid), item)):
+            o = out.setdefault(r["student_no"], {})
+            o["records"] = r["n"]
+            o["confirmed"] = r["k"] or 0
         for r in self.d.q("SELECT student_no, COUNT(*) n FROM results WHERE group_id=? AND item=? GROUP BY student_no", (int(gid), item)):
             out.setdefault(r["student_no"], {})["results"] = r["n"]
         for f in self.d.q("SELECT * FROM finals WHERE group_id=? AND item=?", (int(gid), item)):
@@ -143,6 +145,7 @@ class Records:
             o["stale"] = bool(f["stale"])
         for sno, o in out.items():
             o.setdefault("records", 0)
+            o.setdefault("confirmed", 0)
             o.setdefault("final_bytes", None)
             o.setdefault("stale", False)
             if o.get("closed"):
