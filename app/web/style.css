@@ -1785,3 +1785,5 @@ button.is-next, .rec-final .sec-title > button.btn-join.is-next { box-shadow: no
 @font-face { font-family: "Paperlogy"; font-weight: 900; font-style: normal; font-display: block; src: url("fonts/Paperlogy-9Black.woff2") format("woff2"); }
 :root { --font: "Paperlogy", "Malgun Gothic", "Apple SD Gothic Neo", -apple-system, "Segoe UI", sans-serif; }
 button, input, select, textarea { font-family: inherit; }
+/* 페이퍼로지는 진짜 Black 굵기라 항목 메뉴 글씨는 굵게(700)까지만 */
+.nav.nav-item, .nav.nav-item span, .nav.nav-item.active, .nav.nav-item.active:hover { font-weight: 700; }
