@@ -390,7 +390,7 @@ class Api:
                 g = hr[0]
                 return {"message": f"비담임으로 바꾸면 {g['name']} 담임반(학생 {g['total']}명)과 담임 항목이 화면에서 숨겨집니다. 자료는 지우지 않으며, 다시 담임으로 바꾸면 그대로 보입니다."}
             return {"message": "비담임으로 바꾸면 담임 항목(자율·진로·행특)이 숨겨집니다."}
-        return {"message": "담임으로 바꾸면 담임 항목(자율·진로·행특)이 나타납니다. 담임반이 없으면 명렬·담당 관리에서 추가해 주세요."}
+        return {"message": "담임으로 바꾸면 담임 항목(자율·진로·행특)이 나타납니다. 담임반이 없으면 명렬 / 담당 관리에서 추가해 주세요."}
 
     @safe
     def set_role(self, role):
@@ -809,7 +809,7 @@ class Api:
         students = []
         for m in d.members(gid):
             o = smap.get(m["student_no"], {})
-            students.append({**m, "status": o.get("status", "none"), "records": o.get("records", 0),
+            students.append({**m, "status": o.get("status", "none"), "records": o.get("records", 0), "confirmed": o.get("confirmed", 0),
                              "final_bytes": o.get("final_bytes"), "stale": o.get("stale", False)})
         return {"group": g, "item": item, "target": target, "students": students}
 
@@ -1526,6 +1526,12 @@ class Api:
     def adopt_record(self, rid):
         self._editable()
         self._rec().adopt_record(rid)
+        return {}
+
+    @safe
+    def mark_record_confirmed(self, rid):
+        self._editable()
+        self._rec().mark_record_confirmed(rid)
         return {}
 
     @safe

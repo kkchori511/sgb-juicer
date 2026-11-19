@@ -16,8 +16,8 @@
   let runCost = 0;
 
   const PANEL_TITLES = {
-    dashboard: '현황판', inbox: '자료 Inbox', records: '항목별 기록', tagrec: '태그별 기록', export: '검토·내보내기',
-    roster: '명렬·담당 관리', tags: '태그 관리', prompts: '프롬프트', standards: '성취기준·활동 개요', settings: '설정', notice: '유의 사항', guide: '사용 안내',
+    dashboard: '현황판', inbox: '자료 Inbox', records: '항목별 기록', tagrec: '태그별 기록', export: '검토 / 내보내기',
+    roster: '명렬 / 담당 관리', tags: '태그 관리', prompts: '프롬프트', standards: '성취기준 / 활동 개요', settings: '설정', notice: '유의 사항', guide: '사용 안내',
   };
   const HELP = { dashboard: 'g-dashboard', inbox: 'g-inbox', records: 'g-records', tagrec: 'g-tagrec', export: 'g-export',
     roster: 'g-roster', tags: 'g-settings', prompts: 'g-settings', standards: 'g-standards', settings: 'g-settings', notice: 'g-flow' };
@@ -107,10 +107,10 @@
   const ITEM_LABELS = { autonomy: '자율', career: '진로', behavior: '행특', subject: '세특', club: '동아리' };
   const ITEM_FULL = { autonomy: '자율활동', career: '진로활동', behavior: '행동특성 및 종합의견', subject: '과목 세특(기본)', club: '동아리활동(기본)' };
   const STATUS = {
-    none: { icon: '○', text: '기록 없음', cls: 'st-none' },
-    progress: { icon: '◐', text: '입력 중', cls: 'st-progress' },
-    final: { icon: '◑', text: '최종안 있음', cls: 'st-final' },
-    closed: { icon: '●', text: '마감', cls: 'st-closed' },
+    none: { icon: '⊘', text: '기록 없음', cls: 'st-none' },
+    progress: { icon: '✎', text: '입력 중', cls: 'st-progress' },
+    final: { icon: '✓', text: '최종안 있음', cls: 'st-final' },
+    closed: { icon: '■', text: '마감', cls: 'st-closed' },
   };
   const KIND_LABEL = { homeroom: '담임반', subject: '과목', club: '동아리' };
 
@@ -120,6 +120,7 @@
     Object.entries(attrs || {}).forEach(([k, v]) => {
       if (k === 'class') e.className = v;
       else if (k === 'text') e.textContent = v;
+      else if (k === 'stepText') numberedLabel(e, v);
       else if (k === 'html') e.innerHTML = v;
       else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
       else if (k === 'value') e.value = v;
@@ -127,7 +128,28 @@
       else if (v !== false && v !== null && v !== undefined) e.setAttribute(k, v === true ? '' : v);
     });
     (children || []).forEach((c) => c !== null && c !== undefined && c !== false && e.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c));
+    // 안내 문장 안의 원문자는 원래 글자를 보존하고 크기만 키운다(기록 본문·폼 값 제외).
+    if (tag === 'p' || (tag === 'span' && e.classList.contains('muted'))) bigCircled(e);
     return e;
+  }
+  // 안내 글의 원문자(①…)를 글자 그대로 두고 크게만 보이게(입력칸·선택지는 건드리지 않음, textContent는 그대로)
+  function bigCircled(root) {
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (/[①②③④⑤⑥⑦]/.test(n.textContent) && !n.parentElement.closest('textarea, option, select, .circled-num') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT) });
+    const nodes = [];
+    while (w.nextNode()) nodes.push(w.currentNode);
+    nodes.forEach((n) => n.replaceWith(...n.textContent.split(/([①②③④⑤⑥⑦])/).filter((t) => t).map((t) => (/^[①②③④⑤⑥⑦]$/.test(t) ? el('span', { class: 'circled-num', text: t }) : document.createTextNode(t)))));
+  }
+  // 표시용 단계 번호만 원형 숫자 배지로 그린다. 원본 상수·입력값·기록 본문은 바꾸지 않는다.
+  function numberedLabel(node, value) {
+    const label = String(value || '');
+    const match = label.match(/^([①②③④⑤⑥⑦]|[1-7])\s*(.*)$/);
+    if (!match) { node.textContent = label; return; }
+    const n = '①②③④⑤⑥⑦'.indexOf(match[1]);
+    node.classList.add('num-label');
+    // 버튼·탭은 전체 문구를 이름으로 주고 배지는 숨긴다. 일반 글자 칸은 aria-label이 읽히지 않을 수 있어 배지 숫자를 그대로 읽게 둔다
+    const named = /^(BUTTON|A)$/.test(node.tagName) || node.getAttribute('role') === 'tab';
+    if (named) node.setAttribute('aria-label', label);
+    node.append(el('span', { class: 'num-badge', 'aria-hidden': named ? 'true' : false, text: n < 0 ? match[1] : n + 1 }), document.createTextNode(named ? match[2] : ` ${match[2]}`));
   }
   // append()는 null을 'null' 글자로 넣으므로 빈 값은 걸러 낸다
   function addTo(parent, ...xs) { parent.append(...xs.filter((x) => x !== null && x !== undefined && x !== false)); }
@@ -290,8 +312,10 @@
     return new Promise((resolve) => {
       if (html) $('modalMsg').innerHTML = message;
       else $('modalMsg').textContent = message;
+      bigCircled($('modalMsg'));
       $('modalCancel').hidden = !withCancel;
       $('modalOk').textContent = okText || '확인';
+      $('modalOk').classList.toggle('btn-danger', /삭제|지우|초기화|비우|복원/.test(okText || ''));
       $('modalCancel').textContent = cancelText || '취소';
       $('modal').hidden = false;
       $('modal').setAttribute('aria-modal', 'true');
@@ -317,8 +341,8 @@
     const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const pb = bytesOf(String(prev).trim()), ab = bytesOf(String(add || '').trim()), sum = bytesOf(appendFinal(prev, add));
     const over = target && sum > target;
-    const html = `<div class="fin-mode"><b>${label ? `${esc(label)}의 ` : ''}지금 최종안이 있습니다(${pb}B).</b> 새 글(${ab}B)을 어떻게 넣을까요?`
-      + `<div class="fin-mode-btns"><button type="button" class="primary" id="finAppend">뒤에 이어 붙이기 → 합계 <span class="${over ? 'bytes over' : ''}">${sum}B${target ? ` / ${target}B` : ''}</span></button>`
+    const html = `<div class="fin-mode"><b>${label ? `${esc(label)}의 ` : ''}지금 최종안이 있습니다(${pb}(B)).</b> 새 글(${ab}(B))을 어떻게 넣을까요?`
+      + `<div class="fin-mode-btns"><button type="button" class="primary" id="finAppend">뒤에 이어 붙이기 → 합계 <span class="${over ? 'bytes over' : ''}">${sum}(B)${target ? ` / ${target}(B)` : ''}</span></button>`
       + (withCursor ? ` <button type="button" id="finCursor" title="최종안 칸에서 마지막으로 커서를 둔 자리(없으면 맨 끝)에 끼워 넣습니다">커서 자리에 넣기</button>` : '') + `</div>`
       + `<p class="hint">이어 붙이기는 지금 최종안 뒤에 띄어쓰기 한 칸으로 붙입니다(줄바꿈 없음). ${withCursor ? '넣은 뒤 최종안 칸에서 Ctrl+Z로 되돌릴 수 있습니다.' : '어느 쪽이든 넣은 직후 [되돌리기]로 원래 최종안을 돌려놓을 수 있습니다.'}</p></div>`;
     let mode = 'replace';
@@ -382,7 +406,7 @@
       saveAllPending().then(async (ok) => {
         if (ok) { showPanelNow(name, fromHistory); return; }
         if (fromHistory) history.pushState({ panel }, '');
-        // 다시 시도해도 저장되지 않는 대기 저장(성취기준·활동 개요 등)이 있으면, 버리고 이동할 수 있게 묻는다(그대로 두면 화면을 못 떠남)
+        // 다시 시도해도 저장되지 않는 대기 저장(성취기준 / 활동 개요 등)이 있으면, 버리고 이동할 수 있게 묻는다(그대로 두면 화면을 못 떠남)
         const failed = [...pendingSaves.entries()].filter(([, j]) => j.failed);
         if (failed.length && !draftDirty() && !tvDirty() && await confirmBox(`${SAVE_FAIL_MSG}\n\n저장하지 못한 글을 버리고 이동할까요? 필요하면 [취소]를 누르고 편집칸의 글을 먼저 복사해 두세요.`, '버리고 이동')) {
           failed.forEach(([k]) => dropPending(k));
@@ -401,6 +425,8 @@
   // 메뉴 강조: 항목별 기록의 하위 항목은 지금 고른 항목만
   function markNav() {
     const it = panel === 'records' && R.slot ? R.slot.item : null;
+    $('recBody').dataset.item = it || '';
+    $('main').dataset.item = it || ''; // 항목별 기록이면 오른쪽 작업 영역 바탕을 그 항목 색으로
     document.querySelectorAll('.nav').forEach((b) => b.classList.toggle('active', b.dataset.item ? b.dataset.item === it : (!!b.dataset.panel && b.dataset.panel === panel)));
     $('navRecFold').classList.toggle('open-parent', panel === 'records');
   }
@@ -409,7 +435,7 @@
     const pick = async () => {
       if (panel === 'records' && !(R.slot && R.slot.item === item) && !(await leaveOk())) return;
       const list = R.slots.filter((s) => s.item === item);
-      if (!list.length) { toast('이 항목의 담당이 없습니다. 명렬·담당 관리에서 먼저 추가하세요.'); return; }
+      if (!list.length) { toast('이 항목의 담당이 없습니다. 명렬 / 담당 관리에서 먼저 추가하세요.'); return; }
       if (!(R.slot && R.slot.item === item)) { R.slot = list[0]; R.sno = null; R.selected.clear(); }
       if (panel === 'records') { renderRecordsPanel(); markNav(); } else showPanel('records');
     };
@@ -549,7 +575,7 @@
         ? `${s.students}명 · 마감 ${s.closed}/${s.item_total}항목`
         : `${s.students}명 · 마감 ${s.closed}`;
       const pct = s.item_total ? Math.round((s.closed / s.item_total) * 100) : 0;
-      cards.appendChild(el('button', { type: 'button', class: 'gcard' + (g.id === dashSel ? ' active' : '') + (s.item_total && s.closed >= s.item_total ? ' is-closed' : ''), onclick: () => { dashSel = g.id; renderDashboard(); } }, [
+      cards.appendChild(el('button', { type: 'button', 'data-item': g.kind === 'homeroom' ? 'autonomy' : g.kind, class: 'gcard' + (g.id === dashSel ? ' active' : '') + (s.item_total && s.closed >= s.item_total ? ' is-closed' : ''), onclick: () => { dashSel = g.id; renderDashboard(); } }, [
         el('span', { class: 'g-kind', text: g.kind === 'homeroom' ? '담임반 · 연간' : g.kind === 'subject' ? `과목 세특 · ${g.semester}학기` : '동아리 · 연간' }),
         el('span', { class: 'g-name', text: g.kind === 'homeroom' ? g.name : g.name }),
         el('span', { class: 'g-sum', text: g.total ? sum : '명렬 미등록' }),
@@ -561,7 +587,7 @@
     todo.innerHTML = '';
     if (dash.todo.length) {
       todo.appendChild(el('span', { class: 'todo-label', text: '다음 할 일:' }));
-      dash.todo.forEach((t) => todo.appendChild(el('button', { type: 'button', text: t.label, onclick: () => {
+      dash.todo.forEach((t) => todo.appendChild(el('button', { type: 'button', text: t.label, 'data-todo': t.kind === 'inbox' ? (t.label.includes('보내기') ? 'inbox-send' : 'inbox-check') : t.kind, onclick: () => {
         if (t.kind === 'roster') { rosterSel = t.group_id; showPanel('roster'); return; }
         if (t.kind === 'inbox') { IB.bid = t.batch_id; showPanel('inbox'); return; }
         if (t.kind === 'tagwork') { goTagWork(t.tag_id, '', t.step); return; }
@@ -570,9 +596,14 @@
     }
     renderDashTable(groups.find((g) => g.id === dashSel), groups.length);
   }
-  function stCell(key) {
+  // 상태 칩: 모든 화면에서 같은 모양(테두리·같은 폭). label을 주면 글자만 바꾼다. iconOnly면 아이콘만(좁은 칸)
+  function stBadge(key, label, iconOnly) {
     const s = STATUS[key] || STATUS.none;
-    return el('td', { class: 'stcell' }, [el('span', { class: `st ${s.cls}`, text: s.icon }), ' ', s.text]);
+    return el('span', { class: `status-badge ${s.cls}${iconOnly ? ' icon-only' : ''}`, title: label || s.text },
+      iconOnly ? [el('span', { class: 'st', text: s.icon })] : [el('span', { class: 'st', text: s.icon }), ' ', label || s.text]);
+  }
+  function stCell(key) {
+    return el('td', { class: 'stcell' }, [stBadge(key)]);
   }
   const dashFold = new Set(); // 현황판에서 표를 접은 담당
   function renderDashTable(g, count) {
@@ -581,7 +612,7 @@
     if (!count) {
       card.appendChild(el('div', { class: 'empty-state' }, [
         el('p', { text: '아직 담당이 없습니다. 담임반·과목·동아리를 추가하세요.' }),
-        el('div', { class: 'steps-btns' }, [el('button', { type: 'button', class: 'primary', text: '명렬·담당 관리', onclick: () => showPanel('roster') })]),
+        el('div', { class: 'steps-btns' }, [el('button', { type: 'button', class: 'primary', text: '명렬 / 담당 관리', onclick: () => showPanel('roster') })]),
       ]));
       return;
     }
@@ -591,8 +622,8 @@
         el('h2', { text: g.label }),
         el('p', { text: '명렬이 아직 없습니다. 아래 순서로 시작하세요.' }),
         el('div', { class: 'steps-btns' }, [
-          el('button', { type: 'button', class: 'primary', text: '① 명렬 등록', onclick: () => { rosterSel = g.id; showPanel('roster'); } }),
-          el('button', { type: 'button', text: '② 자료 가져오기', onclick: () => showPanel('inbox') }),
+          el('button', { type: 'button', class: 'primary', stepText: '① 명렬 등록', onclick: () => { rosterSel = g.id; showPanel('roster'); } }),
+          el('button', { type: 'button', stepText: '② 자료 가져오기', onclick: () => showPanel('inbox') }),
         ]),
       ]));
       return;
@@ -614,8 +645,8 @@
     its.forEach((it) => {
       const n = act.filter((r) => r.status[it] === 'closed').length;
       const pct = act.length ? Math.round((n / act.length) * 100) : 0;
-      head.appendChild(el('span', { class: 'dg-sum' + (!act.length ? '' : n >= act.length ? ' all' : ' open'), title: `${g.kind === 'homeroom' ? ITEM_LABELS[it] : '이 담당'} 마감 ${n}명 / 활성 ${act.length}명` }, [
-        `${g.kind === 'homeroom' ? `${ITEM_LABELS[it]} ` : ''}${act.length && n >= act.length ? `● 마감 ${n}/${act.length}명` : `◐ 마감 ${n}/${act.length}명`}`, el('span', { class: 'bar dg-bar' }, [el('span', { class: 'bar-fill', style: `width:${pct}%` })])]));
+      head.appendChild(el('span', { 'data-item': it, class: 'dg-sum' + (!act.length ? '' : n >= act.length ? ' all' : ' open'), title: `${g.kind === 'homeroom' ? ITEM_LABELS[it] : '이 담당'} 마감 ${n}명 / 활성 ${act.length}명` }, [
+        `${g.kind === 'homeroom' ? `${ITEM_LABELS[it]} ` : ''}${act.length && n >= act.length ? `■ 마감 ${n}/${act.length}명` : `□ 마감 ${n}/${act.length}명`}`, el('span', { class: 'bar dg-bar' }, [el('span', { class: 'bar-fill', style: `width:${pct}%` })])]));
     });
     if (shut) return;
     let rows = g.rows.slice();
@@ -644,7 +675,7 @@
     if (g.kind === 'homeroom') {
       t.appendChild(el('tr', {}, [th('학번'), th('이름'), th('자율(연간)'), th('진로(연간)'), th('행특(연간)'), th('내 과목·동아리'), th('확인 사항')]));
     } else {
-      t.appendChild(el('tr', {}, [th('학번'), th('이름'), th('학년-반'), th('상태'), th('기록 수'), th(`최종안 (목표 ${target}B)`), th('확인 사항')]));
+      t.appendChild(el('tr', {}, [th('학번'), th('이름'), th('학년-반'), th('상태'), th('기록 수'), th(`최종안 (목표 ${target}(B))`), th('확인 사항')]));
     }
     rows.sort((a, b) => (b.active - a.active) || a.student_no.localeCompare(b.student_no));
     rows.forEach((r) => {
@@ -672,7 +703,7 @@
     card.appendChild(wrap);
   }
 
-  // ---------- 명렬·담당 관리 ----------
+  // ---------- 명렬 / 담당 관리 ----------
   function renderRoster() {
     const groups = visibleGroups();
     const tabs = $('groupTabs');
@@ -690,7 +721,7 @@
       return;
     }
     const g = groups.find((x) => x.id === rosterSel);
-    $('crumb').textContent = `${ys.year}학년도 › 명렬·담당 관리 › ${g.label}`;
+    $('crumb').textContent = `${ys.year}학년도 › 명렬 / 담당 관리 › ${g.label}`;
     if (returnTo) {
       body.appendChild(el('div', { class: 'return-bar' }, ['📥 자료 Inbox에서 학생 매칭 중이었습니다. 명렬을 반영한 뒤 돌아가세요.', el('span', { class: 'spacer' }),
         el('button', { type: 'button', class: 'primary', text: '매칭으로 돌아가기', onclick: async () => {
@@ -753,7 +784,7 @@
     const partnerOf = (ys.groups || []).find((x) => x.pair_id === g.id);
     if (g.semester !== 2) {
       row.append(el('b', { text: '1·2학기 합산' }), partnerOf
-        ? el('span', {}, [`2학기 ${partnerOf.label}와 세특 합산 ${partnerOf.pair_total}B. 1학기를 먼저 쓰면 2학기에 남은 바이트가 학생별로 자동 계산됩니다.`])
+        ? el('span', {}, [`2학기 ${partnerOf.label}와 세특 합산 ${partnerOf.pair_total}(B). 1학기를 먼저 쓰면 2학기에 남은 바이트가 학생별로 자동 계산됩니다.`])
         : el('span', { class: 'muted', text: '1학기와 2학기가 세특 바이트를 함께 쓰는 과목이면, 2학기 과목 설정에서 이 과목을 고르세요.' }));
       return row;
     }
@@ -1957,7 +1988,7 @@
   }
   function bytesEl(n, target) {
     const over = target && n > target;
-    return el('span', { class: 'bytes' + (over ? ' over' : ''), text: target ? `${n} / ${target}B${over ? ` · ${n - target}B 초과` : ''}` : `${n}B` });
+    return el('span', { class: 'bytes' + (over ? ' over' : ''), text: target ? `${n} / ${target}(B)${over ? ` · ${n - target}(B) 초과` : ''}` : `${n}(B)` }); // 바이트 칩: 1500(B)
   }
   function fillModelSelect(sel) {
     const prev = sel.value;
@@ -2200,7 +2231,7 @@
       $('recRecords').innerHTML = '';
       unfoldEmpty();
       updateRecTools();
-      $('recRecords').appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '담당이 없습니다. 명렬·담당 관리에서 먼저 추가하세요.' }), el('button', { type: 'button', class: 'primary', text: '명렬·담당 관리', onclick: () => showPanel('roster') })]));
+      $('recRecords').appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '담당이 없습니다. 명렬 / 담당 관리에서 먼저 추가하세요.' }), el('button', { type: 'button', class: 'primary', text: '명렬 / 담당 관리', onclick: () => showPanel('roster') })]));
       return;
     }
     await loadSlotStudents();
@@ -2208,7 +2239,7 @@
   // 공통 일괄 버튼(이 항목 전체)
   function updateRecTools() {
     const off = !R.slot || !!ys.archived || !(R.students || []).length;
-    $('recToolsLabel').textContent = R.slot ? `${R.slot.label} 전체 작업` : '이 항목 전체 작업';
+    $('recToolsLabel').textContent = R.slot ? `${String(R.slot.label).replace(/\s*·\s*/g, ' / ')} 전체 작업` : '이 항목 전체 작업'; // 이 줄은 가운데 점 대신 슬래시
     ['recBulkRecord', 'recBulkExisting', 'recBulkFinal', 'recBasisGen', 'recBulkClose', 'recJoinBulk', 'recTraitBulk', 'recTraitTpl', 'recTraitImp'].forEach((id) => { $(id).disabled = off; });
     ['recTraitBulk', 'recTraitTpl', 'recTraitImp'].forEach((id) => { $(id).hidden = !R.slot || R.slot.item !== 'behavior'; });
     const bg = $('recBasisGen');
@@ -2289,14 +2320,15 @@
     function renderStu(parent, s) {
       const st = STATUS[s.status] || STATUS.none;
       parent.appendChild(el('button', { type: 'button', class: 'stu' + (s.student_no === R.sno ? ' active' : '') + (s.active ? '' : ' inactive'), title: st.text, onclick: async () => { if (s.student_no !== R.sno && !(await leaveOk())) return; R.sno = s.student_no; R.selected.clear(); renderStudentList(); loadStudent(); } }, [
-        el('span', { class: `st ${st.cls}`, text: st.icon }), el('span', { class: 'no', text: s.student_no }), el('span', { text: s.name }),
-        el('span', { class: 'cnt', text: (s.stale ? '! ' : '') + (s.records ? `${s.records}건` : '') + (s.active ? '' : ' 비활성') }),
+        el('span', { class: `st ${st.cls}`, text: st.icon }), el('span', { class: 'no', text: s.student_no }), el('span', { class: 'nm', text: s.name, title: s.name }),
+        el('span', { class: 'cnt', title: `확정 기록 ${s.confirmed || 0}건 / 전체 기록 ${s.records || 0}건`, text: (s.stale ? '! ' : '') + (s.records ? `${s.confirmed || 0}/${s.records}` : '') + (s.active ? '' : ' 비활성') }),
       ]));
     }
     if (!list.length) box.appendChild(el('p', { class: 'muted', text: '조건에 맞는 학생이 없습니다.' }));
   }
   // 묶음 색: 반·수업 이름으로 정해 화면이 바뀌어도 같은 색
-  const GROUP_COLORS = ['#ea580c', '#7c3aed', '#db2777', '#92400e', '#475569', '#0f766e'];
+  // 원색 계열(진하게). 머리 칸은 이 색으로 채우고 흰 글자를 쓰므로 흰 글자가 잘 읽히는 진하기로 둔다
+  const GROUP_COLORS = ['#e03131', '#1c7ed6', '#2f9e44', '#e8590c', '#c2255c', '#0c8599']; // 보라는 AI 전용이라 쓰지 않음
   function groupColor(key) { let h = 0; for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return GROUP_COLORS[h % GROUP_COLORS.length]; }
   // 맨 위 통계 상자: 담당 전체(검색·필터와 관계없이). 숫자를 누르면 그 상태로 거른다.
   function statBox() {
@@ -2305,9 +2337,10 @@
     const done = n('closed');
     const pct = act.length ? Math.round((done / act.length) * 100) : 0;
     const chip = (k, label) => el('button', { type: 'button', class: `stat-chip ${STATUS[k].cls}${R.filter === k ? ' on' : ''}`, title: `${label}만 보기`,
-      onclick: () => { R.filter = R.filter === k ? '' : k; renderStudentList(); } }, [`${STATUS[k].icon} ${label} `, el('b', { text: String(n(k)) })]);
+      onclick: () => { R.filter = R.filter === k ? '' : k; renderStudentList(); } }, [el('span', { text: `${STATUS[k].icon} ${label}` }), el('b', { text: String(n(k)) })]);
     return el('div', { class: 'stat-box' }, [
-      el('div', { class: 'stat-top' }, [el('span', { text: '마감 ' }), el('b', { class: 'stat-big', text: `${done}` }), el('span', { text: ` / ${act.length}명` }), el('span', { class: 'spacer' }), el('b', { text: `${pct}%` })]),
+      el('div', { class: 'stat-count', title: `마감 ${pct}%` }, [el('span', { class: 'stat-label', text: '마감' }), el('b', { class: 'stat-big', text: `${done}` }), el('span', { class: 'stat-unit', text: '명' }),
+        el('span', { class: 'stat-sep', text: '/' }), el('b', { class: 'stat-big stat-all', text: `${act.length}` }), el('span', { class: 'stat-unit', text: '명' })]),
       el('div', { class: 'stat-bar' }, [el('span', { style: `width:${pct}%` })]),
       el('div', { class: 'stat-chips' }, [chip('closed', '마감'), chip('final', '최종안'), chip('progress', '입력 중'), chip('none', '기록 없음')]),
       el('div', { class: 'stat-scope', text: `담당 전체 기준${R.students.length > act.length ? ` · 비활성 ${R.students.length - act.length}명 제외` : ''}${R.search.trim() ? ` · 검색어 '${R.search.trim()}' 적용 중(아래 목록 ${filteredStudents().length}명)` : ''}` }),
@@ -2338,14 +2371,21 @@
     R.target = r.target; // 1·2학기 합산 과목은 학생마다 목표가 다르다
     const st = R.students.find((s) => s.student_no === R.sno);
     const stInfo = STATUS[(r.final && r.final.closed) ? 'closed' : r.final ? 'final' : (r.records.length || r.results.length) ? 'progress' : 'none'];
-    if (st) st.status = (r.final && r.final.closed) ? 'closed' : r.final ? 'final' : (r.records.length || r.results.length) ? 'progress' : 'none';
+    if (st) {
+      st.status = (r.final && r.final.closed) ? 'closed' : r.final ? 'final' : (r.records.length || r.results.length) ? 'progress' : 'none';
+      st.records = r.records.length; // 목록의 '확정/전체' 건수도 새로 읽은 기록으로
+      st.confirmed = r.records.filter((x) => x.confirmed).length;
+    }
     $('recStudentHead').innerHTML = '';
-    $('recStudentHead').append(`${r.student.student_no} ${r.student.name} `, el('span', { class: `st ${stInfo.cls}`, text: `${stInfo.icon} ${stInfo.text}` }),
+    $('recStudentHead').append(`${r.student.student_no} ${r.student.name} `, stBadge(Object.keys(STATUS).find((k) => STATUS[k] === stInfo)),
       r.student.active ? '' : el('span', { class: 'tag', text: '비활성' }), r.student.level ? el('span', { class: 'tag', text: `성취수준 ${r.student.level}` }) : '');
     $('crumb').textContent = `${ys.year}학년도 › 항목별 기록 › ${R.slot.label} › ${r.student.name}`;
     if (R.slot.item === 'behavior' && !TD) await traitDict();
     renderRecords();
     renderFinal();
+    // 좁은 창 탭: 학생을 새로 열면 다음 단계가 있는 쪽을 보여 주고, 같은 학생을 다시 그릴 때는 보던 탭을 둔다
+    if (!keepScroll) setRecTab(['join', 'close'].includes(recNext()) ? 'final' : 'records');
+    else setRecTab($('recMain').dataset.tab);
     if (keepScroll) { $('recRecords').scrollTop = scroll[0]; $('recFinal').scrollTop = scroll[1]; }
     renderStudentList();
   }
@@ -2395,7 +2435,8 @@
   const FOLD_KEY = 'sgb.fold';
   const fold = (() => { try { return JSON.parse(localStorage.getItem(FOLD_KEY) || '{}') || {}; } catch (e) { return {}; } })();
   // 최종안 칸은 '최종안'과 '후보'를 따로 접는다. 둘 다 접으면 칸 전체가 막대(제목은 늘 보임).
-  const syncFinalCol = () => $('recFinal').classList.toggle('folded-all', !!(fold.final && fold.results));
+  // 최종안 칸 전체 접기는 오른쪽 위 «로만. 안쪽 구역(최종안·확정 기록·후보) ▾는 그 구역만 접는다
+  const syncFinalCol = () => $('recFinal').classList.remove('folded-all');
   function setFold(key, v) {
     fold[key] = v;
     try { localStorage.setItem(FOLD_KEY, JSON.stringify(fold)); } catch (e) { /* 무시 */ }
@@ -2414,7 +2455,54 @@
     b.addEventListener('click', () => { setFold(key, !fold[key]); apply(); });
     return b;
   }
+  // 항목별 기록 세 칸(학생 목록·기록·최종안) 접기: 칸 오른쪽 위 «로 접으면 얇은 세로 띠, 띠를 누르면 다시 펼침. 상태는 기억.
+  // 좁은 창(기록·최종안이 탭)에서는 기록·최종안 접기는 쓰지 않는다(탭이 대신함)
+  const COLS = { list: ['recList', '학생 목록'], rec: ['recRecords', '기록'], final: ['recFinal', '최종안'] };
+  const NARROW_MQ = window.matchMedia('(max-aspect-ratio: 1/1), (max-width: 1180px)');
+  const colOff = (k) => !!fold['col_' + k];
+  function applyCols() {
+    const b = $('recBody');
+    b.classList.toggle('col-list-off', colOff('list'));
+    ['rec', 'final'].forEach((k) => b.classList.toggle(`col-${k}-off`, colOff(k) && !NARROW_MQ.matches));
+  }
+  function toggleCol(k) {
+    if (!colOff(k) && k !== 'list' && colOff(k === 'rec' ? 'final' : 'rec')) { toast('기록과 최종안 중 한 칸은 펼쳐 둡니다.'); return; }
+    setFold('col_' + k, !colOff(k));
+    applyCols();
+  }
+  function ensureColCtl(k) {
+    const [id, label] = COLS[k];
+    const box = $(id);
+    if (!box.querySelector(':scope > .col-strip')) {
+      box.appendChild(el('button', { type: 'button', class: 'col-strip', title: `${label} 칸 펼치기`, onclick: () => toggleCol(k) }, [el('span', { text: label }), el('b', { text: '»' })]));
+    }
+    if (!box.querySelector('.col-fold')) {
+      const btn = el('button', { type: 'button', class: 'col-fold', title: `${label} 칸 접기(화면을 넓게)`, 'aria-label': `${label} 칸 접기`, text: '«', onclick: () => toggleCol(k) });
+      const t = k === 'list' ? null : box.querySelector('.sec-title');
+      if (t) t.appendChild(btn);
+      else box.prepend(el('div', { class: 'col-head' }, [el('b', { text: k === 'list' ? label : '' }), el('span', { class: 'spacer' }), btn]));
+    }
+  }
+  Object.keys(COLS).forEach((k) => {
+    let q = 0;
+    new MutationObserver(() => { if (!q) q = requestAnimationFrame(() => { q = 0; ensureColCtl(k); }); }).observe($(COLS[k][0]), { childList: true });
+  });
+  NARROW_MQ.addEventListener('change', applyCols);
+  applyCols();
   // 새 후보가 생기면 후보 칸을 펼쳐 보이게
+  // 좁은 창(기록·최종안이 위아래로 쌓일 때)에서 한 번에 한 영역만 크게 보이는 탭. 넓은 창에서는 탭이 숨고 두 영역이 함께 보인다
+  function setRecTab(tab) {
+    const t = tab === 'final' ? 'final' : 'records';
+    $('recMain').dataset.tab = t;
+    const nx = recNext();
+    $('recTabs').querySelectorAll('[data-rtab]').forEach((b) => {
+      const on = b.dataset.rtab === t;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+      b.classList.toggle('has-next', b.dataset.rtab === (['join', 'close'].includes(nx) ? 'final' : nx === 'ai' ? 'records' : ''));
+    });
+  }
+  $('recTabs').addEventListener('click', (e) => { const b = e.target.closest('[data-rtab]'); if (b) setRecTab(b.dataset.rtab); });
   function revealResults() { if (fold.results) setFold('results', false); }
   function unfoldEmpty() { ['recRecords', 'recFinal'].forEach((id) => $(id).classList.remove('folded', 'folded-all')); }
   const closedNow = () => !!(R.view && R.view.final && R.view.final.closed) || !!ys.archived;
@@ -2422,6 +2510,22 @@
   const pairFull = () => { const p = R.view && R.view.pair; return !!(p && p.role === 'second' && p.remain !== null && p.remain !== undefined && p.remain <= 0); };
   const PAIR_FULL_TIP = '1학기 최종안이 합산 바이트를 이미 다 써서 AI로 쓸 수 없습니다. 1학기 최종안을 줄이거나 합산을 바꾸세요.';
 
+  // 이 학생에서 지금 누를 단계(보라 채움 버튼 하나): 'ai' 확정 기록·최종안 없음 → 'join' 확정 기록 있음 → 'close' 최종안 있음 → '' 마감
+  function recNext() {
+    const v = R.view;
+    if (!v) return '';
+    const f = v.final;
+    if (f && f.closed) return '';
+    if (f && String(f.text || '').trim()) return 'close';
+    return v.records.some((r) => r.confirmed) ? 'join' : 'ai';
+  }
+  // 'ai' 단계에서 채울 AI 변환 버튼: 행특은 설계 카드, 나머지는 확정 안 된 첫 기록
+  function recNextAiId() {
+    if (recNext() !== 'ai') return null;
+    if (R.slot.item === 'behavior') return 'trait';
+    const r = R.view.records.find((x) => x.kind !== 'trait' && !x.confirmed && String(x.orig || '').trim());
+    return r ? r.id : null;
+  }
   function renderRecords() {
     const box = $('recRecords');
     box.innerHTML = '';
@@ -2430,7 +2534,8 @@
     const v = { ...v0, records: v0.records.filter((r) => r.kind !== 'trait') }; // 행특 설계 카드는 따로(맨 위)
     const locked = closedNow();
     const nConf = v.records.filter((r) => r.confirmed).length;
-    const head = el('div', { class: 'sec-title' }, [foldBtn('records', box, `${v.student.name} 기록 ${v.records.length}건 · 확정 ${nConf}건`), el('span', { class: 'spacer' }),
+    box.classList.remove('folded'); // 기록 칸 접기는 오른쪽 위 «로만(예전 ▾ 접기 상태가 남아 있어도 펼침)
+    const head = el('div', { class: 'sec-title' }, [el('span', { class: 'sec-label', text: `${v.student.name} 기록 ${v.records.length}건 · 확정 ${nConf}건` }), el('span', { class: 'spacer' }),
       (() => { const m = menuBox('+ 기록 ▾', [
         el('button', { type: 'button', class: 'primary', disabled: locked, text: '+ 학생관찰기록', onclick: () => recordForm(null, 'record') }),
         el('button', { type: 'button', disabled: locked, text: '이미 쓴 생기부 넣기', onclick: () => recordForm(null, 'existing') }),
@@ -2438,7 +2543,7 @@
       ], '학생관찰기록·이미 쓴 생기부·기준 자료로 생성'); m.classList.add('add-menu'); return m; })(),
     ]);
     box.appendChild(head);
-    if (locked && !ys.archived) box.appendChild(el('div', { class: 'stale', text: '● 마감된 항목입니다. 고치려면 오른쪽 [마감 해제]를 누르세요.' }));
+    if (locked && !ys.archived) box.appendChild(el('div', { class: 'stale', text: '■ 마감된 항목입니다. 고치려면 오른쪽 [마감 해제]를 누르세요.' }));
     if (R.slot.item === 'behavior') box.appendChild(traitCard(trait, locked || !!ys.archived));
     const sel = [...R.selected].filter((id) => v.records.some((r) => r.id === id));
     R.selected = new Set(sel);
@@ -2527,7 +2632,7 @@
       el('div', { class: 'cand-body', title: '필요한 부분을 마우스로 끌어 고르면 [⤵ 넣기]가 뜹니다. Ctrl+C로 복사도 됩니다.', text: b.text }),
       aiSrcLine(b),
       el('div', { class: 'rcard-foot' }, [
-        el('button', { type: 'button', class: 'small primary', disabled: locked || (r.confirmed && b.text === r.content), text: '✔ 이걸로 확정', onclick: () => confirmText(r, b.text) }),
+        el('button', { type: 'button', class: "small btn-confirm", disabled: locked || (r.confirmed && b.text === r.content), text: '✔ 이걸로 확정', onclick: () => confirmText(r, b.text) }),
         el('button', { type: 'button', class: 'small', disabled: locked, text: '고쳐서 확정', title: '이 글을 [직접 작성] 칸에 불러와 고친 뒤 확정합니다', onclick: () => openDraft(r, b.text) }),
         el('span', { class: 'spacer' }),
         menuBox('⋯', [
@@ -2578,7 +2683,7 @@
       el('div', { class: 'draft-head' }, [el('b', { text: '✍ 직접 작성' }), el('span', { class: 'muted', text: '원문·결과에서 끌어 고른 문장은 [⤵ 작성 칸에 넣기]로 들어옵니다.' }), el('span', { class: 'spacer' }), bc]),
       ta,
       el('div', { class: 'rcard-foot' }, [
-        el('button', { type: 'button', class: 'small primary', disabled: locked, text: '✔ 확정', onclick: () => { if (need()) confirmText(r, ta.value); } }),
+        el('button', { type: 'button', class: "small btn-confirm", disabled: locked, text: '✔ 확정', onclick: () => { if (need()) confirmText(r, ta.value); } }),
         el('button', { type: 'button', class: 'small', disabled: locked, text: '후보로 저장', title: '확정하지 않고 결과 묶음 맨 위에 ✍ 직접 작성으로 남깁니다', onclick: async () => { if (need() && await mutate('save_draft', r.id, ta.value)) { delete BO.drafts[r.id]; toast('후보로 저장했습니다.'); loadStudent(true); } } }),
         el('button', { type: 'button', class: 'small', disabled: locked, text: '새 기록으로 저장', title: '같은 활동명·날짜·태그로 새 기록(확정된 상태)을 만듭니다', onclick: async () => { if (need() && await mutate('new_record_from', r.id, ta.value)) { delete BO.drafts[r.id]; toast('새 기록으로 저장해 확정했습니다.'); loadStudent(true); } } }),
         el('span', { class: 'spacer' }),
@@ -2628,11 +2733,11 @@
       card.appendChild(el('div', { class: 'rcard-label', text: r.kind === 'existing' ? '기존 완성문' : '원문' }));
       card.appendChild(el('div', { class: 'rcard-body', text: r.orig }));
       const blocked = r.kind === 'existing' && pairFull();
-      const aiBtn = el('button', { type: 'button', class: 'ai-btn', disabled: locked || blocked, title: blocked ? PAIR_FULL_TIP : '원문을 AI로 변환해 아래 결과 묶음 맨 위에 더합니다(확정은 따로)', text: 'AI 변환' });
+      const aiBtn = el('button', { type: 'button', class: 'ai-btn' + (recNextAiId() === r.id ? ' is-next' : ''), disabled: locked || blocked, title: blocked ? PAIR_FULL_TIP : '원문을 AI로 변환해 아래 결과 묶음 맨 위에 더합니다(확정은 따로)', text: 'AI 변환' });
       aiBtn.addEventListener('click', () => aiRecord(r, aiBtn));
       card.appendChild(el('div', { class: 'rcard-foot' }, [
         aiBtn,
-        el('button', { type: 'button', disabled: locked, text: '원문 그대로 확정', onclick: () => confirmText(r, r.orig) }),
+        el('button', { class: 'btn-confirm', type: 'button', disabled: locked, text: '원문 그대로 확정', onclick: () => confirmText(r, r.orig) }),
         el('button', { type: 'button', disabled: locked, text: '✍ 직접 작성', title: '원문·결과에서 쓸 문장을 모아 새 글을 만들고 확정합니다', onclick: () => openDraft(r, '') }),
         el('span', { class: 'spacer' }), bytesEl(bytesOf(r.orig), r.kind === 'existing' ? R.target : 0),
       ]));
@@ -2726,18 +2831,18 @@
         text: '📋 누가기록에서 불러오기', onclick: () => openTraitPull(a, label, d, () => { ta.value = x.case; fit(); changed(); }) }) : null;
       const off = el('input', { type: 'checkbox', checked: x.off, disabled: locked });
       off.addEventListener('change', () => { x.off = off.checked; box.classList.toggle('off', x.off); changed(); });
-      box.append(el('div', { class: 'tr-area-head' }, [el('b', { text: `${'③④⑤'[i]} ${label}` }), el('span', { class: 'muted', text: '키워드 0~3개 · 사례 선택' }), el('span', { class: 'spacer' }), pull,
+      box.append(el('div', { class: 'tr-area-head' }, [el('b', { class: 'num-label', stepText: `${'③④⑤'[i]} ${label}` }), el('span', { class: 'muted', text: '키워드 0~3개 · 사례 선택' }), el('span', { class: 'spacer' }), pull,
         el('label', { class: 'inline', style: 'margin:0', title: '이 영역은 생성에 쓰지 않습니다' }, [off, '이 영역 빼기'])].filter(Boolean)), chips, ta);
       return box;
     });
     const warnList = el('div', { class: 'tr-warn-list', hidden: !TRS.warnings.length }, TRS.warnings.map((w) => el('div', { text: `⚠ ${w}` })));
-    const aiBtn = el('button', { type: 'button', class: 'ai-btn', disabled: locked, title: '고른 성격·키워드와 사례로 행동특성 및 종합의견을 만들어 아래 결과 묶음에 더합니다(확정은 따로)', text: 'AI 변환' });
+    const aiBtn = el('button', { type: 'button', class: 'ai-btn' + (recNextAiId() === 'trait' ? ' is-next' : ''), disabled: locked, title: '고른 성격·키워드와 사례로 행동특성 및 종합의견을 만들어 아래 결과 묶음에 더합니다(확정은 따로)', text: 'AI 변환' });
     aiBtn.addEventListener('click', () => traitAi(aiBtn));
     card.append(
-      el('div', { class: 'rcard-head' }, [el('b', { text: '🧩 행특 설계' }), r && r.confirmed ? el('span', { class: 'badge conf-badge', text: '✔ 확정' }) : null, el('span', { class: 'muted', text: '성격유형 → 설명 → 영역별 키워드·사례 → AI 변환' }), el('span', { class: 'spacer' }), state, el('span', { class: 'muted', text: `목표 ${R.target}B` })].filter(Boolean)),
+      el('div', { class: 'rcard-head' }, [el('b', { text: '🧩 행특 설계' }), r && r.confirmed ? el('span', { class: 'badge conf-badge', text: '✔ 확정' }) : null, el('span', { class: 'muted', text: '성격유형 → 설명 → 영역별 키워드·사례 → AI 변환' }), el('span', { class: 'spacer' }), state, el('span', { class: 'muted', text: `목표 ${R.target}(B)` })].filter(Boolean)),
       el('div', { class: 'tr-pii', text: TRAIT_PII }),
-      el('div', { class: 'tr-row' }, [el('b', { text: '① 성격유형' }), typeSel, el('span', { class: 'muted', text: TD && !TD.is_default ? '(내 사전)' : '' })]),
-      el('div', { class: 'tr-row' }, [el('b', { text: '② 성격 설명' }), descSel]),
+      el('div', { class: 'tr-row' }, [el('b', { stepText: '① 성격유형' }), typeSel, el('span', { class: 'muted', text: TD && !TD.is_default ? '(내 사전)' : '' })]),
+      el('div', { class: 'tr-row' }, [el('b', { stepText: '② 성격 설명' }), descSel]),
       el('div', { class: 'tr-row' }, [el('span', { class: 'muted', text: '직접 고치기' }), descIn, descAdd]),
       ...areas, warnList,
       el('div', { class: 'rcard-foot' }, [aiBtn, el('span', { class: 'muted', text: '키워드도 사례도 없는 영역은 생성에서 빠집니다. 사례가 없는 영역은 성향·태도로만 쓰고 활동을 지어내지 않습니다.' })]));
@@ -2815,7 +2920,7 @@
     const used = TRAIT_AREAS.filter(([a]) => !r.design.areas[a].off && (r.design.areas[a].kws.length || r.design.areas[a].case.trim())).map(([, l]) => l);
     const out = await busyRun(btn, `trait${r.id}`, () => aiRun({
       title: '행특 생성', kind: 'trait',
-      rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['자료', `성격 ${r.design.type || '-'} · 영역 ${used.join('·') || '없음'}`], ['목표', `${R.target}B`], ['모델', modelName($('recModel'))]],
+      rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['자료', `성격 ${r.design.type || '-'} · 영역 ${used.join('·') || '없음'}`], ['목표', `${R.target}(B)`], ['모델', modelName($('recModel'))]],
       warn: '결과는 설계 카드의 결과 묶음 맨 위에 더해집니다(설계는 그대로). 확정은 따로 합니다.',
       wiz: async () => { if (await flushFinal()) openWizardMenu(recWizCtx('trait', r.content || r.orig, r.id)); },
       jobs: [{ run: () => api.ai_record(r.id, $('recModel').value) }],
@@ -3200,6 +3305,7 @@
     });
     if (!res) return;
     if (mode === 'append') prev = res.prev || '';
+    if (!r.confirmed) await mutate('mark_record_confirmed', r.id); // 최종안에 그대로 쓴 기록은 확정으로(목록 '확정/전체')
     loadStudent(true);
     actionToast(mode === 'append' ? '최종안 뒤에 이어 붙였습니다.' : '최종안으로 채택했습니다.', '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, prev, ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
   }
@@ -3302,7 +3408,7 @@
     const what = r.kind === 'existing' ? '기존 완성문 AI 변환(다듬기)' : '원문 AI 변환(정제)';
     const out = await busyRun(btn, `rec${r.id}`, () => aiRun({
       title: what, kind: r.kind === 'existing' ? 'polish' : 'refine',
-      rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['대상', `${r.kind === 'existing' ? '기존 완성문' : `${r.seq}회 기록 원문`}${r.title ? ` · ${r.title}` : ''} (${bytesOf(r.orig)}B)`], ['모델', modelName($('recModel'))]],
+      rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['대상', `${r.kind === 'existing' ? '기존 완성문' : `${r.seq}회 기록 원문`}${r.title ? ` · ${r.title}` : ''} (${bytesOf(r.orig)}(B))`], ['모델', modelName($('recModel'))]],
       warn: '결과는 이 기록의 결과 묶음 맨 위에 더해집니다(원문·이전 결과는 그대로). 확정은 따로 합니다.',
       wiz: async () => { if (await flushFinal()) openWizardMenu(recWizCtx(r.kind === 'existing' ? 'polish' : 'refine', r.orig, r.id)); },
       jobs: [{ run: () => api.ai_record(r.id, $('recModel').value) }],
@@ -3365,7 +3471,7 @@
       const title = el('input', { type: 'text', class: 'grow', placeholder: existing ? '예: 1학기 작성본' : '예: 진로 독서 감상문', value: r ? r.title : (existing ? '이미 쓴 생기부' : '') });
       const content = el('textarea', { rows: 12, placeholder: existing ? '이미 작성한 생기부 문장을 붙여넣으세요.' : '활동 내용, 학생 글, 관찰 메모 등을 적으세요. 학번·이름은 적지 않아도 됩니다.', value: r ? recText(r) : '' });
       const bc = el('span', { class: 'bytes' });
-      const upd = () => { bc.textContent = `${bytesOf(content.value)}B`; };
+      const upd = () => { bc.textContent = `${bytesOf(content.value)}(B)`; };
       content.addEventListener('input', upd);
       upd();
       const tags = tagPicker(r ? r.tags.map((t) => t.id) : []);
@@ -3443,7 +3549,7 @@
         const res = computeWeights(items, sumCheck);
         recs.forEach((r, i) => {
           const cell = t.querySelector(`[data-applied="${r.id}"]`);
-          cell.textContent = res.ratios ? `${(res.ratios[i] * 100).toFixed(1)}% · 약 ${Math.round(res.ratios[i] * R.target)}B` : '-';
+          cell.textContent = res.ratios ? `${(res.ratios[i] * 100).toFixed(1)}% · 약 ${Math.round(res.ratios[i] * R.target)}(B)` : '-';
           inputs[r.id].placeholder = res.ratios && inputs[r.id].value === '' ? `자동 ${(res.ratios[i] * 100).toFixed(0)}` : '';
         });
         sumLine.className = 'sum-line' + (res.error ? ' bad' : '');
@@ -3453,7 +3559,7 @@
       t.appendChild(el('tr', {}, ['기록', '길이', '비중(%)', '적용 비율 · 예상 분량'].map((h) => el('th', { text: h }))));
       recs.forEach((r) => {
         inputs[r.id] = el('input', { type: 'number', min: 0, step: 5, value: r.weight === null || r.weight === undefined ? '' : r.weight, oninput: redraw });
-        t.appendChild(el('tr', {}, [el('td', { text: `${r.kind === 'existing' ? '기존 완성문' : r.seq + '회'} ${r.title || ''}`.trim() }), el('td', { text: `${r.bytes}B` }), el('td', {}, [inputs[r.id]]), el('td', { 'data-applied': r.id, class: 'auto-w' })]));
+        t.appendChild(el('tr', {}, [el('td', { text: `${r.kind === 'existing' ? '기존 완성문' : r.seq + '회'} ${r.title || ''}`.trim() }), el('td', { text: `${r.bytes}(B)` }), el('td', {}, [inputs[r.id]]), el('td', { 'data-applied': r.id, class: 'auto-w' })]));
       });
       const chk = el('input', { type: 'checkbox', checked: sumCheck, onchange: (e) => { sumCheck = e.target.checked; redraw(); } });
       const model = el('select', {});
@@ -3470,12 +3576,12 @@
         const res = out.results[0];
         closeSheet();
         revealResults();
-        const size = res.bytes ? ` (${res.bytes}B / 목표 ${res.target}B)` : '';
+        const size = res.bytes ? ` (${res.bytes}(B) / 목표 ${res.target}(B))` : '';
         toast((res.dropped ? 'AI 분량 맞춤 후보를 만들고 가장 오래된 후보를 지웠습니다.' : 'AI 분량 맞춤 후보를 만들었습니다. 오른쪽 아래 [AI 분량 맞춤 후보]에서 확인하세요.') + size, 5000);
         loadStudent(true);
       });
       box.append(
-        el('div', { class: 'sheet-head' }, [el('h2', { text: `비중으로 분량 맞추기 · ${R.view.student.name}` }), el('span', { class: 'muted', text: `${R.slot.label} · 확정 기록 ${recs.length}건 · 목표 ${R.target}B` })]),
+        el('div', { class: 'sheet-head' }, [el('h2', { text: `비중으로 분량 맞추기 · ${R.view.student.name}` }), el('span', { class: 'muted', text: `${R.slot.label} · 확정 기록 ${recs.length}건 · 목표 ${R.target}(B)` })]),
         el('div', { class: 'sheet-body' }, [
           el('p', { class: 'hint', text: '확정 기록마다 비중만큼의 분량으로 원문을 덜어내 한 글로 잇습니다. 새로 쓰지 않고, 덜 중요한 문장·문단을 빼거나 문장을 짧게 하며, 뺀 자리가 어색한 곳만 조금 다듬습니다. 이미 자기 몫보다 짧은 기록은 그대로 둡니다. 결과가 목표를 넘으면 자동으로 한두 번 더 줄입니다. 결과는 최종안에 바로 들어가지 않고 [AI 분량 맞춤 후보]에 쌓입니다. 비중을 비워 두면 기록 길이에 비례해 나눕니다. 입력한 비중은 기록에 저장됩니다.' }),
           t, sumLine,
@@ -3499,7 +3605,7 @@
     try { fmeta = f ? JSON.parse(f.meta || '{}') : {}; } catch (e) { fmeta = {}; }
     const finSec = el('div', { class: 'final-sec' });
     box.appendChild(finSec);
-    finSec.appendChild(el('div', { class: 'sec-title' }, [foldBtn('final', finSec, '최종안'), el('span', { class: 'muted', text: `목표 ${R.target}B` }), stdBadge(fmeta)]));
+    finSec.appendChild(el('div', { class: 'sec-title' }, [foldBtn('final', finSec, '최종안'), el('span', { class: 'muted', text: `목표 ${R.target}(B)` }), stdBadge(fmeta)]));
     const pairBox = pairInfo(v.pair);
     if (pairBox) finSec.appendChild(pairBox);
     const fb = el('div', { class: 'final-box' + (f ? ' has' : '') + (closed ? ' closed' : '') });
@@ -3526,15 +3632,15 @@
       if (!(await flushFinal())) return;
       const out = await busyRun(polishBtn, `synth${R.sno}`, () => aiRun({
         title: '최종안 다듬기', kind: 'polish',
-        rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['최종안', `${bytesOf(ta.value)}B → 목표 ${R.target}B`], ['모델', modelName($('recModel'))]],
+        rows: [['학생', `${R.view.student.name} · ${R.slot.label}`], ['최종안', `${bytesOf(ta.value)}(B) → 목표 ${R.target}(B)`], ['모델', modelName($('recModel'))]],
         warn: `${DROP_WARN} 최종안 자체는 바뀌지 않고 후보로 만듭니다.`,
         jobs: [{ run: () => api.ai_polish_final(R.slot.group_id, R.slot.item, R.sno, $('recModel').value) }],
       }));
       if (out && out.done) { revealResults(); toast('다듬기 후보를 만들었습니다. 최종안 아래 후보에서 확인하세요.'); loadStudent(true); }
     });
     const closeBtn = closed
-      ? el('button', { type: 'button', disabled: !!ys.archived, text: '마감 해제', onclick: async () => { if (await mutate('set_closed', R.slot.group_id, R.slot.item, R.sno, false)) { toast('마감을 해제했습니다.'); loadStudent(true); } } })
-      : el('button', { type: 'button', class: 'primary', disabled: !f || !!ys.archived, text: '● 마감', title: f ? '검토를 끝내고 편집을 잠급니다' : '최종안이 있어야 마감할 수 있습니다', onclick: async () => {
+      ? el('button', { type: 'button', class: 'btn-close', disabled: !!ys.archived, text: '마감 해제', onclick: async () => { if (await mutate('set_closed', R.slot.group_id, R.slot.item, R.sno, false)) { toast('마감을 해제했습니다.'); loadStudent(true); } } })
+      : el('button', { type: 'button', class: 'btn-close' + (recNext() === 'close' ? ' is-next' : ''), disabled: !f || !!ys.archived, text: '■ 마감', title: f ? '검토를 끝내고 편집을 잠급니다' : '최종안이 있어야 마감할 수 있습니다', onclick: async () => {
         const c = ctx;
         if (await afterFinalSaved(() => mutate('set_closed', c.gid, c.item, c.sno, true))) { toast('마감했습니다. 다음 학생으로 넘어가세요.'); loadStudent(true); }
       } });
@@ -3560,7 +3666,7 @@
     const conf = v.records.filter((r) => r.confirmed);
     const optMenu = el('details', { class: 'opt-menu' }, [el('summary', { text: '옵션 ▾' }), el('div', { class: 'opt-list' }, [polishBtn, polishWiz])]);
     fb.append(ta, el('div', { class: 'final-actions' }, [bc, saveState, el('span', { class: 'spacer' }), saveBtn, optMenu, closeBtn]));
-    if (closed) fb.appendChild(el('div', { class: 'hint', text: `● ${f.closed_at || ''} 마감 — 기록·AI·최종안 편집이 잠겼습니다. 조회·복사·내보내기는 됩니다.` }));
+    if (closed) fb.appendChild(el('div', { class: 'hint', text: `■ ${f.closed_at || ''} 마감 — 기록·AI·최종안 편집이 잠겼습니다. 조회·복사·내보내기는 됩니다.` }));
     finSec.appendChild(fb);
 
     // 확정 기록: 왼쪽에서 확정한 기록이 여기 쌓인다. 끌어서 순서, 눌러서 바로 고치기(왼쪽과 같은 자료)
@@ -3568,7 +3674,7 @@
     box.appendChild(confSec);
     const unc = v.records.filter((r) => !r.confirmed);
     confSec.appendChild(el('div', { class: 'sec-title' }, [foldBtn('confirmed', confSec, `확정 기록 ${conf.length}건`), el('span', { class: 'spacer' }),
-      el('button', { type: 'button', class: 'primary small', disabled: ro || !conf.length, title: '확정 기록을 이 순서대로 내용 그대로 이어 최종안에 넣습니다', text: '이어 붙이기 → 최종안', onclick: () => openJoin() }),
+      el('button', { type: 'button', class: 'small btn-join' + (recNext() === 'join' ? ' is-next' : ''), disabled: ro || !conf.length, title: '확정 기록을 이 순서대로 내용 그대로 이어 최종안에 넣습니다', text: '이어 붙이기 → 최종안', onclick: () => openJoin() }),
       el('button', { type: 'button', class: 'small ai-btn', disabled: ro || !conf.length || pairFull(), title: pairFull() ? PAIR_FULL_TIP : '확정 기록을 비중대로 AI가 목표 분량에 맞춰 한 글로 씁니다(결과는 아래 후보로)', text: '비중으로 분량 맞추기', onclick: () => openSynth(conf) })]));
     if (!conf.length) confSec.appendChild(el('p', { class: 'hint', text: '왼쪽 기록에서 [원문 그대로 확정]·[✔ 이걸로 확정]·[✍ 직접 작성]으로 확정하면 여기에 쌓입니다.' }));
     const rows = conf.map((r, i) => ({ id: r.id, el: confRow(r, i, ro) }));
@@ -3586,7 +3692,7 @@
     resSec.appendChild(el('div', { class: 'sec-title' }, [foldBtn('results', resSec, `AI 분량 맞춤 후보 ${v.results.length}/3`), el('span', { class: 'muted', text: '잠금 포함 최근 3개 보관' })]));
     if (!v.results.length) resSec.appendChild(el('p', { class: 'hint', text: '확정 기록의 [비중으로 분량 맞추기]나 최종안 [옵션 ▾ › 다듬기(AI)]를 하면 여기에 후보가 생깁니다.' }));
     v.results.slice().reverse().forEach((cd) => resSec.appendChild(candEl(cd, ro, [
-      el('button', { type: 'button', class: 'small primary', disabled: ro, text: '✔ 최종안으로', onclick: async () => {
+      el('button', { type: 'button', class: 'small btn-confirm', disabled: ro, text: '✔ 최종안으로', onclick: async () => {
         const fin = await savedFinal(ctx);
         if (!fin) return;
         const mode = await askFinalMode(fin.text, cd.text, fin.target);
@@ -3649,7 +3755,7 @@
           if (on) no += 1;
           const cb = el('input', { type: 'checkbox', checked: on, 'aria-label': `${recName(r)} 넣기`, title: '끄면 이번 최종안에서 뺍니다(확정은 그대로)',
             onchange: (e) => { if (e.target.checked) off.delete(r.id); else off.add(r.id); draw(); } });
-          return { id: r.id, el: el('div', { class: 'join-row' + (on ? '' : ' off') }, [cb, el('b', { text: on ? `${no}. ${recName(r)}` : `빼기 · ${recName(r)}` }), el('span', { class: 'muted', text: `${r.bytes}B` }),
+          return { id: r.id, el: el('div', { class: 'join-row' + (on ? '' : ' off') }, [cb, el('b', { text: on ? `${no}. ${recName(r)}` : `빼기 · ${recName(r)}` }), el('span', { class: 'muted', text: `${r.bytes}(B)` }),
             el('span', { class: 'spacer' })]) };
         });
         const handle = sortable(rows, (ids) => { order = ids.map((id) => order.find((r) => r.id === id)); draw(); }, order.length < 2);
@@ -3678,7 +3784,7 @@
         actionToast(`${pick.length < order.length ? `확정 기록 ${order.length}건 중 ${pick.length}건을` : `확정 기록 ${order.length}건을`} 이어 최종안${mode === 'append' ? ' 뒤에 붙였습니다' : '에 넣었습니다'}.`, '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, res.prev || '', ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
       });
       addTo(box,
-        el('div', { class: 'sheet-head' }, [el('h2', { text: `확정 기록 이어 붙이기 · ${v.student.name}` }), el('span', { class: 'muted', text: `${R.slot.label} · 목표 ${R.target}B` })]),
+        el('div', { class: 'sheet-head' }, [el('h2', { text: `확정 기록 이어 붙이기 · ${v.student.name}` }), el('span', { class: 'muted', text: `${R.slot.label} · 목표 ${R.target}(B)` })]),
         el('p', { class: 'hint', text: '이 순서대로 확정본을 내용 그대로 이어 최종안에 넣습니다(띄어쓰기 한 칸, 줄바꿈 없음). 체크를 끄면 이번 최종안에서만 빠집니다(확정은 그대로). 바꾼 순서는 기록 순서에도 저장됩니다.' }),
         list,
         unc.length ? el('p', { class: 'muted small-note', text: `확정 안 된 기록 ${unc.length}건은 빠집니다: ${unc.map(recName).join(', ')}` }) : null,
@@ -3755,7 +3861,7 @@
         loadSlotStudents();
       });
       addTo(box,
-        el('div', { class: 'sheet-head' }, [el('h2', { text: `전체 학생 이어 붙이기 · ${s.label}` }), el('span', { class: 'muted', text: `목표 ${R.target}B` })]),
+        el('div', { class: 'sheet-head' }, [el('h2', { text: `전체 학생 이어 붙이기 · ${s.label}` }), el('span', { class: 'muted', text: `목표 ${R.target}(B)` })]),
         el('p', { class: 'hint', text: '학생마다 확정 기록을 아래 활동(태그) 순서로 내용 그대로 이어 최종안에 넣습니다. 그 학생에게 없는 활동은 건너뜁니다. 같은 활동(태그) 안에서는 학생별 기록 순서를 따릅니다.' }),
         el('div', { class: 'col-label', text: '활동 순서 (끌거나 ▲▼)' }), list,
         el('div', { class: 'map-row' }, [el('label', {}, [onlyNew, ` 최종안 없는 학생만 (${eligible.length - withFinal.length}명)`]), el('label', {}, [over, ` 최종안 있는 학생도 바꾸기 (+${withFinal.length}명)`])]),
@@ -3772,22 +3878,22 @@
   function pairInfo(p) {
     if (!p) return null;
     if (p.role === 'first') {
-      return el('div', { class: 'pair-box' + (p.over ? ' over' : '') }, [el('b', { text: `1·2학기 합산 ${p.total}B` }),
-        ` · 2학기 ${p.other}${p.second_bytes !== null && p.second_bytes !== undefined ? ` 최종안 ${p.second_bytes}B` : ''}`,
+      return el('div', { class: 'pair-box' + (p.over ? ' over' : '') }, [el('b', { text: `1·2학기 합산 ${p.total}(B)` }),
+        ` · 2학기 ${p.other}${p.second_bytes !== null && p.second_bytes !== undefined ? ` 최종안 ${p.second_bytes}(B)` : ''}`,
         el('div', { class: 'muted', text: '여기(1학기)에서 쓴 바이트만큼 2학기 목표가 줄어듭니다.' }),
-        p.over ? el('div', { class: 'danger-text', text: `1학기 ${p.first_bytes}B + 2학기 최종안이 합산 ${p.total}B를 넘습니다. 2학기${(p.others || []).some((x) => x.second_closed) ? '(마감됨)' : ''}를 다시 확인하세요.` }) : null]);
+        p.over ? el('div', { class: 'danger-text', text: `1학기 ${p.first_bytes}(B) + 2학기 최종안이 합산 ${p.total}(B)를 넘습니다. 2학기${(p.others || []).some((x) => x.second_closed) ? '(마감됨)' : ''}를 다시 확인하세요.` }) : null]);
     }
     const over = p.remain !== null && p.remain !== undefined && p.remain <= 0;
     const box = el('div', { class: 'pair-box' + (over ? ' over' : '') });
     const add = (...xs) => box.append(...xs.filter((x) => x !== null && x !== undefined));
     if (p.first_bytes === null || p.first_bytes === undefined) {
-      add(el('b', { text: `1학기 ${p.other} 최종안 없음` }), ` · 합산 ${p.total}B → 우선 절반 `, el('b', { text: `${p.target}B` }), '를 목표로 씁니다.',
+      add(el('b', { text: `1학기 ${p.other} 최종안 없음` }), ` · 합산 ${p.total}(B) → 우선 절반 `, el('b', { text: `${p.target}(B)` }), '를 목표로 씁니다.',
         p.member ? null : el('div', { class: 'muted', text: '이 학생은 1학기 명렬에 없습니다.' }));
       return box;
     }
-    add(p.over ? el('div', { class: 'danger-text', style: 'font-weight:800', text: `⚠ 합산 초과: 1학기 ${p.first_bytes}B + 이번 학기 ${p.second_bytes}B = ${p.first_bytes + p.second_bytes}B > ${p.total}B${p.second_closed ? ' — 마감했지만 다시 확인이 필요합니다' : ''}` }) : null);
-    add(el('b', { text: `1학기 ${p.other} 최종안 ${p.first_bytes}B${p.first_closed ? ' (마감)' : ''}` }), ` · 합산 ${p.total}B → 이번 학기 남은 `,
-      el('b', { class: over ? 'danger-text' : '', text: `${p.remain}B` }),
+    add(p.over ? el('div', { class: 'danger-text', style: 'font-weight:800', text: `⚠ 합산 초과: 1학기 ${p.first_bytes}(B) + 이번 학기 ${p.second_bytes}(B) = ${p.first_bytes + p.second_bytes}(B) > ${p.total}(B)${p.second_closed ? ' — 마감했지만 다시 확인이 필요합니다' : ''}` }) : null);
+    add(el('b', { text: `1학기 ${p.other} 최종안 ${p.first_bytes}(B)${p.first_closed ? ' (마감)' : ''}` }), ` · 합산 ${p.total}(B) → 이번 학기 남은 `,
+      el('b', { class: over ? 'danger-text' : '', text: `${p.remain}(B)` }),
       over ? el('div', { class: 'danger-text', text: '1학기가 합산을 이미 채워 AI 종합·다듬기를 할 수 없습니다. 1학기 최종안을 줄이거나 합산 목표를 바꾸세요.' }) : null,
       el('details', {}, [el('summary', { text: '1학기 최종안 보기' }), el('div', { class: 'cmp-text', text: p.first_text })]));
     return box;
@@ -3851,7 +3957,7 @@
       if (btn.isConnected) { btn.textContent = old; btn.disabled = false; if (btn._refresh) btn._refresh(); }
     }
   }
-  const stepBar = (n) => el('div', { class: 'steps' }, ['① 자료 붙여넣기', '② 열·학생 연결 확인', '③ 입력'].map((t, i) => el('span', { class: i + 1 === n ? 'on' : '', text: t })));
+  const stepBar = (n) => el('div', { class: 'steps' }, ['① 자료 붙여넣기', '② 열·학생 연결 확인', '③ 입력'].map((t, i) => el('span', { class: i + 1 === n ? 'on' : '', stepText: t })));
 
   // 여러 학생 일괄 입력: kind='existing'(이미 쓴 생기부 → 기존 완성문, 학생당 한 줄) / 'record'(학생관찰기록, 한 학생 여러 줄, 활동명·날짜 선택).
   // 파일마다 다른 형식. 이름·내용만 있으면 이름으로 연결한다. NEIS 업로드 파일(반/번호·성명·내용)도 알아본다.
@@ -3922,7 +4028,7 @@
         const clsSel = colSel('반/번호(선택)', () => { const k = clsRole(); return k ? st.cols[k] : null; }, (v) => { st.cols.clsnum = null; st.cols.gradecls = null; st.cols.clsany = v; });
         const tableBox = el('div', {});
         const summary = el('span', {});
-        const confirmAll = el('button', { type: 'button', text: '추천 모두 확정' });
+        const confirmAll = el('button', { type: 'button', class: 'btn-confirm', text: '추천 모두 확정' });
         const skipDates = el('button', { type: 'button', hidden: true });
         const applyBtn = el('button', { type: 'button', class: 'primary', text: '입력' });
         const headChk = el('input', { type: 'checkbox', checked: st.header, onchange: (e) => { st.header = e.target.checked; selects.forEach((f) => f()); build(); } });
@@ -3973,7 +4079,7 @@
               el('div', { class: `st-chip ${iss.length ? 'none' : r.state}`, text: iss.length ? '! 확인 필요' : ST_CHIP[r.state] }),
               ...(iss.length ? iss : (r.note && r.state !== 'confirmed' ? [r.note] : [])).map((x) => el('div', { class: 'note', text: x })),
               r.change ? el('div', { class: 'note', text: `학적변동: ${r.change}` }) : null,
-              r.state === 'suggested' && r.student_no && !iss.length ? el('button', { type: 'button', class: 'small', text: '확정', onclick: () => { r.state = 'confirmed'; ed(r).confirm = r.student_no; draw(); } }) : null,
+              r.state === 'suggested' && r.student_no && !iss.length ? el('button', { type: 'button', class: "small btn-confirm", text: '확정', onclick: () => { r.state = 'confirmed'; ed(r).confirm = r.student_no; draw(); } }) : null,
               badDate(r) ? el('button', { type: 'button', class: 'small', text: '날짜 없이', onclick: () => { r.dateSkip = true; ed(r).dateSkip = true; draw(); } }) : null]);
             const dateIn = dateCol() ? el('input', { type: 'date', value: r.date || '', onchange: (e) => { r.date = e.target.value; r.dateSkip = !r.date; ed(r).date = { col: st.cols.date, v: r.date }; ed(r).dateSkip = r.dateSkip; draw(); } }) : null;
             const meta = isRec ? el('div', { class: 'inline', style: 'gap:6px;margin-bottom:4px' }, [dateIn, dateCol() && r.date_raw ? el('span', { class: 'note', text: `원본 ${r.date_raw}` }) : null, r.title ? el('span', { class: 'note', text: r.title }) : null]) : null;
@@ -3993,7 +4099,7 @@
           const conf = st.rows.length - bad - sug;
           const nBadDate = st.rows.filter(badDate).length;
           summary.innerHTML = '';
-          summary.append(el('b', { text: `확정 ${conf}` }), ' · ', el('b', { style: 'color:#a16207', text: `추천 ${sug}` }), ' · ', el('b', { class: bad ? 'danger-text' : '', text: `확인 필요 ${bad}` }),
+          summary.append(el('b', { text: `확정 ${conf}` }), ' · ', el('b', { style: 'color:var(--warn-text)', text: `추천 ${sug}` }), ' · ', el('b', { class: bad ? 'danger-text' : '', text: `확인 필요 ${bad}` }),
             removed.size ? el('span', { class: 'muted', text: ` · 뺀 줄 ${removed.size}` }) : '');
           confirmAll.disabled = !sug;
           confirmAll.textContent = `추천 ${sug}건 모두 확정`;
@@ -4069,7 +4175,7 @@
     const choice = new Map(); // 여러 개인 학생에서 직접 고른 기록 id
     const open = new Set(); // 전문 비교를 펼친 학생
     const when = (s) => (s || '').slice(5, 16).replace(' ', ' ');
-    const recInfo = (r) => `${r.title || '제목 없음'} · 추가 ${when(r.created_at)}${r.updated_at && r.updated_at !== r.created_at ? ` · 수정 ${when(r.updated_at)}` : ''} · ${r.bytes}B`;
+    const recInfo = (r) => `${r.title || '제목 없음'} · 추가 ${when(r.created_at)}${r.updated_at && r.updated_at !== r.created_at ? ` · 수정 ${when(r.updated_at)}` : ''} · ${r.bytes}(B)`;
     const clip = (t) => el('div', { class: 'clip', text: t || '-' });
     openSheet((box) => {
       const body = el('div', { class: 'sheet-body' });
@@ -4107,7 +4213,7 @@
           const chip = on ? (c.kind === 'new' ? ['confirmed', '새로 반영'] : ['suggested', '덮어쓰기']) : ['excluded', can ? '이번에는 제외' : '제외'];
           const verSel = isMulti(x) ? el('select', { class: 'ver-sel', onchange: (e) => { if (e.target.value) choice.set(x.student_no, +e.target.value); else choice.delete(x.student_no); draw(); } }, [
             el('option', { value: '', text: multi === 'latest' ? '(마지막으로 추가한 것)' : '보낼 것 고르기' }),
-            ...x.existing.map((r, i) => el('option', { value: r.id, selected: choice.get(x.student_no) === r.id, text: `${i + 1}번째 추가 · ${when(r.created_at)} · ${r.bytes}B${i === x.existing.length - 1 ? ' (마지막)' : ''}` }))]) : null;
+            ...x.existing.map((r, i) => el('option', { value: r.id, selected: choice.get(x.student_no) === r.id, text: `${i + 1}번째 추가 · ${when(r.created_at)} · ${r.bytes}(B)${i === x.existing.length - 1 ? ' (마지막)' : ''}` }))]) : null;
           t.appendChild(el('tr', { class: !on ? 'off' : c.kind === 'over' ? 'row-pending' : '' }, [
             el('td', {}, [chk]),
             el('td', { text: `${x.grade}-${x.class_no}-${x.number} ${x.name}` }),
@@ -4118,14 +4224,14 @@
           ]));
           if (c.rec && open.has(x.student_no)) {
             t.appendChild(el('tr', { class: 'cmp-row' }, [el('td', {}), el('td', { colspan: 5 }, [el('div', { class: 'cmp' }, [
-              el('div', {}, [el('div', { class: 'col-label', text: `지금 최종안${x.final ? ` · ${bytesOf(x.final)}B` : ''}` }), el('div', { class: 'cmp-text', text: x.final || '(없음)' })]),
+              el('div', {}, [el('div', { class: 'col-label', text: `지금 최종안${x.final ? ` · ${bytesOf(x.final)}(B)` : ''}` }), el('div', { class: 'cmp-text', text: x.final || '(없음)' })]),
               el('div', {}, [el('div', { class: 'col-label', text: `보낼 기존 완성문 · ${recInfo(c.rec)}` }), el('div', { class: 'cmp-text', text: c.rec.content })]),
             ])])]));
           }
         });
         tbox.appendChild(t);
         summary.innerHTML = '';
-        summary.append(el('b', { text: `반영 ${nNew + nOver}명` }), ` (새로 ${nNew} · `, el('b', { style: 'color:#a16207', text: `덮어쓰기 ${nOver}` }), ') · ',
+        summary.append(el('b', { text: `반영 ${nNew + nOver}명` }), ` (새로 ${nNew} · `, el('b', { style: 'color:var(--warn-text)', text: `덮어쓰기 ${nOver}` }), ') · ',
           el('b', { class: 'muted', text: `제외 ${nOff}명` }), nNeed ? el('span', { class: 'danger-text', text: ` (그중 고르기 필요 ${nNeed})` }) : '', el('span', { class: 'muted', text: ` · 전체 ${studs.length}명` }));
         sendBtn.textContent = `${nNew + nOver}명 최종안으로 보내기${nOver ? ` (덮어쓰기 ${nOver}명)` : ''}`;
         sendBtn.disabled = !(nNew + nOver);
@@ -4165,7 +4271,7 @@
     });
   }
 
-  // ---------- 검토·내보내기 ----------
+  // ---------- 검토 / 내보내기 ----------
   const E = { slotKey: null, rows: [] };
   async function renderExport() {
     if (!(await loadSlots())) return;
@@ -4174,7 +4280,7 @@
     fillSlotSelect(sel, E.slotKey);
     await loadExport();
   }
-  // 검토·내보내기 표 열 너비: 기본은 글자 길이에 맞추고(남는 너비는 최종안), 머리 칸 오른쪽 끝을 끌어 바꿀 수 있다. 바꾼 너비는 기억한다.
+  // 검토 / 내보내기 표 열 너비: 기본은 글자 길이에 맞추고(남는 너비는 최종안), 머리 칸 오른쪽 끝을 끌어 바꿀 수 있다. 바꾼 너비는 기억한다.
   const EXP_COLW = 'sgb.expColW';
   const expColW = () => { try { return JSON.parse(localStorage.getItem(EXP_COLW) || '{}') || {}; } catch (e) { return {}; } };
   function expColResize(t) {
@@ -4216,11 +4322,11 @@
     const cols = ['학년', '반', '번호', '이름', '상태', '최종안 (1학기 · 빈 줄 · 2학기)', '바이트'];
     t.appendChild(el('tr', {}, cols.map((h) => el('th', { class: h.startsWith('최종안') ? 'exp-main' : 'exp-fit', 'data-col': h.startsWith('최종안') ? '최종안' : h, text: h }))));
     expColResize(t);
-    const stOf = (closed, text) => { const k = closed ? 'closed' : text ? 'final' : 'none'; return el('span', { class: `exp-st ${STATUS[k].cls}`, text: STATUS[k].icon }); };
+    const stOf = (closed, text) => stBadge(closed ? 'closed' : text ? 'final' : 'none', null, true);
     r.rows.forEach((x) => t.appendChild(el('tr', { class: x.closed ? '' : 'bad' }, [el('td', { text: x.grade ?? '' }), el('td', { text: x.class_no ?? '' }), el('td', { text: x.number ?? '' }), el('td', { text: x.name }),
       el('td', { title: `1학기 ${x.closed1 ? '마감' : x.text1 ? '미마감' : '최종안 없음'} · 2학기 ${x.closed2 ? '마감' : x.text2 ? '미마감' : '최종안 없음'}` }, ['1 ', stOf(x.closed1, x.text1), '  2 ', stOf(x.closed2, x.text2)]),
       el('td', {}, [el('div', { class: 'exp-text', text: x.text })]),
-      el('td', { class: x.bytes > r.total ? 'danger-text' : '', title: `1학기 ${x.bytes1}B + 2학기 ${x.bytes2}B`, text: `${x.bytes}/${r.total}B` })])));
+      el('td', { class: x.bytes > r.total ? 'danger-text' : '', title: `1학기 ${x.bytes1}(B) + 2학기 ${x.bytes2}(B)`, text: `${x.bytes}/${r.total}(B)` })])));
     if (!r.rows.length) t.appendChild(el('tr', {}, [el('td', { colspan: 7, class: 'muted', text: '보여 줄 학생이 없습니다.' })]));
     box.appendChild(t);
     $('expCopyBtn').textContent = '클립보드 복사';
@@ -4247,9 +4353,9 @@
     t.appendChild(el('tr', {}, cols.map((h) => el('th', { class: h === '최종안' ? 'exp-main' : 'exp-fit', 'data-col': h, text: h }))));
     expColResize(t);
     r.rows.forEach((x) => t.appendChild(el('tr', { class: x.closed ? '' : 'bad' }, [el('td', { text: x.grade ?? '' }), el('td', { text: x.class_no ?? '' }), el('td', { text: x.number ?? '' }), el('td', { text: x.name }),
-      el('td', {}, [(() => { const k = x.closed ? 'closed' : x.text ? 'final' : 'none'; return el('span', { class: `exp-st ${STATUS[k].cls}`, title: x.closed ? '마감' : x.text ? '미마감(최종안 있음)' : '최종안 없음', text: `${STATUS[k].icon} ${x.closed ? '마감' : x.text ? '최종안' : '없음'}` }); })()]),
+      el('td', {}, [stBadge(x.closed ? 'closed' : x.text ? 'final' : 'none', x.closed ? '마감' : x.text ? '최종안 있음' : '최종안 없음')]),
       el('td', {}, [el('div', { class: 'exp-text', text: x.text || '' })]), el('td', {}, [x.text ? bytesEl(x.bytes, x.target ?? r.target) : el('span', { class: 'muted', text: '-' })]),
-      ...(paired ? [el('td', { class: (x.first_bytes || 0) + x.bytes > x.pair_total ? 'danger-text' : '', text: x.pair_total ? `${x.first_bytes ?? 0}B · ${(x.first_bytes || 0) + x.bytes}/${x.pair_total}B` : '' })] : [])])));
+      ...(paired ? [el('td', { class: (x.first_bytes || 0) + x.bytes > x.pair_total ? 'danger-text' : '', text: x.pair_total ? `${x.first_bytes ?? 0}(B) · ${(x.first_bytes || 0) + x.bytes}/${x.pair_total}(B)` : '' })] : [])])));
     if (!r.rows.length) t.appendChild(el('tr', {}, [el('td', { colspan: 7, class: 'muted', text: '내보낼 학생이 없습니다.' })]));
     box.appendChild(t);
     $('expCopyBtn').textContent = `클립보드 복사: ${r.rows.length}명`;
@@ -4261,7 +4367,7 @@
     const onlyClosed = $('expScopeRows').value === 'closed';
     const open = E.rows.filter((x) => !x.closed).length;
     const over = E.rows.filter((x) => x.pair_total && x.text && (x.first_bytes || 0) + x.bytes > x.pair_total && (!onlyClosed || x.closed));
-    if (over.length && !(await confirmBox(`1·2학기 합산 바이트를 넘는 학생이 ${over.length}명 있습니다.\n${over.slice(0, 10).map((x) => `${x.name} ${(x.first_bytes || 0) + x.bytes}/${x.pair_total}B`).join(', ')}${over.length > 10 ? ` 외 ${over.length - 10}명` : ''}\n\n그래도 내보낼까요?`, '그래도 내보내기'))) return;
+    if (over.length && !(await confirmBox(`1·2학기 합산 바이트를 넘는 학생이 ${over.length}명 있습니다.\n${over.slice(0, 10).map((x) => `${x.name} ${(x.first_bytes || 0) + x.bytes}/${x.pair_total}(B)`).join(', ')}${over.length > 10 ? ` 외 ${over.length - 10}명` : ''}\n\n그래도 내보낼까요?`, '그래도 내보내기'))) return;
     if (kind === 'copy') {
       const r = await call('export_copy', s.group_id, s.item, onlyClosed, $('expOrder').value, $('expCols').value, $('expHeader').checked);
       if (r) toast(`${r.count}명 최종안을 복사했습니다.${open ? ` (미마감 ${open}명 포함)` : ''}`);
@@ -4464,11 +4570,11 @@
     const b = st.ui.badges;
     b.innerHTML = '';
     if (TV.out.has(st.r.id)) b.append(el('span', { class: 'badge tv-out', text: TV.tag === 0 ? '태그를 붙임 · 다음 조회 때 목록에서 빠짐' : '이 태그를 뺌 · 다음 조회 때 목록에서 빠짐' }));
-    st.ui.bytes.textContent = `${bytesOf(st.draft.content)}B`;
+    st.ui.bytes.textContent = `${bytesOf(st.draft.content)}(B)`;
   }
   function tvEditable(r) { return !ys.archived && !r.closed && r.active && !r.gone; }
   function tvLock(r) {
-    if (r.closed) return { cls: 'closed', text: '● 마감됨 · 읽기 전용' };
+    if (r.closed) return { cls: 'closed', text: '■ 마감됨 · 읽기 전용' };
     if (ys.archived) return { cls: 'other', text: '🔒 보관 학년도 · 읽기 전용' };
     if (!r.active || r.gone) return { cls: 'other', text: '🔒 비활성 학생 · 읽기 전용' };
     return null;
@@ -4513,18 +4619,57 @@
     }
     return true;
   }
+  // 항목 보기 칸은 고른 항목의 색으로(전체면 기본색)
+  function tvTintSlot() {
+    const v = $('tvSlot').value || '';
+    const it = v.startsWith('i:') ? v.slice(2) : v.startsWith('g:') ? v.split(':')[2] : '';
+    if (it) $('tvSlot').dataset.item = it; else delete $('tvSlot').dataset.item;
+    tvRenderSlotPick();
+  }
+  // 항목 보기: 숨긴 select 대신 버튼을 누르면 카테고리를 항목 색 둥근 버튼으로 펼친다
+  function tvSlotItem(key) { return key.startsWith('i:') ? key.slice(2) : key.startsWith('g:') ? key.split(':')[2] : ''; }
+  function tvRenderSlotPick() {
+    const sel = $('tvSlot'), btn = $('tvSlotBtn'), pop = $('tvSlotPop');
+    const cur = sel.value || '';
+    const opt = sel.selectedOptions[0];
+    btn.textContent = (opt ? opt.textContent : '전체') + ' ▾';
+    if (sel.dataset.item) btn.dataset.item = sel.dataset.item; else delete btn.dataset.item;
+    pop.innerHTML = '';
+    const chip = (key, label) => {
+      const b = el('button', { type: 'button', class: 'tv-cat' + (key === cur ? ' active' : ''), text: label, 'aria-pressed': key === cur ? 'true' : 'false' });
+      const it = tvSlotItem(key);
+      if (it) b.dataset.item = it;
+      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); tvSlotPopClose(); if (sel.value !== key) { sel.value = key; sel.dispatchEvent(new Event('change')); } });
+      return b;
+    };
+    [...sel.children].forEach((c) => {
+      if (c.tagName === 'OPTION') { pop.appendChild(el('div', { class: 'tv-cat-row' }, [chip(c.value, c.textContent)])); return; }
+      pop.appendChild(el('div', { class: 'tv-cat-group' }, [el('div', { class: 'tv-cat-title', text: c.label }), el('div', { class: 'tv-cat-row' }, [...c.children].map((o) => chip(o.value, o.textContent)))]));
+    });
+  }
+  function tvSlotPopClose() { $('tvSlotPop').hidden = true; $('tvSlotBtn').setAttribute('aria-expanded', 'false'); }
+  function tvSlotPopToggle(e) {
+    e.preventDefault(); e.stopPropagation();
+    const pop = $('tvSlotPop');
+    if (!pop.hidden) { tvSlotPopClose(); return; }
+    pop.hidden = false; $('tvSlotBtn').setAttribute('aria-expanded', 'true');
+    const a = pop.querySelector('.tv-cat.active') || pop.querySelector('.tv-cat');
+    if (a) a.focus();
+  }
   function tvRenderFilters() {
     const o = TV.data.options;
+    const sl = (t) => String(t || '').replace(/\s*·\s*/g, ' / '); // 이 화면 보기(필터) 글자는 가운데 점 대신 슬래시
     const fill = (sel, groups, cur) => {
       sel.innerHTML = '';
       groups.forEach(([label, opts]) => {
-        if (!label) { opts.forEach((x) => sel.appendChild(el('option', { value: x.key, text: x.label, selected: x.key === cur }))); return; }
+        if (!label) { opts.forEach((x) => sel.appendChild(el('option', { value: x.key, text: sl(x.label), selected: x.key === cur }))); return; }
         if (!opts.length) return;
-        sel.appendChild(el('optgroup', { label }, opts.map((x) => el('option', { value: x.key, text: x.label, selected: x.key === cur }))));
+        sel.appendChild(el('optgroup', { label: sl(label) }, opts.map((x) => el('option', { value: x.key, text: sl(x.label), selected: x.key === cur }))));
       });
     };
     fill($('tvScope'), [['', [{ key: '', label: '전체' }]], ['학년-반 (그 반 학생의 모든 기록)', o.classes], ['수업 (그 과목·수업 기록만)', o.sections]], TV.flt.scope);
     fill($('tvSlot'), [['', [{ key: '', label: '전체' }]], ['항목', o.items], ['과목·동아리', o.slots]], TV.flt.slot);
+    tvTintSlot();
     $('tvStatus').value = TV.flt.status;
     if (document.activeElement !== $('tvQ')) $('tvQ').value = TV.flt.q;
     $('tvInactive').checked = !!TV.flt.inactive;
@@ -4546,7 +4691,7 @@
     const draw = () => {
       list.innerHTML = '';
       const q = find.value.trim();
-      d.tags.filter((t) => !q || t.name.includes(q)).forEach((t) => list.appendChild(el('button', { type: 'button', class: 'tv-tag' + (t.id === TV.tag ? ' active' : '') + (t.count ? '' : ' zero'), 'aria-pressed': t.id === TV.tag ? 'true' : 'false',
+      d.tags.filter((t) => !q || t.name.includes(q)).forEach((t) => list.appendChild(el('button', { type: 'button', class: 'tv-tag' + (t.id ? ` tc${Math.abs(t.id) % 6}` : '') + (t.id === TV.tag ? ' active' : '') + (t.count ? '' : ' zero'), 'aria-pressed': t.id === TV.tag ? 'true' : 'false',
         onclick: () => tvPickTag(t.id) }, [el('span', { class: 'tdot' + tagC(t.id) }), el('span', { class: 'nm', text: t.name }), el('span', { class: 'cnt', text: `${t.count}건` })])));
       if (!d.tags.length) list.appendChild(el('p', { class: 'muted', text: '태그가 없습니다.' }));
     };
@@ -4610,8 +4755,7 @@
       sum.append(el('span', { class: 'tv-bulk-note' }, [`최근 일괄 작업: ${b.text} `, el('button', { type: 'button', class: 'link', text: '되돌리기', onclick: () => tvBulkUndo() })]));
     }
     if (TV.tag > 0) sum.append(el('div', { class: 'cw-tip tv-ai-tip' }, ['💡 한 명으로 먼저 기록 카드의 [AI 변환] › ', el('b', { text: '[🪄 프롬프트 마법사]' }), '에서 대화해 원하는 결과를 만들고, ', el('b', { text: '[🧪 대화 내용 스킬화]' }),
-      '로 저장하면 이 태그의 나머지 기록에 한꺼번에 적용할 수 있습니다. 결과를 골라 확정하면 항목별 기록의 확정 기록에도 들어갑니다.']));
-    sum.append(el('span', { class: 'tv-note', text: '이 태그가 붙은 기록만 보입니다(학생별 미입력 현황이 아님). 기록을 고쳐도 최종안 문장은 자동으로 바뀌지 않습니다. [되돌리기]는 이 학년도에서 이 화면을 쓰는 동안 남습니다.' }));
+      '로 저장하면 이 태그의 나머지 기록에 한꺼번에 적용할 수 있습니다.']));
   }
   function tvClassOf(r) {
     if (!r.grade || !r.class_no) return { key: 'c:-', label: '반 정보 없음' };
@@ -4686,10 +4830,10 @@
         const st = STATUS[r.status] || STATUS.none;
         const stale = el('span', { class: 'badge tv-stale', text: '최종안 확인 필요', title: '기록이 바뀌었습니다. 이 항목에서 열어 최종안을 확인하세요.', hidden: !(r.stale && !r.closed) });
         TV.slotUI.set(slotKeyOf(r), { stale, closed: r.closed });
-        slotBox = el('div', { class: 'tv-slot' + (r.closed ? ' is-closed' : '') }, [el('div', { class: 'tv-slot-head' }, [
+        slotBox = el('div', { 'data-item': r.item, class: 'tv-slot' + (r.closed ? ' is-closed' : '') }, [el('div', { class: 'tv-slot-head' }, [
           el('span', { class: `tv-src it-${r.item}`, text: `${TV_ITEM_ICON[r.item] || ''} ${tvSrcLabel(r)}` }),
           r.gkind === 'subject' && r.section ? el('span', { class: 'muted', text: `수업: ${r.section}` }) : null,
-          el('span', { class: `tv-stat ${st.cls}`, title: '이 항목의 상태', text: `${st.icon} ${st.text}` }),
+          stBadge(r.status),
           stale,
           el('span', { class: 'spacer' }),
           el('button', { type: 'button', class: 'link', text: '이 항목에서 열기 ↗', title: '항목별 기록에서 이 학생의 이 항목을 엽니다. 돌아오면 이 자리로 옵니다.',
@@ -4787,7 +4931,7 @@
     if (!(await leaveOk())) return;
     const out = await busyRun(btn, `tvrec${r.id}`, () => aiRun({
       title: r.kind === 'existing' ? '기존 완성문 AI 변환(다듬기)' : '원문 AI 변환(정제)', kind: tvKind(r),
-      rows: [['학생', `${r.name} · ${tvSrcLabel(r)}`], ['대상', `${r.kind === 'existing' ? '기존 완성문' : `${r.seq || ''}회 기록 원문`}${r.title ? ` · ${r.title}` : ''} (${bytesOf(r.orig)}B)`], ['모델', modelName(tvModel())]],
+      rows: [['학생', `${r.name} · ${tvSrcLabel(r)}`], ['대상', `${r.kind === 'existing' ? '기존 완성문' : `${r.seq || ''}회 기록 원문`}${r.title ? ` · ${r.title}` : ''} (${bytesOf(r.orig)}(B))`], ['모델', modelName(tvModel())]],
       warn: '결과는 이 기록의 결과 묶음 맨 위에 더해집니다(원문·이전 결과는 그대로). 확정은 따로 합니다.',
       wiz: () => tvWizard(r),
       jobs: [{ run: () => api.ai_record(r.id, tvModel().value) }],
@@ -4848,9 +4992,9 @@
         const ta = el('textarea', { class: 'cand-edit-ta', rows: 4, 'aria-label': '고쳐서 확정할 글' });
         editBox.append(ta, el('div', { class: 'cand-edit-foot' }, [el('span', { class: 'muted', text: '고친 뒤 [확정]을 누르세요. 원래 결과는 그대로 남습니다.' }), el('span', { class: 'spacer' }),
           el('button', { type: 'button', class: 'small', text: '취소', onclick: () => { editBox.hidden = true; body.hidden = false; foot.hidden = false; } }),
-          el('button', { type: 'button', class: 'small primary', text: '✔ 확정', onclick: () => { if (!ta.value.trim()) { toast('확정할 글이 비어 있습니다.'); return; } act(() => mutate('confirm_record', r.id, ta.value.trim()), '고친 글로 확정했습니다. 항목별 기록의 확정 기록에도 들어갔습니다.'); } })]));
+          el('button', { type: 'button', class: "small btn-confirm", text: '✔ 확정', onclick: () => { if (!ta.value.trim()) { toast('확정할 글이 비어 있습니다.'); return; } act(() => mutate('confirm_record', r.id, ta.value.trim()), '고친 글로 확정했습니다. 항목별 기록의 확정 기록에도 들어갔습니다.'); } })]));
         foot.append(
-          el('button', { type: 'button', class: 'small primary', disabled: !can || (r.confirmed && b.text === r.content), text: '✔ 이걸로 확정',
+          el('button', { type: 'button', class: "small btn-confirm", disabled: !can || (r.confirmed && b.text === r.content), text: '✔ 이걸로 확정',
             onclick: () => act(() => mutate('confirm_record', r.id, b.text), '기록을 확정했습니다. 항목별 기록의 확정 기록에도 들어갔습니다.') }),
           el('button', { type: 'button', class: 'small', disabled: !can, text: '고쳐서 확정', title: '이 글을 이 자리에서 고친 뒤 확정합니다',
             onclick: () => { ta.value = b.text; editBox.hidden = false; body.hidden = true; foot.hidden = true; ta.style.height = `${Math.min(Math.max(ta.scrollHeight + 2, 90), 420)}px`; ta.focus(); } }),
@@ -4869,7 +5013,7 @@
     wrap.append(el('div', { class: 'tv-bundle-bar' }, [tgl, el('span', { class: 'spacer' }),
       r.confirmed
         ? el('button', { type: 'button', class: 'small', disabled: !can, text: '확정 풀기', onclick: () => act(() => mutate('unconfirm_record', r.id), '확정을 풀었습니다. 확정본은 결과 묶음에 남겨 두었습니다.') })
-        : el('button', { type: 'button', class: 'small', disabled: !can, text: '원문 그대로 확정', onclick: () => act(() => mutate('confirm_record', r.id, r.orig), '원문 그대로 확정했습니다.') })]), items);
+        : el('button', { type: 'button', class: "small btn-confirm", disabled: !can, text: '원문 그대로 확정', onclick: () => act(() => mutate('confirm_record', r.id, r.orig), '원문 그대로 확정했습니다.') })]), items);
     return wrap;
   }
   function tvRenderBulk() {
@@ -4889,7 +5033,7 @@
     const latest = recs.filter((r) => !r.confirmed).map((r) => [r, tvLatest(r)]).filter((x) => x[1]);
     bar.append(el('b', { text: `선택 ${n}명 ${recs.length}건` }), el('span', { class: 'muted', text: '(고칠 수 있는 기록만 고를 수 있습니다)' }),
       el('button', { type: 'button', class: 'ai-btn', disabled: !aiRecs.length, title: '고른 기록(확정 전)의 원문을 한꺼번에 AI로 변환해 각 기록의 결과 묶음에 더합니다', text: `선택 기록 AI 변환 (${aiRecs.length})`, onclick: (e) => tvAiRecords(aiRecs, e.currentTarget) }),
-      el('button', { type: 'button', class: 'primary', disabled: !latest.length, title: '고른 기록(확정 전)마다 결과 묶음 맨 위 결과로 확정합니다. 결과가 없는 기록은 건너뜁니다', text: `최신 결과로 확정 (${latest.length})`, onclick: () => tvConfirmLatest(latest) }),
+      el('button', { type: 'button', class: 'primary btn-confirm', disabled: !latest.length, title: '고른 기록(확정 전)마다 결과 묶음 맨 위 결과로 확정합니다. 결과가 없는 기록은 건너뜁니다', text: `최신 결과로 확정 (${latest.length})`, onclick: () => tvConfirmLatest(latest) }),
       addSel, rmSel,
       menuBox('활동명·날짜 ▾', [
         el('span', { class: 'tv-bulk-grp' }, [titleIn, setTitle]),
@@ -5153,7 +5297,7 @@
     const main = $('tvMain');
     main.innerHTML = '';
     const tagName = (TV.data.tags.find((t) => t.id === TV.tag) || {}).name || '';
-    const tabs = el('div', { class: 'tw-tabs', role: 'tablist' }, TW_STEPS.map(([k, label]) => el('button', { type: 'button', role: 'tab', class: 'tw-tab' + (TW.step === k ? ' on' : ''), 'aria-selected': TW.step === k ? 'true' : 'false', text: label,
+    const tabs = el('div', { class: 'tw-tabs', role: 'tablist' }, TW_STEPS.map(([k, label]) => el('button', { type: 'button', role: 'tab', class: 'tw-tab' + (TW.step === k ? ' on' : ''), 'aria-selected': TW.step === k ? 'true' : 'false', stepText: label,
       onclick: async () => { if (!(await twFlushOrWarn())) return; TW.step = k; if (k === 'review') TW.review = null; if (k === 'bulk') TW.plan = null; twRender(); } })));
     main.appendChild(el('div', { class: 'tw-head' }, [el('b', { text: `🤖 '${tagName}' AI 변환` }), tabs, el('span', { class: 'spacer' }),
       el('button', { type: 'button', class: 'small', text: '← 기록 목록으로', onclick: () => twClose() })]));
@@ -5176,7 +5320,7 @@
     const groups = [['학생관찰기록', recs.filter((x) => x.kind === 'record')], ['기존 완성문', recs.filter((x) => x.kind !== 'record')]];
     groups.forEach(([label, list]) => { if (list.length) sel.appendChild(el('optgroup', { label }, list.map((x) => el('option', { value: x.id, selected: x.id === TW.rid, disabled: !tvEditable(x), text: `${twRecLabel(x)} — ${twShort(x.content, 30)}${tvEditable(x) ? '' : ' (읽기 전용)'}` })))); });
     const rec = twRec(TW.rid);
-    body.appendChild(el('div', { class: 'tw-row' }, [el('label', { class: 'inline' }, ['시험할 기록', sel]), rec ? el('span', { class: 'muted', text: `${tvSrcLabel(rec)} · ${rec.bytes}B` }) : null]));
+    body.appendChild(el('div', { class: 'tw-row' }, [el('label', { class: 'inline' }, ['시험할 기록', sel]), rec ? el('span', { class: 'muted', text: `${tvSrcLabel(rec)} · ${rec.bytes}(B)` }) : null]));
     if (!rec) return;
     const trials = TW.trials.filter((t) => t.record_id === rec.id);
     const hasOrig = !!(rec.original && rec.original !== rec.content);
@@ -5247,7 +5391,7 @@
       conf ? el('span', { class: 'badge ok', text: '✔ 확정' }) : null,
       t.locked ? el('span', { class: 'badge', text: '🔒 잠김' }) : null]));
     card.appendChild(el('div', { class: 'tw-cand-text', text: t.text }));
-    card.appendChild(el('div', { class: 'muted tw-cand-meta', text: `${bytesOf(t.text)}B · ${t.model || ''} · ${fmtCredit(t.cost)} 크레딧 · ${t.created_at.slice(5, 16)}` }));
+    card.appendChild(el('div', { class: 'muted tw-cand-meta', text: `${bytesOf(t.text)}(B) · ${t.model || ''} · ${fmtCredit(t.cost)} 크레딧 · ${t.created_at.slice(5, 16)}` }));
     const foot = el('div', { class: 'tw-cand-foot' });
     if (TW.cont === t.id) {
       const rq = el('input', { type: 'text', placeholder: '이어서 고칠 요청: 예) 조금 더 짧게, 마지막 문장은 빼고', 'aria-label': '이어서 고칠 요청' });
@@ -5272,7 +5416,7 @@
           el('button', { type: 'button', class: 'small', text: '단계 보기', title: '이 후보를 만든 프롬프트·요청 보기', onclick: () => twChainInfo(t.chain) }),
           el('button', { type: 'button', class: 'small', title: '잠그면 새 후보가 생겨도 지워지지 않습니다', text: t.locked ? '🔒 잠금 풀기' : '🔓 잠그기', onclick: async () => { if (await mutate('tag_cand_lock', t.id, !t.locked, TW.year)) { t.locked = !t.locked; twRender(); } } }),
           el('button', { type: 'button', class: 'small danger-text', text: '지우기', onclick: async () => { if (await mutate('tag_cand_delete', t.id, TW.year)) { TW.trials = TW.trials.filter((x) => x.id !== t.id); twRender(); } } })], '단계 보기·잠금·지우기'),
-        el('button', { type: 'button', class: 'small primary', disabled: !tvEditable(rec), title: '이 후보를 만든 프롬프트를 이 태그 설정으로 정합니다(기록은 바꾸지 않음)', text: '✔ 설정 확정', onclick: () => twConfirm(t, rec) }));
+        el('button', { type: 'button', class: 'small primary btn-confirm', disabled: !tvEditable(rec), title: '이 후보를 만든 프롬프트를 이 태그 설정으로 정합니다(기록은 바꾸지 않음)', text: '✔ 설정 확정', onclick: () => twConfirm(t, rec) }));
     }
     card.appendChild(foot);
     return card;
@@ -5550,7 +5694,7 @@
     const w = TW.work;
     if (!w.confirmed) {
       body.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '먼저 ① 프롬프트 적용 시험에서 마음에 드는 후보를 [✔ 확정]하세요. 그 후보를 만든 단계로 나머지 기록을 변환합니다.' }),
-        el('button', { type: 'button', class: 'primary', text: '① 프롬프트 적용 시험으로', onclick: () => { TW.step = 'trial'; twRender(); } })]));
+        el('button', { type: 'button', class: 'primary', stepText: '① 프롬프트 적용 시험으로', onclick: () => { TW.step = 'trial'; twRender(); } })]));
       return;
     }
     if (!TW.lib) { const l = await rawCall('prompt_list'); TW.lib = l && l.ok ? l.prompts : []; }
@@ -5665,7 +5809,7 @@
     const rv = TW.review;
     twBatches(body, rv.batches);
     if (!rv.run) {
-      body.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '아직 나머지 변환을 하지 않았습니다.' }), el('button', { type: 'button', class: 'primary', text: '② 나머지 변환으로', onclick: () => { TW.step = 'bulk'; TW.plan = null; twRender(); } })]));
+      body.appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '아직 나머지 변환을 하지 않았습니다.' }), el('button', { type: 'button', class: 'primary', stepText: '② 나머지 변환으로', onclick: () => { TW.step = 'bulk'; TW.plan = null; twRender(); } })]));
       return;
     }
     const rows = rv.rows;
@@ -6290,12 +6434,12 @@
     const box = $('ibList');
     box.innerHTML = '';
     box.appendChild(el('button', { type: 'button', class: 'primary edit-only', style: 'width:100%;margin-bottom:10px', text: '+ 새 자료 묶음', onclick: newBatch }));
-    const item = (b) => el('button', { type: 'button', class: 'ib-item' + (b.id === IB.bid ? ' active' : ''), onclick: () => { IB.bid = b.id; IB.raw = null; IB.sel.clear(); renderInboxList(); loadBatch(); } }, [
+    const item = (b) => el('button', { type: 'button', class: 'ib-item' + (b.id === IB.bid ? ' active' : ''), ...(b.item ? { 'data-item': b.item } : {}), onclick: () => { IB.bid = b.id; IB.raw = null; IB.sel.clear(); renderInboxList(); loadBatch(); } }, [
       el('span', { class: 't', text: b.title }),
       el('span', { class: 's', text: slotLabel(b.group_id, b.item) }),
-      el('span', { class: 's' }, [el('span', { class: 'stage-chip' + (b.stage === 'sent' ? ' sent' : ''), text: b.stage === 'sent' && b.rounds > 1 ? `✔ 보냄 ${b.rounds}회` : STAGE_NAME[b.stage] }),
+      el('span', { class: 's' }, [el('span', { class: 'stage-chip' + (b.stage === 'sent' ? ' sent' : ''), 'data-stage': b.stage, stepText: b.stage === 'sent' ? (b.rounds > 1 ? `5 ✔ 보냄 ${b.rounds}회` : '5 ✔ 보냄') : STAGE_NAME[b.stage] }),
         b.stage === 'sent' ? ` ${b.sent_summary}` : `${b.n ? ` 새 자료 ${b.n}건${b.pending ? ` · 확인 필요 ${b.pending}` : ''}` : ''}${b.n_sent ? ` · 보낸 ${b.n_sent}건` : ''}`]),
-      b.sent_at ? el('span', { class: 's when', text: `마지막으로 보낸 때 ${b.sent_at}` }) : null,
+      b.sent_at ? el('span', { class: 's when', text: b.sent_at }) : null,
     ]);
     if (!IB.list.length) box.appendChild(el('p', { class: 'hint', text: '묶음이 없습니다. 학습지·엑셀 자료를 [+ 새 자료 묶음]으로 가져오세요.' }));
     IB.list.forEach((b) => box.appendChild(item(b)));
@@ -6340,7 +6484,7 @@
     return s;
   }
   function newBatch() {
-    if (!R.slots.length) { alertBox('담당이 없습니다. 명렬·담당 관리에서 먼저 추가하세요.'); return; }
+    if (!R.slots.length) { alertBox('담당이 없습니다. 명렬 / 담당 관리에서 먼저 추가하세요.'); return; }
     openSheet((box) => {
       box.style.height = 'auto';
       box.style.width = 'min(560px, 92vw)';
@@ -6381,9 +6525,9 @@
   function stepsBar(stage) {
     const order = ['import', 'match', 'refine', 'review'];
     const idx = stage === 'sent' ? 4 : order.indexOf(stage);
-    const refined = !!(IB.view && (IB.view.rows || []).some((r) => r.cands && r.cands.length));
-    return el('div', { class: 'steps-bar' }, ['1 가져오기', '2 학생 매칭', '3 AI 정제(선택)', '4 보내기 검토'].map((t, i) => el('span', {
-      class: i === idx ? 'active' : i < idx ? (i === 2 && !refined ? 'skipped' : 'done') : '', text: t })));
+    const refined = !!(IB.view && [...(IB.view.rows || []), ...(IB.view.sentRows || [])].some((r) => r.cands && r.cands.length));
+    return el('div', { class: 'steps-bar' }, ['1 가져오기', '2 학생 매칭', '3 AI 정제(선택)', '4 보내기 검토', '5 보냄'].map((t, i) => el('span', {
+      class: i === idx ? 'active' : i < idx ? (i === 2 && !refined ? 'skipped' : 'done') : '', 'data-stage': ['import', 'match', 'refine', 'review', 'sent'][i], stepText: t })));
   }
   function renderBatch() {
     const m = $('ibMain');
@@ -6442,7 +6586,7 @@
           el('button', { type: 'button', title: '학번 없는 모둠·개인 보고서처럼 한 문서를 고른 학생 모두에게 같은 원문으로 넣습니다', text: '📄 한 문서 → 여러 학생', onclick: () => { IB.shared = sharedState(b, b.meta.shared); renderBatch(); } }),
         ]),
         ta,
-        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '읽기', onclick: () => loadSource(() => call('inbox_source_text', b.id, ta.value)) })]),
+        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', class: 'btn-next', text: '읽기', onclick: () => loadSource(() => call('inbox_source_text', b.id, ta.value)) })]),
       );
       return;
     }
@@ -6471,7 +6615,7 @@
     const left = el('div', { class: 'prev-box' });
     const right = el('div', { class: 'prev-box mk-list' });
     const summary = el('span', {});
-    const go = el('button', { type: 'button', class: 'primary', text: '확정하고 매칭으로' });
+    const go = el('button', { type: 'button', class: 'primary btn-confirm', text: '확정하고 매칭으로' });
     body.append(el('div', { class: 'split2' }, [el('div', {}, [el('div', { class: 'col-label', text: '원본 셀 미리보기' }), left]), el('div', {}, [el('div', { class: 'col-label', text: '만들어질 기록' }), right])]),
       el('div', { class: 'sheet-foot' }, [summary, el('span', { class: 'spacer' }), el('button', { type: 'button', text: '다시 가져오기', onclick: () => { IB.raw = null; renderBatch(); } }), go]));
     go.addEventListener('click', async () => {
@@ -6619,7 +6763,7 @@
         list.appendChild(row);
       });
     };
-    const go = el('button', { type: 'button', class: 'primary', text: '확정하고 매칭으로' });
+    const go = el('button', { type: 'button', class: 'primary btn-confirm', text: '확정하고 매칭으로' });
     go.addEventListener('click', async () => {
       if (!st.text.trim()) { toast('문서 내용을 넣어 주세요.'); ta.focus(); return; }
       if (!st.roles.size) { toast('넣을 학생을 골라 주세요.'); return; }
@@ -6686,7 +6830,7 @@
       el('b', { text: `확정 ${c.confirmed}` }), el('span', { class: pending ? 'danger-text' : 'muted', style: 'font-weight:800', text: `확인 필요 ${pending}` }), el('span', { class: 'muted', text: `제외 ${c.excluded}` }),
       el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'checkbox', checked: IB.onlyPending, onchange: (e) => { IB.onlyPending = e.target.checked; renderBatch(); } }), '확인 필요만 보기']),
       el('span', { class: 'spacer' }),
-      el('button', { type: 'button', disabled: !c.suggested, text: `추천 ${c.suggested}건 일괄 확정`, onclick: async () => {
+      el('button', { type: 'button', class: 'btn-confirm', disabled: !c.suggested, text: `추천 ${c.suggested}건 일괄 확정`, onclick: async () => {
         if (!(await confirmBox('추천은 학번·이름이 완전히 맞지 않아 앱이 짐작한 연결입니다. 원본과 대조해 보셨나요? 추천 모두를 확정합니다.', '확정'))) return;
         if (await mutate('inbox_confirm_suggested', b.id)) loadBatch();
       } }),
@@ -6703,7 +6847,7 @@
       const stateTd = el('td', {}, [el('div', { class: `st-chip ${r.state}`, text: ST_CHIP[r.state] + (r.state === 'excluded' ? ` (${r.exclude_reason})` : '') }),
         r.note && r.state !== 'confirmed' ? el('div', { class: 'note', text: r.note }) : null,
         r.dup ? el('div', { class: 'note', text: '같은 학생이 원본의 다른 줄에도 있음(중복 의심)' }) : null,
-        r.state === 'suggested' ? el('button', { type: 'button', class: 'small', text: '확정', onclick: async () => { if (await mutate('inbox_confirm_suggested', b.id, [r.id])) loadBatch(); } }) : null]);
+        r.state === 'suggested' ? el('button', { type: 'button', class: "small btn-confirm", text: '확정', onclick: async () => { if (await mutate('inbox_confirm_suggested', b.id, [r.id])) loadBatch(); } }) : null]);
       const holder = el('td', {});
       const tr = el('tr', { class: r.state === 'excluded' ? 'row-excluded' : (r.state === 'none' || r.state === 'suggested') ? 'row-pending' : '' }, [
         holder, el('td', { text: r.source_ref }), el('td', { text: `${r.ext_no || r.ext_cls || '-'} ${r.ext_name || ''}` }), el('td', {}, [sel]), stateTd,
@@ -6842,7 +6986,7 @@
     const tagsBox = el('div', { class: 'tagpick' });
     const tagSet = new Set(b.tag_ids || []);
     const tags = (await call('tags')) || { tags: [] };
-    const tagCard = el('div', { class: 'ib-tagcard' });
+    const tagCard = el('div', { class: 'ib-tagcard', 'data-item': b.item });
     const tagState = el('div', { class: 'ib-tag-state' });
     const newName = el('input', { type: 'text', maxlength: 30, value: (tags.tags.some((t) => t.name === b.title) ? '' : b.title || ''), placeholder: '새 태그 이름(예: 진로 독서)', 'aria-label': '새 태그 이름' });
     const pickTag = async (id) => { tagSet.clear(); if (id) tagSet.add(id); drawTags(); await mutate('inbox_update', b.id, { tag_ids: [...tagSet] }); };
@@ -6897,7 +7041,7 @@
       body.appendChild(el('div', { class: 'warn', style: 'margin-top:12px' }, [
         el('b', { text: `마감된 학생 ${r.closed.length}명: ` }), r.closed.map((s) => `${s.student_no} ${s.name}`).join(', '), el('br'),
         '마감된 학생에게는 그대로 보낼 수 없습니다. ',
-        el('button', { type: 'button', text: '마감 해제하고 보내기', onclick: async () => { if (await confirmBox(`${r.closed.length}명의 마감을 해제하고 보냅니다. 보낸 뒤 다시 검토·마감하세요.`, '보내기')) doSend('reopen'); } }), ' ',
+        el('button', { type: 'button', class: 'btn-close', text: '마감 해제하고 보내기', onclick: async () => { if (await confirmBox(`${r.closed.length}명의 마감을 해제하고 보냅니다. 보낸 뒤 다시 검토·마감하세요.`, '보내기')) doSend('reopen'); } }), ' ',
         el('button', { type: 'button', text: '이 학생들은 제외하고 보내기', onclick: () => doSend('exclude') }),
       ]));
       sendBtn.disabled = true;
@@ -7075,7 +7219,7 @@
     body.appendChild(el('p', { class: 'hint', text: '학생 경계가 밀렸다면 페이지의 [여기서 새 학생]을 켜고 끄세요. 백지·표지는 [빼기]. 학번·이름은 각 학생 첫 페이지 머리글에서 규칙으로 읽습니다(AI 미사용).' }));
     const list = el('div', {});
     const summary = el('span', {});
-    const go = el('button', { type: 'button', class: 'primary', text: '확정하고 매칭으로' });
+    const go = el('button', { type: 'button', class: 'primary btn-confirm', text: '확정하고 매칭으로' });
     body.append(list, el('div', { class: 'sheet-foot' }, [summary, el('span', { class: 'spacer' }), go]));
     go.addEventListener('click', async () => {
       const r = await mutate('inbox_scan_confirm', b.id, SC.starts, SC.skipped);
@@ -7169,9 +7313,9 @@
     list.innerHTML = '';
     const outs = r.outlines || [];
     if (!r.subjects.length && !outs.length) {
-      list.appendChild(el('p', { class: 'hint', text: '등록한 담당이 없습니다. 명렬·담당 관리에서 반·과목·동아리를 추가하세요.' }));
+      list.appendChild(el('p', { class: 'hint', text: '등록한 담당이 없습니다. 명렬 / 담당 관리에서 반·과목·동아리를 추가하세요.' }));
       $('stdMain').innerHTML = '';
-      $('stdMain').appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '성취기준은 과목 세특에서, 활동 개요는 자율·진로·동아리에서 씁니다.' }), el('button', { type: 'button', class: 'primary', text: '명렬·담당 관리', onclick: () => showPanel('roster') })]));
+      $('stdMain').appendChild(el('div', { class: 'empty-state' }, [el('p', { text: '성취기준은 과목 세특에서, 활동 개요는 자율·진로·동아리에서 씁니다.' }), el('button', { type: 'button', class: 'primary', text: '명렬 / 담당 관리', onclick: () => showPanel('roster') })]));
       return;
     }
     // 고른 것: SD.item이 'subject'면 과목 성취기준, 아니면 (SD.gid, SD.item) 활동 개요
@@ -7608,8 +7752,8 @@
       const body = el('div', { class: 'sheet-body' });
       const tbl = el('table', { class: 'tbl' });
       const head = el('div', { class: 'basis-acts' });
-      const closeBtn = el('button', { type: 'button', class: 'primary' });
-      const openBtn = el('button', { type: 'button' });
+      const closeBtn = el('button', { type: 'button', class: 'primary btn-close' });
+      const openBtn = el('button', { type: 'button', class: 'btn-close' });
       const draw = () => {
         tbl.innerHTML = '';
         tbl.appendChild(el('tr', {}, ['', '학번', '이름', '상태', '최종안', '확인 사항'].map((h) => el('th', { text: h }))));
@@ -7620,8 +7764,8 @@
           tbl.appendChild(el('tr', { class: off ? 'is-off' : '' }, [
             el('td', {}, [el('input', { type: 'checkbox', disabled: off, checked: sel.has(x.student_no), onchange: (e) => { if (e.target.checked) sel.add(x.student_no); else sel.delete(x.student_no); draw(); } })]),
             el('td', { text: x.student_no }), el('td', { text: x.name }),
-            el('td', {}, [el('span', { class: 'stcell' }, [el('span', { class: `st ${st.cls}`, text: st.icon }), ' ', st.text]), why ? el('div', { class: 'muted small-note', text: why }) : null]),
-            el('td', { text: x.final_bytes ? `${x.final_bytes}/${x.target}B` : '-' }),
+            el('td', {}, [stBadge(x.status), why ? el('div', { class: 'muted small-note', text: why }) : null]),
+            el('td', { text: x.final_bytes ? `${x.final_bytes}/${x.target}(B)` : '-' }),
             el('td', {}, x.notes.map((n) => el('span', { class: 'tag warn-tag', text: n }))),
           ]));
         });
@@ -7633,7 +7777,7 @@
         head.append(el('button', { type: 'button', disabled: !allFinal, text: `최종안 있는 학생 모두 고르기 (${allFinal}명)`, onclick: () => { info.students.filter(canClose).forEach((x) => sel.add(x.student_no)); draw(); } }),
           el('button', { type: 'button', disabled: !allClosed, text: `마감된 학생 모두 고르기 (${allClosed}명)`, onclick: () => { info.students.filter(canOpen).forEach((x) => sel.add(x.student_no)); draw(); } }),
           el('button', { type: 'button', disabled: !sel.size, text: '모두 해제', onclick: () => { sel.clear(); draw(); } }));
-        closeBtn.textContent = `● 선택 ${nClose}명 마감`;
+        closeBtn.textContent = `■ 선택 ${nClose}명 마감`;
         closeBtn.disabled = !nClose;
         openBtn.textContent = `선택 ${nOpen}명 마감 해제`;
         openBtn.disabled = !nOpen;
@@ -7683,7 +7827,7 @@
     const [info0, basis] = await Promise.all([call('batch_info', s.group_id, s.item), isSub ? call('standards_get', s.group_id) : call('outline_get', s.group_id, s.item)]);
     if (!info0 || !basis) return;
     if (!(basis.text || '').trim()) {
-      const go = await modal(`${s.label}의 ${what}이(가) 아직 없습니다. 메뉴의 <b>[성취기준·활동 개요]</b>에서 먼저 넣어 주세요.`, true, true, `${what} 넣으러 가기`);
+      const go = await modal(`${s.label}의 ${what}이(가) 아직 없습니다. 메뉴의 <b>[성취기준 / 활동 개요]</b>에서 먼저 넣어 주세요.`, true, true, `${what} 넣으러 가기`);
       if (go) { SD.gid = s.group_id; SD.item = s.item; showPanel('standards'); }
       return;
     }
@@ -7716,14 +7860,14 @@
       const runBtn = el('button', { type: 'button', class: 'primary ai-btn' });
       const head = el('div', { class: 'basis-acts' });
       const commonBox = el('div', { class: 'basis-common' });
-      const stCellOf = (x) => { const st = STATUS[x.status] || STATUS.none; return el('span', { class: 'stcell' }, [el('span', { class: `st ${st.cls}`, text: st.icon }), ' ', st.text]); };
+      const stCellOf = (x) => stBadge(x.status);
       const draw = () => {
         const can = info.students.filter((x) => !blocked(x));
         [...sel].forEach((n) => { if (!can.some((x) => x.student_no === n)) sel.delete(n); });
         // ① 공통 참여 활동(활동 개요): 전체 이름으로 고르고, 학생별로 다른 점만 펼쳐 고친다
         commonBox.innerHTML = '';
         if (!isSub) {
-          commonBox.append(el('div', { class: 'col-label', text: '① 공통 참여 활동 — 고른 학생 모두에게 적용됩니다. 참여하지 않은 활동은 눌러서 빼세요.' }),
+          commonBox.append(el('div', { class: 'col-label', stepText: '① 공통 참여 활동 — 고른 학생 모두에게 적용됩니다. 참여하지 않은 활동은 눌러서 빼세요.' }),
             el('div', { class: 'basis-picks wide' }, lines.map((ln, i) => el('button', { type: 'button', class: 'small' + (common.has(i) ? ' on' : ''), disabled: running, text: `${i + 1}. ${ln}`,
               onclick: () => { if (common.has(i)) common.delete(i); else common.add(i); draw(); } }))));
         }
@@ -7772,7 +7916,7 @@
         const empties = can.filter(isEmpty).length;
         const retry = can.filter((x) => res[x.student_no] && res[x.student_no].ok !== true);
         head.innerHTML = '';
-        addTo(head, el('span', { class: 'col-label', style: 'margin:0', text: `${isSub ? '①' : '②'} 대상 학생` }),
+        addTo(head, el('span', { class: 'col-label', style: 'margin:0', stepText: `${isSub ? '①' : '②'} 대상 학생` }),
           el('button', { type: 'button', disabled: running || !empties, text: `기록 없는 학생 모두 고르기 (${empties}명)`, onclick: () => { can.filter(isEmpty).forEach((x) => sel.add(x.student_no)); draw(); } }),
           retry.length ? el('button', { type: 'button', disabled: running, text: `실패·중지된 ${retry.length}명 고르기`, onclick: () => { sel.clear(); retry.forEach((x) => sel.add(x.student_no)); draw(); } }) : null,
           el('button', { type: 'button', disabled: running || !sel.size, text: '모두 해제', onclick: () => { sel.clear(); draw(); } }));
@@ -7799,7 +7943,7 @@
         try {
           out = await aiRun({
             title: `${basisRo(s.item)} 생성`, kind: 'synth',
-            rows: [['담당', s.label], ['학생', `${students.length}명 (학생마다 AI를 한 번씩 부름)`], ['기준', isSub ? `성취기준 ${bytesOf(stdTa.value)}B · 학생별 성취수준` : `활동 개요 ${lines.length}개 중 공통 ${common.size}개${Object.keys(own).length ? ` · 따로 고른 학생 ${students.filter((x) => own[x.student_no]).length}명` : ''}`], ['모델', modelName(model)]],
+            rows: [['담당', s.label], ['학생', `${students.length}명 (학생마다 AI를 한 번씩 부름)`], ['기준', isSub ? `성취기준 ${bytesOf(stdTa.value)}(B) · 학생별 성취수준` : `활동 개요 ${lines.length}개 중 공통 ${common.size}개${Object.keys(own).length ? ` · 따로 고른 학생 ${students.filter((x) => own[x.student_no]).length}명` : ''}`], ['모델', modelName(model)]],
             warn: `학생관찰기록은 쓰지 않고 ${what}만으로 만듭니다. ${DROP_WARN} 같은 담당에서 먼저 만든 다른 학생 후보(최대 3개, 학번·이름 없음)도 함께 보내 표현이 겹치지 않게 합니다.${lvChanged.length ? ` 고른 성취수준(${lvChanged.length}명)은 실행할 때 명렬에도 저장됩니다.` : ''}`,
             before: async () => {
               await jobStart(); // 여러 명 생성 동안 학년도 전환·복원·업데이트와 겹치지 않게
@@ -7836,7 +7980,7 @@
       runBtn.addEventListener('click', () => run(info.students.filter((x) => sel.has(x.student_no) && !blocked(x))));
       box.append(
         el('div', { class: 'sheet-head' }, [el('h2', { text: `${basisRo(s.item)} 생성` }), el('span', { class: 'muted', text: `${s.label} · 학생관찰기록은 쓰지 않음 · 명렬 전체` }), el('span', { class: 'spacer' }),
-          el('button', { type: 'button', class: 'small', title: `[성취기준·활동 개요] 메뉴에서 이 담당의 ${what}을(를) 엽니다. 고친 뒤 마우스 뒤로 버튼으로 돌아오세요.`, text: `📚 ${what} 보기·고치기 ↗`,
+          el('button', { type: 'button', class: 'small', title: `[성취기준 / 활동 개요] 메뉴에서 이 담당의 ${what}을(를) 엽니다. 고친 뒤 마우스 뒤로 버튼으로 돌아오세요.`, text: `📚 ${what} 보기·고치기 ↗`,
             onclick: () => { if (running) return; closeSheet(); SD.gid = s.group_id; SD.item = s.item; showPanel('standards'); } })]),
         body, foot);
       addTo(body,
@@ -7844,7 +7988,7 @@
           ? '고른 학생마다 성취기준과 학생의 성취수준만으로 세특 후보를 만듭니다. 기록이 있는 학생을 골라도 기록은 쓰지 않습니다. 결과에는 "관찰기록 없이 성취기준으로 생성" 표시가 남으니 실제 수업 모습과 맞는지 꼭 확인하세요.'
           : '고른 학생마다 참여한 활동만으로 후보를 만듭니다. 기록이 있는 학생을 골라도 기록은 쓰지 않습니다. 개요에 없는 사실은 지어내지 않도록 지시합니다. 학생마다 활동이 다르면 문장도 덜 겹칩니다.' }),
         isSub
-          ? el('details', {}, [el('summary', { text: `이번에 쓸 성취기준 (${bytesOf(basis.text)}B, 필요한 부분만 남겨도 됩니다. 저장되지는 않음)` }), stdTa])
+          ? el('details', {}, [el('summary', { text: `이번에 쓸 성취기준 (${bytesOf(basis.text)}(B), 필요한 부분만 남겨도 됩니다. 저장되지는 않음)` }), stdTa])
           : null,
         commonBox,
         el('div', { class: 'map-row' }, [head]),
@@ -8116,11 +8260,15 @@
     $('tagAddBtn').addEventListener('click', addTag);
     $('tagFromInboxBtn').addEventListener('click', tagsFromInbox);
     $('tvScope').addEventListener('change', (e) => tvSetFilter({ scope: e.target.value }));
-    $('tvSlot').addEventListener('change', (e) => tvSetFilter({ slot: e.target.value }));
+    $('tvSlot').addEventListener('change', (e) => { tvTintSlot(); tvSetFilter({ slot: e.target.value }); });
+    $('tvSlotBtn').addEventListener('click', tvSlotPopToggle);
+    $('tvSlotPop').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); }); // label 안이라 빈 곳 클릭이 버튼으로 넘어가지 않게
+    document.addEventListener('click', (e) => { if (!$('tvSlotPop').hidden && !e.target.closest('.tv-slotpick')) tvSlotPopClose(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('tvSlotPop').hidden) { tvSlotPopClose(); $('tvSlotBtn').focus(); } });
     $('tvStatus').addEventListener('change', (e) => tvSetFilter({ status: e.target.value }));
     $('tvInactive').addEventListener('change', (e) => tvSetFilter({ inactive: e.target.checked }));
     $('tvQ').addEventListener('input', debounce((e) => tvSetFilter({ q: e.target.value }), 400));
-    $('tvQ').setAttribute('aria-label', '이름·학번·내용 찾기');
+    $('tvQ').setAttribute('aria-label', '이름 / 학번 / 내용 찾기');
     $('tvClear').addEventListener('click', () => tvSetFilter({ scope: '', slot: '', status: 'all', q: '', inactive: false }));
     $('tvTagSel').addEventListener('change', (e) => { if (e.target.value !== '') tvPickTag(+e.target.value); });
     $('tvReload').addEventListener('click', async () => {

@@ -63,6 +63,8 @@ jobs:
           python tests/test_migrate_v13.py
           python tests/test_migrate_v14.py
           python tests/test_inbox_columns.py
+          python tests/test_adopt_confirm.py
+          python tests/test_migrate_v16.py
 
       - name: Version info
         shell: pwsh
