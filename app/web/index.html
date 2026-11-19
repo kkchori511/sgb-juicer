@@ -106,7 +106,7 @@
         </div>
         <div class="rec-tools" id="recTools">
           <b id="recToolsLabel">이 항목 전체 작업</b>
-          <span class="muted" title="학생 목록의 검색·상태 필터와 관계없이 이 담당 명렬 전체가 대상입니다">(검색·필터와 관계없이 명렬 전체)</span>
+          <span class="muted" title="학생 목록의 검색 / 상태 필터와 관계없이 이 담당 명렬 전체가 대상입니다">(검색 / 필터와 관계없이 명렬 전체)</span>
           <details class="opt-menu menu-down" id="recAddMenu"><summary title="여러 학생 자료를 한꺼번에 넣거나 기준 자료로 만듭니다">📥 자료 추가 ▾</summary><div class="opt-list">
             <button type="button" id="recBulkRecord" title="여러 학생의 학생관찰기록을 엑셀에서 한 번에">📥 학생관찰기록 일괄 입력</button>
             <button type="button" id="recBulkExisting" title="여러 학생의 이미 쓴 생기부를 엑셀에서 한 번에">📥 이미 쓴 생기부 일괄 입력</button>
@@ -114,12 +114,10 @@
           </div></details>
           <button type="button" id="recJoinBulk" title="학생마다 확정 기록을 같은 활동 순서로 이어 최종안에 넣습니다(없는 활동은 건너뜀)">⛓ 전체 학생 이어 붙이기</button>
           <button type="button" id="recBulkClose" class="btn-close" title="최종안 있는 학생을 한꺼번에 마감하거나 마감을 해제">■ 마감 일괄</button>
-          <details class="opt-menu menu-down" id="recMoreMenu"><summary>더보기 ▾</summary><div class="opt-list">
-            <button type="button" id="recBulkFinal" title="학생마다 기존 완성문을 최종안으로 한꺼번에">✔ 기존 완성문 → 최종안 일괄</button>
-            <button type="button" id="recTraitBulk" class="ai-btn" hidden title="설계 카드를 채운 학생을 골라 한꺼번에 행특을 만듭니다">🧩 행특 설계 일괄 변환</button>
-            <button type="button" id="recTraitTpl" hidden title="학번·이름이 채워진 설계 엑셀 양식(드롭다운·사전 시트 포함)">📄 설계 엑셀 양식 내려받기</button>
-            <button type="button" id="recTraitImp" hidden title="채운 설계 엑셀을 올려 여러 학생의 설계를 한꺼번에 넣습니다">📤 엑셀로 설계 입력</button>
-          </div></details>
+          <button type="button" id="recBulkFinal" title="학생마다 기존 완성문을 최종안으로 한꺼번에">✔ 기존 완성문 → 최종안 일괄</button>
+          <button type="button" id="recTraitBulk" class="ai-btn" hidden title="설계 카드를 채운 학생을 골라 한꺼번에 행특을 만듭니다">🧩 행특 설계 일괄 변환</button>
+          <button type="button" id="recTraitTpl" hidden title="학번·이름이 채워진 설계 엑셀 양식(드롭다운·사전 시트 포함)">📄 설계 엑셀 양식 내려받기</button>
+          <button type="button" id="recTraitImp" hidden title="채운 설계 엑셀을 올려 여러 학생의 설계를 한꺼번에 넣습니다">📤 엑셀로 설계 입력</button>
         </div>
         <div class="rec-body" id="recBody">
           <aside class="rec-list" id="recList"></aside>
@@ -157,9 +155,9 @@
       <section class="panel" data-panel-content="tagrec">
         <div class="tv-head">
           <label class="inline tv-tagsel">태그 <select id="tvTagSel"></select></label>
-          <span class="tv-view-label">보기 :</span>
+          <span class="tv-view-label">필터 :</span>
           <label class="inline">반 / 수업 <select id="tvScope"></select></label>
-          <label class="inline">항목 <select id="tvSlot"></select></label>
+          <label class="inline tv-slotpick">항목 <select id="tvSlot" hidden></select><button type="button" class="tv-slot-btn" id="tvSlotBtn" aria-haspopup="true" aria-expanded="false"></button><div class="tv-slot-pop" id="tvSlotPop" hidden></div></label>
           <label class="inline">마감 <select id="tvStatus"><option value="all">마감 포함</option><option value="open">마감 빼고</option><option value="closed">마감만</option></select></label>
           <input type="search" id="tvQ" class="tv-q" placeholder="이름 / 학번 / 내용 찾기">
           <label class="inline tv-inact"><input type="checkbox" id="tvInactive"> 비활성 포함</label>
@@ -531,7 +529,7 @@
               <li><b>행특 고정 지침</b>: 행동특성 및 종합의견의 모든 AI 변환(행특 생성·정제·다듬기·분량 맞추기·태그 변환)에는 프롬프트와 상관없이 '부정적인 행동·평가는 그대로 쓰지 않고 노력·개선 의지·변화 가능성 중심으로 긍정적으로 고침(없는 행동은 지어내지 않음), 민감 정보·날짜는 쓰지 않음' 지침이 늘 붙습니다.</li>
               <li><b>⚠ 인적사항</b>: 설명·사례 글은 AI에 그대로 보내집니다. 학생 이름(명렬)·학번·전화번호처럼 보이는 글이 있으면 노란 경고가 뜹니다(저장은 됨). 학번·이름은 따로 보내지 않습니다.</li>
               <li><b>[AI 변환]</b>: 확인 창에서 프롬프트(기본 '행특 생성')·이번 추가 요구 사항을 고르고 실행. 결과는 카드의 결과 묶음 맨 위에 쌓이고(🤖 모델 · 📝 프롬프트 표시), <b>[✔ 이걸로 확정]·[고쳐서 확정]</b>하면 오른쪽 확정 기록에 들어갑니다. 확인 창 왼쪽 아래 [🪄 프롬프트 마법사]로 대화하며 고친 뒤 스킬화하면, 저장 뒤 [다른 학생에게도 적용] 창이 이 반의 설계한 학생들로 열립니다.</li>
-              <li><b>여러 학생</b>: 위 줄 [더보기 ▾] › <b>[🧩 행특 설계 일괄 변환]</b>(설계한 학생 중 확정 전, 처음엔 결과 없는 학생만 고름) · <b>[📄 설계 엑셀 양식 내려받기]</b>(학번·이름이 채워지고 성격유형·키워드 드롭다운과 사전 시트가 든 양식) · <b>[📤 엑셀로 설계 입력]</b>(학생 찾기 결과·경고를 보고 체크한 줄만 넣음, 있던 설계는 바뀜).</li>
+              <li><b>여러 학생</b>: 위 줄 <b>[🧩 행특 설계 일괄 변환]</b>(설계한 학생 중 확정 전, 처음엔 결과 없는 학생만 고름) · <b>[📄 설계 엑셀 양식 내려받기]</b>(학번·이름이 채워지고 성격유형·키워드 드롭다운과 사전 시트가 든 양식) · <b>[📤 엑셀로 설계 입력]</b>(학생 찾기 결과·경고를 보고 체크한 줄만 넣음, 있던 설계는 바뀜).</li>
               <li><b>사전</b>: 설정 › <b>행특 사전</b>에서 [✏️ 사전 편집](성격유형·설명, 영역별 키워드·설명·추천 유형) 또는 [📥 사전 엑셀 내려받기] → 고쳐서 [📤 엑셀 올리기](바뀌는 수를 보고 [바꾸기]). [↩ 앞 사전으로] 한 번, [기본 사전으로 되돌리기]도 됩니다.</li>
             </ol>
             <h3>🤖 태그별 기록 AI 변환 — 한 명으로 대화 → 스킬화 → 나머지 한꺼번에 → 확정</h3>
@@ -554,7 +552,7 @@
               <li><b>담임 항목끼리 옮기기</b>: 자율·진로·행특 기록 카드의 <b>[→ 진로]·[→ 행특]</b> 같은 버튼으로 그 학생의 기록 1건을 다른 담임 항목으로 옮깁니다(확인 후, 날짜·활동명·태그·정제 후보 함께, [되돌리기] 가능). 도착 항목이 마감이면 옮기지 않습니다. 문단 일부나 세특·동아리로 옮길 때는 [이동]을 씁니다.</li>
               <li>왼쪽 학생 목록 → 가운데 학생관찰기록 → 오른쪽 최종안·후보. [이전/다음 학생](Alt+↑/↓)으로 넘깁니다. 상태 필터로 '입력 중만' 같이 볼 수 있습니다.</li>
               <li><b>+ 학생관찰기록</b>: 날짜·활동명·태그·내용. 회차는 자동으로 붙습니다.</li>
-              <li><b>버튼 자리</b>: 위 줄은 <b>[📥 자료 추가 ▾]</b>(학생관찰기록·이미 쓴 생기부 일괄 입력, 기준 자료로 여러 명 생성)·[⛓ 전체 학생 이어 붙이기]·[■ 마감 일괄]·<b>[더보기 ▾]</b>(기존 완성문 → 최종안 일괄). 기록 목록 위는 <b>[+ 기록 ▾]</b>(학생관찰기록·이미 쓴 생기부·기준 자료만으로 생성)과 선택 줄의 [선택 기록 AI 변환]·<b>[일괄 작업 ▾]</b>(변환 안 한 기록만 고르기·태그 일괄 지정·다른 항목으로 이동). 기록 카드는 [수정]·<b>[⋯]</b>(그대로 최종안으로·이동·→진로 등·삭제), 결과 하나는 [✔ 이걸로 확정]·[고쳐서 확정]·[⋯](정보·삭제). 메뉴는 안의 버튼을 누르거나 바깥을 누르면 닫힙니다.</li>
+              <li><b>버튼 자리</b>: 위 줄은 <b>[📥 자료 추가 ▾]</b>(학생관찰기록·이미 쓴 생기부 일괄 입력, 기준 자료로 여러 명 생성)·[⛓ 전체 학생 이어 붙이기]·[■ 마감 일괄]·[✔ 기존 완성문 → 최종안 일괄]. 기록 목록 위는 <b>[+ 기록 ▾]</b>(학생관찰기록·이미 쓴 생기부·기준 자료만으로 생성)과 선택 줄의 [선택 기록 AI 변환]·<b>[일괄 작업 ▾]</b>(변환 안 한 기록만 고르기·태그 일괄 지정·다른 항목으로 이동). 기록 카드는 [수정]·<b>[⋯]</b>(그대로 최종안으로·이동·→진로 등·삭제), 결과 하나는 [✔ 이걸로 확정]·[고쳐서 확정]·[⋯](정보·삭제). 메뉴는 안의 버튼을 누르거나 바깥을 누르면 닫힙니다.</li>
               <li><b>기록 = 원문 + 결과 묶음</b>: 기록 카드 위에는 원문, 아래에는 '▸ 변환 결과 n개'(기본 접힘)가 있습니다. [AI 변환]이나 태그별 기록의 변환 결과는 모두 이 묶음 맨 위에 쌓이고 지워지지 않습니다. 펼치면 최근 3개, 나머지는 [이전 n개 더 보기].</li>
               <li><b>기록 확정</b>: 결과의 <b>[✔ 이걸로 확정]</b>, 원문의 <b>[원문 그대로 확정]</b>, 또는 <b>[✍ 직접 작성]</b>으로 확정합니다. 확정하면 확정본만 보이고 원문·다른 결과는 '▸ 원문·변환 결과 보기'로 가려집니다. [수정]으로 확정본을 고쳐도 확정은 그대로이고, [확정 풀기]를 하면 확정본은 '이전 확정본' 결과로 남습니다. AI 변환만으로는 확정되지 않습니다.</li>
               <li><b>[✍ 직접 작성]</b>: 기록 안에 작성 칸이 열립니다. 원문·결과에서 쓸 문장을 마우스로 끌어 고르면 <b>[⤵ 작성 칸에 넣기]</b>가 뜹니다(직접 써도 됨). [✔ 확정], [후보로 저장](✍ 직접 작성 결과로 남김), [새 기록으로 저장](같은 활동명·날짜·태그의 새 기록, 확정된 상태). 결과의 [고쳐서 확정]은 그 글을 작성 칸에 불러옵니다.</li>

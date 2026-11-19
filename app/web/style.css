@@ -1797,11 +1797,33 @@ button, input, select, textarea { font-family: inherit; }
 .tv-head select:focus { outline: 2px solid color-mix(in srgb, var(--fc) 40%, white); outline-offset: 1px; }
 #tvSlot[data-item] { --fc: var(--category-color); }
 #tvStatus { --fc: var(--st-closed); }
-.tv-head .tv-q { border-radius: var(--radius-pill); }/* 반 / 수업 보기 칸은 청록(남색은 거의 검정으로 보여서) */
-#tvScope { --fc: #0c8599; }
+.tv-head .tv-q { border-radius: var(--radius-pill); }
+/* 반 / 수업 보기 칸은 원래대로 검은 글자, 흰 바탕 */
+#tvScope { --fc: var(--text); color: var(--text); background-color: #fff; }
+#tvScope:hover { background-color: #f4f4f5; }
+/* 항목 보기: 버튼을 누르면 카테고리를 항목 색 둥근 버튼으로 펼침 */
+.tv-slotpick { position: relative; }
+.tv-slot-btn { --fc: var(--accent); height: 34px; padding: 3px 14px; border: 1.5px solid var(--fc); border-radius: var(--radius-pill); font-weight: 700; white-space: nowrap;
+  color: color-mix(in srgb, var(--fc) 85%, black); background: color-mix(in srgb, var(--fc) 7%, white); cursor: pointer; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.tv-slot-btn:hover { background: color-mix(in srgb, var(--fc) 13%, white); }
+.tv-slot-btn[data-item] { --fc: var(--category-color); }
+.tv-slot-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 50; min-width: 260px; max-width: 520px; max-height: 60vh; overflow: auto;
+  padding: 10px 12px; background: #fff; border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.14); display: flex; flex-direction: column; gap: 8px; }
+.tv-slot-pop[hidden] { display: none; }
+.tv-cat-title { font-size: 12px; font-weight: 700; color: var(--muted, #666); margin-bottom: 4px; }
+.tv-cat-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.tv-cat { --fc: var(--text); padding: 4px 12px; border: 1.5px solid var(--fc); border-radius: var(--radius-pill); font-weight: 700; font-size: 14px; white-space: nowrap; cursor: pointer;
+  color: color-mix(in srgb, var(--fc) 85%, black); background: #fff; }
+.tv-cat[data-item] { --fc: var(--category-color); }
+.tv-cat:hover { background: color-mix(in srgb, var(--fc) 10%, white); }
+.tv-cat.active { background: var(--fc); color: #fff; }
 /* 바이트 수: 네모 라운드 칩. 목표 이내면 검정, 넘으면 빨강 */
 .bytes, .tv-bytes { display: inline-flex; align-items: center; box-sizing: border-box; padding: 2px 9px; border: 1.5px solid var(--card-border, var(--border)); border-radius: 8px;
   background: var(--input); color: var(--text); font-size: 13px; font-weight: 800; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .bytes.over { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
 .bytes:empty, .tv-bytes:empty { display: none; }
 .fin-mode-btns .bytes { border: none; background: none; padding: 0; }
+/* ▾ 메뉴 버튼(details > summary)도 일반 버튼과 같은 크기 / 여백 / 검정 테두리 / 글씨로(사용자 지정 2026-11-19). 태그 고르기 칩은 제외 */
+.opt-menu:not(.tag-menu) > summary, .add-menu > summary { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  min-height: 40px; padding: 8px 16px; border: 1px solid var(--text); border-radius: var(--radius-pill); font-size: 14px; font-weight: 700; line-height: normal; white-space: nowrap; }
+.rec-tools .opt-menu:not(.tag-menu) > summary { min-height: 32px; }
