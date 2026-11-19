@@ -1750,4 +1750,9 @@ button.is-next, .rec-final .sec-title > button.btn-join.is-next { box-shadow: no
 .tv-slot[data-item] .tv-meta { color: color-mix(in srgb, var(--category-color) 82%, black); font-size: 15px; font-weight: 800; }
 .tv-lock { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border: 1.5px solid currentColor; border-radius: var(--radius-pill); font-size: 13px; font-weight: 700; white-space: nowrap; }
 .tv-lock.closed { color: var(--st-closed); background: var(--st-closed-bg); }
-.tv-lock.other { color: var(--muted); background: var(--surface-2); }
+.tv-lock.other { color: var(--muted); background: var(--surface-2); }/* 둥근 상자 안의 맨 위·맨 아래 칸이 모서리 곡선을 덮지 않게(펼침 메뉴가 잘리지 않도록 overflow는 그대로 두고 칸 모서리를 안쪽 곡선에 맞춤) */
+.tv-slot > :first-child { border-top-left-radius: 7px; border-top-right-radius: 7px; }
+.tv-slot > :last-child { border-bottom-left-radius: 7px; border-bottom-right-radius: 7px; }
+.tv-class > :last-child { border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
+/* 태그별 기록의 확정 기록은 상자 안 한 줄이라 상자 테두리와 겹치는 네모 테두리 대신 윗줄 구분선만 */
+.tv-slot > .tv-rec.confirmed { border: none; border-top: 1px solid color-mix(in srgb, var(--st-final) 30%, white); }
