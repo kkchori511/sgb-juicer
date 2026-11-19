@@ -32,8 +32,8 @@ class Records:
                 continue
             for it in items_of(g):
                 target = targets[it] if g["kind"] == "homeroom" else (g["target_bytes"] or targets[it])
-                label = f"{ITEM_LABEL[it]} · {g['name']}" if g["kind"] == "homeroom" else (
-                    f"세특 · {g['name']}({g['semester']}학기)" if g["kind"] == "subject" else f"동아리 · {g['name']}")
+                label = f"{ITEM_LABEL[it]} / {g['name']}" if g["kind"] == "homeroom" else (
+                    f"세특 / {g['name']}({g['semester']}학기)" if g["kind"] == "subject" else f"동아리 / {g['name']}")
                 out.append({"group_id": g["id"], "item": it, "kind": g["kind"], "label": label, "target": target,
                             "semester": g["semester"], "level_scale": g["level_scale"], "total": g["total"], "active": g["active"]})
         return out
@@ -501,7 +501,7 @@ class Records:
             "students": len({r["student_no"] for r in sel}),
             "options": {
                 "classes": [{"key": k, "label": f"{v[0]}학년 {v[1]}반"} for k, v in sorted(classes.items(), key=lambda x: x[1])],
-                "sections": [{"key": k, "label": f"{v[0]}({v[1]}학기) · {v[2]}" if v[1] else f"{v[0]} · {v[2]}"} for k, v in sorted(sections.items(), key=lambda x: x[1])],
+                "sections": [{"key": k, "label": f"{v[0]}({v[1]}학기) / {v[2]}" if v[1] else f"{v[0]} / {v[2]}"} for k, v in sorted(sections.items(), key=lambda x: x[1])],
                 "items": items,
                 "slots": [{"key": f"g:{s['group_id']}:{s['item']}", "label": s["label"]} for s in slots if s["kind"] != "homeroom"],
             },
@@ -1090,8 +1090,8 @@ class Records:
             for it in items_of(g):
                 if g["id"] == int(gid) and it == item:
                     continue
-                out.append({"group_id": g["id"], "item": it, "label": f"{ITEM_LABEL[it]} · {g['name']}" if g["kind"] == "homeroom" else (
-                    f"세특 · {g['name']}({g['semester']}학기)" if g["kind"] == "subject" else f"동아리 · {g['name']}"),
+                out.append({"group_id": g["id"], "item": it, "label": f"{ITEM_LABEL[it]} / {g['name']}" if g["kind"] == "homeroom" else (
+                    f"세특 / {g['name']}({g['semester']}학기)" if g["kind"] == "subject" else f"동아리 / {g['name']}"),
                     "closed": self.is_closed(g["id"], it, sno)})
         return out
 

@@ -329,7 +329,7 @@ class TagWork:
                 x = self.cand(conf["cand_id"])
                 r = self.record_info(x["record_id"])
                 t = x["edited"] if x["edited"] is not None else x["text"]
-                out.append({"label": f"확정한 결과 · {self._who(r)}", "text": t})
+                out.append({"label": f"확정한 결과 / {self._who(r)}", "text": t})
                 seen.add(t.strip())
             except DbError:
                 pass
@@ -343,7 +343,7 @@ class TagWork:
                 who = self._who(r)
             except DbError:
                 who = "(지운 기록)"
-            out.append({"label": f"반영한 결과 · {who}", "text": t})
+            out.append({"label": f"반영한 결과 / {who}", "text": t})
             if len(out) >= 30:
                 break
         return out

@@ -43,7 +43,7 @@ def test_all():
     ok(api.set_closed(hr, "career", "20303", True))
 
     # 1) 대화 결과 → 그 기록의 결과 묶음(💬 대화 결과)
-    ok(api.save_chat_result(a, "대화로 얻은 글", {"model": "1번 · m", "secret": "x"}))
+    ok(api.save_chat_result(a, "대화로 얻은 글", {"model": "1번 / m", "secret": "x"}))
     v = ok(api.student_view(hr, "career", "20301"))
     rec = next(r for r in v["records"] if r["id"] == a)
     top = rec["bundle"][0]

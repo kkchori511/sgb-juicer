@@ -46,7 +46,7 @@ def main():
     assert not api.add_record(hr, "career", "20301", {"content": "두 태그", "tag_ids": [t, t2]})["ok"]  # 기록당 태그 하나
     assert [o["key"] for o in v["options"]["classes"]] == ["c:2-3", "c:2-4"]
     labels = [o["label"] for o in v["options"]["sections"]]
-    assert labels == ["과학(1학기) · A반", "수학(1학기) · A반"], labels  # 같은 'A반'도 담당으로 구분
+    assert labels == ["과학(1학기) / A반", "수학(1학기) / A반"], labels  # 같은 'A반'도 담당으로 구분
     # 학년-반: 그 반 학생의 모든 기록 / 수업: 그 담당·수업의 기록만
     assert [r["id"] for r in ok(api.tag_view(t, {"scope": "c:2-3"}))["records"]] == [a, b, d]
     assert [r["id"] for r in ok(api.tag_view(t, {"scope": f"s:{m1}:A반"}))["records"]] == [b, c]

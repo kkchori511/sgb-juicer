@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; script-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; script-src 'unsafe-inline'; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
 <title>생기부 착즙기</title>
-<style>
+<style>/*INTRO_FONTS*/
 
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;}body{min-height:100vh;display:grid;place-items:center;background:#eaf0f5;color:#263b4b;font-family:"Segoe UI","Malgun Gothic",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 .splash{position:relative;width:min(420px,100vw);height:420px;overflow:hidden;border:1px solid #dce5eb;border-radius:28px;background:#fff;box-shadow:0 16px 48px #31495c12;text-align:center;padding:20px 30px;display:flex;flex-direction:column;justify-content:center}
@@ -15,7 +15,7 @@
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.drop{opacity:0}.drop.d1{opacity:1;transform:translateY(20px) scale(.8)}.dots i{opacity:.65}.pool{transform:scaleY(.65)!important}.ripple{opacity:0!important}}
 @media(max-width:359px){.splash{padding-left:18px;padding-right:18px}h1{font-size:24px}}
 
-.splash{--cycle:3.2s;--delay2:.12s;--delay3:.24s}
+.splash{--cycle:1.6s;--delay2:.12s;--delay3:.24s}
 .splash{background:#f6f9fc}.art{height:230px}h1{color:#2c455a}
 
 /* 420×420 창 안에서 그림과 글자를 세로 중앙 정렬한다. 그림만 줄어들 수 있다. */
@@ -57,9 +57,29 @@ body{background:#f6f9fc;overflow:hidden}.splash{width:100vw;height:100vh;border:
 </g><path d="M145 192 C139 200 142 207 148 207 C155 207 158 200 150 192Z" class="bead" fill="#edb942" stroke="#d79a32" stroke-width="1.5"/><g transform="translate(148 199)"><g class="drop d1"><path d="M0 0 C-3 6-7 11-7 15 A7 7 0 0 0 7 15 C7 11 3 6 0 0Z" fill="#edb942" stroke="#d69a2e" stroke-width="1.5"/><path d="M-2 9 Q-5 13-4 15" fill="none" stroke="#fff4cf" stroke-width="2.5" stroke-linecap="round"/></g><g class="drop d2"><path d="M0 0 C-3 6-7 11-7 15 A7 7 0 0 0 7 15 C7 11 3 6 0 0Z" fill="#edb942" stroke="#d69a2e" stroke-width="1.5"/><path d="M-2 9 Q-5 13-4 15" fill="none" stroke="#fff4cf" stroke-width="2.5" stroke-linecap="round"/></g><g class="drop d3"><path d="M0 0 C-3 6-7 11-7 15 A7 7 0 0 0 7 15 C7 11 3 6 0 0Z" fill="#edb942" stroke="#d69a2e" stroke-width="1.5"/><path d="M-2 9 Q-5 13-4 15" fill="none" stroke="#fff4cf" stroke-width="2.5" stroke-linecap="round"/></g></g>
 </svg>
 <h1 id="app-name">생기부 착즙기</h1>
-<p class="loading" role="status"><span>불러오는 중<span class="sr-only">…</span></span><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></p>
+<p class="loading" id="loadMsg" role="status">착즙 준비 중</p>
+<script>(function(){
+  // 켤 때마다 문구 두 개를 골라, 세 번 짜는 시간(1.6초 × 3)의 앞 절반과 뒤 절반에 하나씩 보인다(두 번째는 반쯤 되기 조금 전부터 아래에서 천천히 올라옴)
+  var M=['착즙 준비 중','손아귀 힘 기르는 중','껍질 벗기는 중','씨 제거하는 중','손 씻는 중','질 좋은 자료 고르는 중','상한 자료 폐기 중','생기부 다 쓴 상상 중','어떻게든 버티는 중'];
+  var a=Math.floor(Math.random()*M.length),b=Math.floor(Math.random()*(M.length-1));if(b>=a)b++;
+  var el=document.getElementById('loadMsg');el.textContent=M[a];
+  setTimeout(function(){el.textContent=M[b];el.classList.remove('rise');void el.offsetWidth;el.classList.add('rise');},1950);
+})();</script>
+<div class="ibar" aria-hidden="true"><span></span></div>
 <small class="version">v0.0.0</small>
 </main>
 <style>.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}</style>
+<style>h1,.loading,.version{font-family:"PaperlogyIntro","Segoe UI","Malgun Gothic",system-ui,sans-serif}
+h1{font-size:38px;font-weight:800;letter-spacing:-1px;margin:10px 0 6px;color:#111}
+.loading{font-size:17px;font-weight:600;line-height:26px;color:#7132f5}
+/* AI 변환 진행 창과 같은 움직이는 줄무늬 막대 */
+.ibar{flex:none;width:220px;max-width:70%;height:12px;margin:8px auto 4px;border-radius:999px;overflow:hidden;background:#f1eaff;border:1px solid #d9c5ff}
+.ibar span{display:block;width:100%;height:100%;background:repeating-linear-gradient(45deg,#7132f5 0 8px,#e5d8ff 8px 16px);background-size:22px 22px;animation:ibar .8s linear infinite}
+@keyframes ibar{from{background-position:0 0}to{background-position:22px 0}}
+/* 두 번째 문구는 아래에서 올라오며 나타남 */
+.loading.rise{animation:rise .9s cubic-bezier(.22,.7,.3,1) both!important}
+@keyframes rise{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:none}}
+.version{font-size:14px!important;font-weight:600;color:#5420bd!important;opacity:1!important;margin-top:4px}
+@media(max-width:359px){h1{font-size:32px}}</style>
 </body>
 </html>

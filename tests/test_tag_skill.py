@@ -120,7 +120,7 @@ def test_skill():
     assert not api.tag_confirm_set(w["id"], None, "없는id")["ok"]
     # ② 예시 불러오기: 확정한 결과(이름 포함)가 맨 앞
     ex = ok(api.tag_examples(w["id"]))["examples"]
-    assert ex and ex[0]["label"].startswith("확정한 결과 · 20301 김하나") and ex[0]["text"].startswith("결과글")
+    assert ex and ex[0]["label"].startswith("확정한 결과 / 20301 김하나") and ex[0]["text"].startswith("결과글")
     # 항목별 기록 마법사 '바로 쓰기': 작업 종류의 기본 프롬프트로
     ok(api.prompt_pick_set("refine", pid))
     assert ok(api.prompt_list())["picks"]["refine"] == pid

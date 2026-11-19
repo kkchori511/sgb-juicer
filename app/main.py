@@ -12,7 +12,23 @@ def _intro_html():
         html = (web_dir() / "intro.html").read_text(encoding="utf-8")
     except Exception:
         return None
-    return html.replace("v0.0.0", f"v{VERSION} 베타")
+    return html.replace("v0.0.0", f"v{VERSION} 베타").replace("/*INTRO_FONTS*/", _intro_fonts())
+
+
+def _intro_fonts():
+    """인트로는 html 문자열로 띄워 글꼴 파일 경로를 쓸 수 없다. 이 화면 글자만 남긴 작은 페이퍼로지(각 2KB 안팎)를 data URL로 넣는다."""
+    import base64
+
+    from .paths import web_dir
+
+    out = []
+    for weight, name in ((800, "intro-Paperlogy-8ExtraBold.woff2"), (600, "intro-Paperlogy-6SemiBold.woff2")):
+        try:
+            b64 = base64.b64encode((web_dir() / "fonts" / name).read_bytes()).decode()
+        except OSError:
+            continue
+        out.append(f'@font-face{{font-family:"PaperlogyIntro";font-weight:{weight};src:url(data:font/woff2;base64,{b64}) format("woff2")}}')
+    return "".join(out)
 
 
 def selftest(out_path):

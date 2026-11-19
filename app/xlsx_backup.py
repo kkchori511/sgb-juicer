@@ -152,7 +152,7 @@ def save(year, path, only_final=False):
                 else:
                     nm = f"동아리_{g['name']}"
                 ws = wb.create_sheet(_sheet_name(nm, used))
-                listing.append((ws.title, f"{db.group_label(g)} · {prompts.ITEM_NAMES[item]}"))
+                listing.append((ws.title, f"{db.group_label(g)} / {prompts.ITEM_NAMES[item]}"))
                 if only_final:
                     rows = []
                     for m in members:
@@ -192,7 +192,7 @@ def save(year, path, only_final=False):
             _table(ws, ["담당", "학년", "반", "번호", "학번", "이름", "상태", "수업", "성취수준"], rows, [20, 6, 6, 6, 10, 10, 8, 12, 8])
             # AI 결과
             ws = wb.create_sheet(_sheet_name("AI 결과", used))
-            listing.append((ws.title, "기록별 변환 결과 묶음 · 분량 맞춤 후보"))
+            listing.append((ws.title, "기록별 변환 결과 묶음 / 분량 맞춤 후보"))
             gl = {g["id"]: db.group_label(g) for g in groups}
             rows = [[gl.get(x["group_id"], ""), prompts.ITEM_NAMES.get(x["item"], x["item"]), x["student_no"], students.get(x["student_no"], {}).get("name", ""),
                      "기록 결과" if x["record_id"] else "분량 맞춤 후보", x["record_id"] or "", prompts.OP_NAMES.get(x["op"], x["op"]), x["text"],
@@ -207,9 +207,9 @@ def save(year, path, only_final=False):
             _table(ws, ["순서", "태그", "기록 수"], [[t["sort_order"], t["name"], cnt.get(t["id"], 0)] for t in tags.values()], [6, 24, 8])
             # 기준 자료
             ws = wb.create_sheet(_sheet_name("성취기준·활동 개요", used))
-            listing.append((ws.title, "과목 성취기준 · 자율·진로·동아리 활동 개요"))
+            listing.append((ws.title, "과목 성취기준 / 자율·진로·동아리 활동 개요"))
             rows = [[gl.get(x["group_id"], ""), "성취기준", x["text"], x["source"] or "", x["updated_at"]] for x in q("SELECT * FROM standards")]
-            rows += [[gl.get(x["group_id"], ""), f"활동 개요 · {prompts.ITEM_NAMES.get(x['item'], x['item'])}", x["text"], x["source"] or "", x["updated_at"]] for x in q("SELECT * FROM outlines")]
+            rows += [[gl.get(x["group_id"], ""), f"활동 개요 / {prompts.ITEM_NAMES.get(x['item'], x['item'])}", x["text"], x["source"] or "", x["updated_at"]] for x in q("SELECT * FROM outlines")]
             _table(ws, ["담당", "종류", "내용", "가져온 곳", "고친 때"], rows, [18, 22, 90, 18, 17], wrap=(3,))
             # 자료 Inbox
             ws = wb.create_sheet(_sheet_name("자료 Inbox", used))

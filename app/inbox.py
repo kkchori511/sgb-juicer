@@ -263,7 +263,7 @@ def match_ext(ext_no, ext_name, ext, members):
             sno, state, note = None, "none", f"{m['name']}: 비활성 학생(명렬에서 다시 활성화하거나 제외)"
     change = (ext.get("change") or "").strip()
     if change and change != "재학":
-        note = (note + " · " if note else "") + f"학적변동: {change} — 가져올지 확인해 주세요"
+        note = (note + " / " if note else "") + f"학적변동: {change} — 가져올지 확인해 주세요"
         if state == "confirmed":
             state = "suggested"
     return sno, state, note
@@ -457,13 +457,13 @@ class Inbox:
                     hit = [x for x in nuga.categories(r["content"]) if x in cut]
                     why = "민감 정보(" + "·".join(nuga.CATS[x][0] for x in hit) + ")" if hit else ""
                     warn = nuga.warnings(r["content"], names) + ([f"이름 {masked}곳을 ○○으로 가림"] if masked else [])
-                    r["warn"] = " · ".join(warn)
+                    r["warn"] = " / ".join(warn)
                 if structure == "single":
                     sno, state, note = str(opts["student_no"]), "confirmed", "고른 학생"
                 else:
                     sno, state, note = match_ext(r["ext_no"], r["ext_name"], r.get("ext"), members)
                 if r.get("warn"):
-                    note = (note + " · " if note else "") + "⚠ " + r["warn"]
+                    note = (note + " / " if note else "") + "⚠ " + r["warn"]
                 if why:
                     state = "excluded"
                 c.execute(
@@ -801,7 +801,7 @@ class Inbox:
                     continue
                 left = c.execute("SELECT COUNT(*) FROM records WHERE source=?", (self._src(bid, x["n"]),)).fetchone()[0]
                 if left:  # 마감·옮긴 기록이 남은 회차는 그대로 둔다
-                    x["summary"] = f"{x.get('summary') or ''} · {len(ids)}건 삭제(남은 {left}건)"
+                    x["summary"] = f"{x.get('summary') or ''} / {len(ids)}건 삭제(남은 {left}건)"
                     keep.append(x)
                     continue
                 for rid in (x.get("rows") or {}):
@@ -939,12 +939,12 @@ class Inbox:
                     c.execute("INSERT OR IGNORE INTO record_tags(record_id, tag_id) VALUES(?,?)", (rid, int(tid)))
                 c.execute("UPDATE finals SET stale=1 WHERE group_id=? AND item=? AND student_no=? AND text<>''", (b["group_id"], b["item"], sno))
             n_students = len({r["student_no"] for r in rows})
-            summary = f"{n_students}명 · {len(rows)}건"
+            summary = f"{n_students}명 / {len(rows)}건"
             now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
             meta = b["meta"]
             meta["rounds"] = rounds + [{"n": n_round, "at": now, "summary": summary, "rows": mapping}]
             sent_all = [r for r in all_rows if r["state"] == "sent"] + rows
-            total = f"{len({r['student_no'] for r in sent_all})}명 · {len(sent_all)}건" + (f" · {len(meta['rounds'])}회" if len(meta["rounds"]) > 1 else "")
+            total = f"{len({r['student_no'] for r in sent_all})}명 / {len(sent_all)}건" + (f" / {len(meta['rounds'])}회" if len(meta["rounds"]) > 1 else "")
             self._touch(c, bid, stage="sent", sent_at=now, sent_summary=total, meta=json.dumps(meta, ensure_ascii=False),
                         tag_ids=json.dumps(tag_ids))
         return {"students": n_students, "records": len(rows), "reopened": closed if closed_action == "reopen" else [],

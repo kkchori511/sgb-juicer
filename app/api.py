@@ -122,7 +122,7 @@ class Api:
         self._window = window
 
     # ---------- 실행 인트로 ----------
-    INTRO_MIN = 2.6  # 두 번 짜는 동작을 다 보여 준다(너무 빨리 사라져 깜빡이지 않게)
+    INTRO_MIN = 4.8  # 오렌지를 세 번 짜는 동작(1.6초 × 3)을 다 보여 준 뒤 본 창을 연다
 
     def attach_splash(self, splash, maximize=False):
         """인트로 창을 기억한다. 화면이 끝내 신호를 못 보내도 본 창은 뜨게 20초 뒤 대비책."""
@@ -1828,7 +1828,7 @@ class Api:
             k, priv = cfg["openrouter_key"].strip(), cfg["privacy_block"]
             if all(p["keep"] for p in plan):  # 모두 몫 안: 줄일 것이 없으니 AI 없이 원문을 잇는다
                 text = "\n".join(p["text"] for p in plan)
-                meta = {"model": "", "op": "synth", "mode": "fit", "prompt_name": prompts.FIT_NAME + " · AI 없이 원문 그대로", "prompt": "", "example": "", "target": target,
+                meta = {"model": "", "op": "synth", "mode": "fit", "prompt_name": prompts.FIT_NAME + " / AI 없이 원문 그대로", "prompt": "", "example": "", "target": target,
                         "record_ids": [r["id"] for r in chosen], "ratios": [round(q * 100, 1) for q in ratios], "sum_check": check, "calls": 0}
                 nid, dropped = rec.add_result(gid, item, sno, "synth", text, self._xm(meta), 0)
                 return self._ai_out({"id": nid, "dropped": dropped, "cost": 0, "ratios": meta["ratios"], "bytes": count_bytes(text), "target": target})

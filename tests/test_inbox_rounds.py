@@ -69,7 +69,7 @@ def test_rounds():
     new_rid = d.q("SELECT id FROM records WHERE student_no='20303'")[0]["id"]
     assert d.q("SELECT 1 FROM record_tags WHERE record_id=? AND tag_id=?", (new_rid, tag))  # 태그 이어받음
     v = ok(api.inbox_view(bid))
-    assert v["batch"]["sent_summary"] == "3명 · 3건 · 2회" and [x["n"] for x in v["batch"]["meta"]["rounds"]] == [1, 2]
+    assert v["batch"]["sent_summary"] == "3명 / 3건 / 2회" and [x["n"] for x in v["batch"]["meta"]["rounds"]] == [1, 2]
     lst = [b for b in ok(api.inbox_list())["batches"] if b["id"] == bid][0]
     assert lst["rounds"] == 2 and lst["n_sent"] == 3 and lst["n"] == 0
     # 회차별 지우기: 1회만 지우면 그 행이 다시 '안 보냄'
@@ -87,10 +87,10 @@ def test_rounds():
     old = ok(api.inbox_create("예전 묶음", hr, "autonomy"))["id"]
     put(api, old, "학번\t이름\t내용\n20301\t김하나\t옛 기록")
     with d.tx() as c:
-        c.execute("UPDATE inbox_batches SET stage='sent', sent_at='2026-05-01 10:00', sent_summary='1명 · 1건' WHERE id=?", (old,))
+        c.execute("UPDATE inbox_batches SET stage='sent', sent_at='2026-05-01 10:00', sent_summary='1명 / 1건' WHERE id=?", (old,))
         c.execute("INSERT INTO records(group_id,item,student_no,kind,seq,content,source) VALUES(?,?,?,'record',9,'옛 기록',?)", (hr, "autonomy", "20301", f"inbox:{old}"))
     v = ok(api.inbox_view(old))
-    assert v["counts"]["sent"] == 1 and v["batch"]["meta"]["rounds"][0]["summary"] == "1명 · 1건"
+    assert v["counts"]["sent"] == 1 and v["batch"]["meta"]["rounds"][0]["summary"] == "1명 / 1건"
     ok(api.inbox_stage(old, "import"))
     put(api, old, "학번\t이름\t내용\n20302\t이두리\t새 기록")
     ok(api.inbox_stage(old, "review"))
