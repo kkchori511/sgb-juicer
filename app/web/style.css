@@ -1775,3 +1775,13 @@ button.is-next, .rec-final .sec-title > button.btn-join.is-next { box-shadow: no
 .col-strip > b { font-size: 16px; }
 .col-strip:hover { background: var(--surface-2); color: var(--text); }
 @media (max-aspect-ratio: 1/1), (max-width: 1180px) { .rec-main .col-fold { display: none !important; } }.sec-title > .sec-label { font-weight: 800; font-size: 15px; color: var(--text); }
+
+/* 글꼴: 페이퍼로지(Paperlogy, SIL OFL 1.1, fonts/Paperlogy-OFL.txt). 굵기 400~900을 앱에 넣어 Windows 맑은 고딕의 가짜 굵게(획 뭉개짐)를 피한다 */
+@font-face { font-family: "Paperlogy"; font-weight: 400; font-style: normal; font-display: block; src: url("fonts/Paperlogy-4Regular.woff2") format("woff2"); }
+@font-face { font-family: "Paperlogy"; font-weight: 500; font-style: normal; font-display: block; src: url("fonts/Paperlogy-5Medium.woff2") format("woff2"); }
+@font-face { font-family: "Paperlogy"; font-weight: 600; font-style: normal; font-display: block; src: url("fonts/Paperlogy-6SemiBold.woff2") format("woff2"); }
+@font-face { font-family: "Paperlogy"; font-weight: 700; font-style: normal; font-display: block; src: url("fonts/Paperlogy-7Bold.woff2") format("woff2"); }
+@font-face { font-family: "Paperlogy"; font-weight: 800; font-style: normal; font-display: block; src: url("fonts/Paperlogy-8ExtraBold.woff2") format("woff2"); }
+@font-face { font-family: "Paperlogy"; font-weight: 900; font-style: normal; font-display: block; src: url("fonts/Paperlogy-9Black.woff2") format("woff2"); }
+:root { --font: "Paperlogy", "Malgun Gothic", "Apple SD Gothic Neo", -apple-system, "Segoe UI", sans-serif; }
+button, input, select, textarea { font-family: inherit; }
