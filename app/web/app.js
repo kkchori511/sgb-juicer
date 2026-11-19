@@ -4619,18 +4619,26 @@
     }
     return true;
   }
+  // 항목 보기 칸은 고른 항목의 색으로(전체면 기본색)
+  function tvTintSlot() {
+    const v = $('tvSlot').value || '';
+    const it = v.startsWith('i:') ? v.slice(2) : v.startsWith('g:') ? v.split(':')[2] : '';
+    if (it) $('tvSlot').dataset.item = it; else delete $('tvSlot').dataset.item;
+  }
   function tvRenderFilters() {
     const o = TV.data.options;
+    const sl = (t) => String(t || '').replace(/\s*·\s*/g, ' / '); // 이 화면 보기(필터) 글자는 가운데 점 대신 슬래시
     const fill = (sel, groups, cur) => {
       sel.innerHTML = '';
       groups.forEach(([label, opts]) => {
-        if (!label) { opts.forEach((x) => sel.appendChild(el('option', { value: x.key, text: x.label, selected: x.key === cur }))); return; }
+        if (!label) { opts.forEach((x) => sel.appendChild(el('option', { value: x.key, text: sl(x.label), selected: x.key === cur }))); return; }
         if (!opts.length) return;
-        sel.appendChild(el('optgroup', { label }, opts.map((x) => el('option', { value: x.key, text: x.label, selected: x.key === cur }))));
+        sel.appendChild(el('optgroup', { label: sl(label) }, opts.map((x) => el('option', { value: x.key, text: sl(x.label), selected: x.key === cur }))));
       });
     };
     fill($('tvScope'), [['', [{ key: '', label: '전체' }]], ['학년-반 (그 반 학생의 모든 기록)', o.classes], ['수업 (그 과목·수업 기록만)', o.sections]], TV.flt.scope);
     fill($('tvSlot'), [['', [{ key: '', label: '전체' }]], ['항목', o.items], ['과목·동아리', o.slots]], TV.flt.slot);
+    tvTintSlot();
     $('tvStatus').value = TV.flt.status;
     if (document.activeElement !== $('tvQ')) $('tvQ').value = TV.flt.q;
     $('tvInactive').checked = !!TV.flt.inactive;
@@ -8221,11 +8229,11 @@
     $('tagAddBtn').addEventListener('click', addTag);
     $('tagFromInboxBtn').addEventListener('click', tagsFromInbox);
     $('tvScope').addEventListener('change', (e) => tvSetFilter({ scope: e.target.value }));
-    $('tvSlot').addEventListener('change', (e) => tvSetFilter({ slot: e.target.value }));
+    $('tvSlot').addEventListener('change', (e) => { tvTintSlot(); tvSetFilter({ slot: e.target.value }); });
     $('tvStatus').addEventListener('change', (e) => tvSetFilter({ status: e.target.value }));
     $('tvInactive').addEventListener('change', (e) => tvSetFilter({ inactive: e.target.checked }));
     $('tvQ').addEventListener('input', debounce((e) => tvSetFilter({ q: e.target.value }), 400));
-    $('tvQ').setAttribute('aria-label', '이름·학번·내용 찾기');
+    $('tvQ').setAttribute('aria-label', '이름 / 학번 / 내용 찾기');
     $('tvClear').addEventListener('click', () => tvSetFilter({ scope: '', slot: '', status: 'all', q: '', inactive: false }));
     $('tvTagSel').addEventListener('change', (e) => { if (e.target.value !== '') tvPickTag(+e.target.value); });
     $('tvReload').addEventListener('click', async () => {

@@ -1789,3 +1789,19 @@ button, input, select, textarea { font-family: inherit; }
 .nav.nav-item, .nav.nav-item span, .nav.nav-item.active, .nav.nav-item.active:hover { font-weight: 700; }
 /* 태그별 기록 안내 한 줄: 글씨 크게 */
 .tv-ai-tip { font-size: 15px; line-height: 1.6; padding: 10px 14px; }
+/* 태그별 기록 보기(필터): 앞에 '보기 :' 표시, 보기 칸은 용도 색 둥근 버튼(반·수업 남색, 항목은 고른 항목 색, 마감 파랑) */
+.tv-view-label { font-weight: 800; color: var(--text); white-space: nowrap; }
+.tv-head select { --fc: var(--accent); border: 1.5px solid var(--fc); color: color-mix(in srgb, var(--fc) 85%, black); background-color: color-mix(in srgb, var(--fc) 7%, white);
+  border-radius: var(--radius-pill); font-weight: 700; padding-left: 14px; }
+.tv-head select:hover { background-color: color-mix(in srgb, var(--fc) 13%, white); }
+.tv-head select:focus { outline: 2px solid color-mix(in srgb, var(--fc) 40%, white); outline-offset: 1px; }
+#tvSlot[data-item] { --fc: var(--category-color); }
+#tvStatus { --fc: var(--st-closed); }
+.tv-head .tv-q { border-radius: var(--radius-pill); }/* 반 / 수업 보기 칸은 청록(남색은 거의 검정으로 보여서) */
+#tvScope { --fc: #0c8599; }
+/* 바이트 수: 네모 라운드 칩. 목표 이내면 검정, 넘으면 빨강 */
+.bytes, .tv-bytes { display: inline-flex; align-items: center; box-sizing: border-box; padding: 2px 9px; border: 1.5px solid var(--card-border, var(--border)); border-radius: 8px;
+  background: var(--input); color: var(--text); font-size: 13px; font-weight: 800; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bytes.over { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
+.bytes:empty, .tv-bytes:empty { display: none; }
+.fin-mode-btns .bytes { border: none; background: none; padding: 0; }
