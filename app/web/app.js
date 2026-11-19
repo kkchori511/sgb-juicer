@@ -2454,6 +2454,40 @@
     b.addEventListener('click', () => { setFold(key, !fold[key]); apply(); });
     return b;
   }
+  // 항목별 기록 세 칸(학생 목록·기록·최종안) 접기: 칸 오른쪽 위 «로 접으면 얇은 세로 띠, 띠를 누르면 다시 펼침. 상태는 기억.
+  // 좁은 창(기록·최종안이 탭)에서는 기록·최종안 접기는 쓰지 않는다(탭이 대신함)
+  const COLS = { list: ['recList', '학생 목록'], rec: ['recRecords', '기록'], final: ['recFinal', '최종안'] };
+  const NARROW_MQ = window.matchMedia('(max-aspect-ratio: 1/1), (max-width: 1180px)');
+  const colOff = (k) => !!fold['col_' + k];
+  function applyCols() {
+    const b = $('recBody');
+    b.classList.toggle('col-list-off', colOff('list'));
+    ['rec', 'final'].forEach((k) => b.classList.toggle(`col-${k}-off`, colOff(k) && !NARROW_MQ.matches));
+  }
+  function toggleCol(k) {
+    if (!colOff(k) && k !== 'list' && colOff(k === 'rec' ? 'final' : 'rec')) { toast('기록과 최종안 중 한 칸은 펼쳐 둡니다.'); return; }
+    setFold('col_' + k, !colOff(k));
+    applyCols();
+  }
+  function ensureColCtl(k) {
+    const [id, label] = COLS[k];
+    const box = $(id);
+    if (!box.querySelector(':scope > .col-strip')) {
+      box.appendChild(el('button', { type: 'button', class: 'col-strip', title: `${label} 칸 펼치기`, onclick: () => toggleCol(k) }, [el('span', { text: label }), el('b', { text: '»' })]));
+    }
+    if (!box.querySelector('.col-fold')) {
+      const btn = el('button', { type: 'button', class: 'col-fold', title: `${label} 칸 접기(화면을 넓게)`, 'aria-label': `${label} 칸 접기`, text: '«', onclick: () => toggleCol(k) });
+      const t = k === 'list' ? null : box.querySelector('.sec-title');
+      if (t) t.appendChild(btn);
+      else box.prepend(el('div', { class: 'col-head' }, [el('b', { text: k === 'list' ? label : '' }), el('span', { class: 'spacer' }), btn]));
+    }
+  }
+  Object.keys(COLS).forEach((k) => {
+    let q = 0;
+    new MutationObserver(() => { if (!q) q = requestAnimationFrame(() => { q = 0; ensureColCtl(k); }); }).observe($(COLS[k][0]), { childList: true });
+  });
+  NARROW_MQ.addEventListener('change', applyCols);
+  applyCols();
   // 새 후보가 생기면 후보 칸을 펼쳐 보이게
   // 좁은 창(기록·최종안이 위아래로 쌓일 때)에서 한 번에 한 영역만 크게 보이는 탭. 넓은 창에서는 탭이 숨고 두 영역이 함께 보인다
   function setRecTab(tab) {

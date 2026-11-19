@@ -1756,4 +1756,22 @@ button.is-next, .rec-final .sec-title > button.btn-join.is-next { box-shadow: no
 .tv-class > :last-child { border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
 /* 태그별 기록의 확정 기록은 상자 안 한 줄이라 상자 테두리와 겹치는 네모 테두리 대신 윗줄 구분선만 */
 .tv-slot > .tv-rec.confirmed { border: none; border-top: 1px solid color-mix(in srgb, var(--st-final) 30%, white); }/* 항목별 기록: 오른쪽 작업 영역 바탕을 그 항목 버튼 색(파스텔)으로 은은하게 */
-.main[data-item="autonomy"], .main[data-item="career"], .main[data-item="behavior"], .main[data-item="subject"], .main[data-item="club"] { background: var(--category-bg); }
+.main[data-item="autonomy"], .main[data-item="career"], .main[data-item="behavior"], .main[data-item="subject"], .main[data-item="club"] { background: var(--category-bg); }/* 항목별 기록 세 칸 접기: 칸 오른쪽 위 « → 얇은 세로 띠(이름 + »), 띠를 누르면 펼침 */
+.col-head { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 14px; font-weight: 800; color: var(--text-2); }
+.col-fold { flex: none; margin-left: auto; width: 28px; height: 28px; min-height: 0; min-width: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--card-border, var(--border)); border-radius: 8px; background: var(--input); color: var(--text-2); font-size: 16px; font-weight: 900; line-height: 1; }
+.col-fold:hover:not(:disabled) { border-color: var(--text); color: var(--text); background: var(--surface-2); }
+:is(.rec-records, .final-sec, .res-sec).folded > .sec-title:first-child > .col-fold { display: inline-flex !important; }
+.col-strip { display: none; }
+#recBody.col-list-off { grid-template-columns: 44px minmax(0, 1fr) !important; }
+#recBody.col-list-off > .rec-list { padding: 6px 2px !important; overflow: hidden !important; }
+#recBody.col-rec-off .rec-main > .rec-records, #recBody.col-final-off .rec-main > .rec-final {
+  flex: 0 0 44px !important; width: 44px !important; min-width: 44px; padding: 6px 2px !important; overflow: hidden !important; }
+#recBody.col-list-off > .rec-list > :not(.col-strip), #recBody.col-rec-off .rec-records > :not(.col-strip), #recBody.col-final-off .rec-final > :not(.col-strip) { display: none !important; }
+#recBody.col-list-off > .rec-list > .col-strip, #recBody.col-rec-off .rec-records > .col-strip, #recBody.col-final-off .rec-final > .col-strip {
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 10px; width: 100%; height: 100%; min-height: 0; padding: 12px 0;
+  border: none; border-radius: 16px; background: none; color: var(--text-2); font-size: 15px; font-weight: 800; cursor: pointer; }
+.col-strip > span { writing-mode: vertical-rl; letter-spacing: 0.1em; }
+.col-strip > b { font-size: 16px; }
+.col-strip:hover { background: var(--surface-2); color: var(--text); }
+@media (max-aspect-ratio: 1/1), (max-width: 1180px) { .rec-main .col-fold { display: none !important; } }
