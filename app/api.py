@@ -1529,6 +1529,12 @@ class Api:
         return {}
 
     @safe
+    def mark_record_confirmed(self, rid):
+        self._editable()
+        self._rec().mark_record_confirmed(rid)
+        return {}
+
+    @safe
     def edit_final(self, gid, item, sno, text, year=None):
         self._editable(year)
         self._rec().edit_final(gid, item, sno, text)

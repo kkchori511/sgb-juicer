@@ -595,9 +595,14 @@
     }
     renderDashTable(groups.find((g) => g.id === dashSel), groups.length);
   }
-  function stCell(key) {
+  // 상태 칩: 모든 화면에서 같은 모양(테두리·같은 폭). label을 주면 글자만 바꾼다. iconOnly면 아이콘만(좁은 칸)
+  function stBadge(key, label, iconOnly) {
     const s = STATUS[key] || STATUS.none;
-    return el('td', { class: 'stcell' }, [el('span', { class: `status-badge ${s.cls}` }, [el('span', { class: 'st', text: s.icon }), ' ', s.text])]);
+    return el('span', { class: `status-badge ${s.cls}${iconOnly ? ' icon-only' : ''}`, title: label || s.text },
+      iconOnly ? [el('span', { class: 'st', text: s.icon })] : [el('span', { class: 'st', text: s.icon }), ' ', label || s.text]);
+  }
+  function stCell(key) {
+    return el('td', { class: 'stcell' }, [stBadge(key)]);
   }
   const dashFold = new Set(); // 현황판에서 표를 접은 담당
   function renderDashTable(g, count) {
@@ -2371,7 +2376,7 @@
       st.confirmed = r.records.filter((x) => x.confirmed).length;
     }
     $('recStudentHead').innerHTML = '';
-    $('recStudentHead').append(`${r.student.student_no} ${r.student.name} `, el('span', { class: `st ${stInfo.cls}`, text: `${stInfo.icon} ${stInfo.text}` }),
+    $('recStudentHead').append(`${r.student.student_no} ${r.student.name} `, stBadge(Object.keys(STATUS).find((k) => STATUS[k] === stInfo)),
       r.student.active ? '' : el('span', { class: 'tag', text: '비활성' }), r.student.level ? el('span', { class: 'tag', text: `성취수준 ${r.student.level}` }) : '');
     $('crumb').textContent = `${ys.year}학년도 › 항목별 기록 › ${R.slot.label} › ${r.student.name}`;
     if (R.slot.item === 'behavior' && !TD) await traitDict();
@@ -3263,6 +3268,7 @@
     });
     if (!res) return;
     if (mode === 'append') prev = res.prev || '';
+    if (!r.confirmed) await mutate('mark_record_confirmed', r.id); // 최종안에 그대로 쓴 기록은 확정으로(목록 '확정/전체')
     loadStudent(true);
     actionToast(mode === 'append' ? '최종안 뒤에 이어 붙였습니다.' : '최종안으로 채택했습니다.', '되돌리기', async () => { if (await mutate('edit_final', ctx.gid, ctx.item, ctx.sno, prev, ctx.year)) { toast('원래 최종안으로 되돌렸습니다.'); if (R.sno === ctx.sno) loadStudent(true); } }, 20000);
   }
@@ -4279,7 +4285,7 @@
     const cols = ['학년', '반', '번호', '이름', '상태', '최종안 (1학기 · 빈 줄 · 2학기)', '바이트'];
     t.appendChild(el('tr', {}, cols.map((h) => el('th', { class: h.startsWith('최종안') ? 'exp-main' : 'exp-fit', 'data-col': h.startsWith('최종안') ? '최종안' : h, text: h }))));
     expColResize(t);
-    const stOf = (closed, text) => { const k = closed ? 'closed' : text ? 'final' : 'none'; return el('span', { class: `exp-st ${STATUS[k].cls}`, text: STATUS[k].icon }); };
+    const stOf = (closed, text) => stBadge(closed ? 'closed' : text ? 'final' : 'none', null, true);
     r.rows.forEach((x) => t.appendChild(el('tr', { class: x.closed ? '' : 'bad' }, [el('td', { text: x.grade ?? '' }), el('td', { text: x.class_no ?? '' }), el('td', { text: x.number ?? '' }), el('td', { text: x.name }),
       el('td', { title: `1학기 ${x.closed1 ? '마감' : x.text1 ? '미마감' : '최종안 없음'} · 2학기 ${x.closed2 ? '마감' : x.text2 ? '미마감' : '최종안 없음'}` }, ['1 ', stOf(x.closed1, x.text1), '  2 ', stOf(x.closed2, x.text2)]),
       el('td', {}, [el('div', { class: 'exp-text', text: x.text })]),
@@ -4310,7 +4316,7 @@
     t.appendChild(el('tr', {}, cols.map((h) => el('th', { class: h === '최종안' ? 'exp-main' : 'exp-fit', 'data-col': h, text: h }))));
     expColResize(t);
     r.rows.forEach((x) => t.appendChild(el('tr', { class: x.closed ? '' : 'bad' }, [el('td', { text: x.grade ?? '' }), el('td', { text: x.class_no ?? '' }), el('td', { text: x.number ?? '' }), el('td', { text: x.name }),
-      el('td', {}, [(() => { const k = x.closed ? 'closed' : x.text ? 'final' : 'none'; return el('span', { class: `exp-st ${STATUS[k].cls}`, title: x.closed ? '마감' : x.text ? '미마감(최종안 있음)' : '최종안 없음', text: `${STATUS[k].icon} ${x.closed ? '마감' : x.text ? '최종안' : '없음'}` }); })()]),
+      el('td', {}, [stBadge(x.closed ? 'closed' : x.text ? 'final' : 'none', x.closed ? '마감' : x.text ? '최종안 있음' : '최종안 없음')]),
       el('td', {}, [el('div', { class: 'exp-text', text: x.text || '' })]), el('td', {}, [x.text ? bytesEl(x.bytes, x.target ?? r.target) : el('span', { class: 'muted', text: '-' })]),
       ...(paired ? [el('td', { class: (x.first_bytes || 0) + x.bytes > x.pair_total ? 'danger-text' : '', text: x.pair_total ? `${x.first_bytes ?? 0}B · ${(x.first_bytes || 0) + x.bytes}/${x.pair_total}B` : '' })] : [])])));
     if (!r.rows.length) t.appendChild(el('tr', {}, [el('td', { colspan: 7, class: 'muted', text: '내보낼 학생이 없습니다.' })]));
@@ -4752,7 +4758,7 @@
         slotBox = el('div', { 'data-item': r.item, class: 'tv-slot' + (r.closed ? ' is-closed' : '') }, [el('div', { class: 'tv-slot-head' }, [
           el('span', { class: `tv-src it-${r.item}`, text: `${TV_ITEM_ICON[r.item] || ''} ${tvSrcLabel(r)}` }),
           r.gkind === 'subject' && r.section ? el('span', { class: 'muted', text: `수업: ${r.section}` }) : null,
-          el('span', { class: `tv-stat ${st.cls}`, title: '이 항목의 상태', text: `${st.icon} ${st.text}` }),
+          stBadge(r.status),
           stale,
           el('span', { class: 'spacer' }),
           el('button', { type: 'button', class: 'link', text: '이 항목에서 열기 ↗', title: '항목별 기록에서 이 학생의 이 항목을 엽니다. 돌아오면 이 자리로 옵니다.',
@@ -7683,7 +7689,7 @@
           tbl.appendChild(el('tr', { class: off ? 'is-off' : '' }, [
             el('td', {}, [el('input', { type: 'checkbox', disabled: off, checked: sel.has(x.student_no), onchange: (e) => { if (e.target.checked) sel.add(x.student_no); else sel.delete(x.student_no); draw(); } })]),
             el('td', { text: x.student_no }), el('td', { text: x.name }),
-            el('td', {}, [el('span', { class: 'stcell' }, [el('span', { class: `st ${st.cls}`, text: st.icon }), ' ', st.text]), why ? el('div', { class: 'muted small-note', text: why }) : null]),
+            el('td', {}, [stBadge(x.status), why ? el('div', { class: 'muted small-note', text: why }) : null]),
             el('td', { text: x.final_bytes ? `${x.final_bytes}/${x.target}B` : '-' }),
             el('td', {}, x.notes.map((n) => el('span', { class: 'tag warn-tag', text: n }))),
           ]));
@@ -7779,7 +7785,7 @@
       const runBtn = el('button', { type: 'button', class: 'primary ai-btn' });
       const head = el('div', { class: 'basis-acts' });
       const commonBox = el('div', { class: 'basis-common' });
-      const stCellOf = (x) => { const st = STATUS[x.status] || STATUS.none; return el('span', { class: 'stcell' }, [el('span', { class: `st ${st.cls}`, text: st.icon }), ' ', st.text]); };
+      const stCellOf = (x) => stBadge(x.status);
       const draw = () => {
         const can = info.students.filter((x) => !blocked(x));
         [...sel].forEach((n) => { if (!can.some((x) => x.student_no === n)) sel.delete(n); });

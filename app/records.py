@@ -699,7 +699,8 @@ class Records:
                 if not r or r["group_id"] != int(gid) or r["item"] != item or r["student_no"] != sno or r["kind"] != "existing":
                     raise DbError(f"{active[sno]['name']}: 기존 완성문이 바뀌었습니다. 창을 다시 열어 주세요.")
                 prev = c.execute("SELECT text, source, meta, stale FROM finals WHERE group_id=? AND item=? AND student_no=?", (int(gid), item, sno)).fetchone()
-                undo.append({"student_no": sno, "prev": dict(prev) if prev else None, "now": r["content"]})
+                newly = self._mark_confirmed(c, r["id"])  # 최종안에 그대로 쓴 기존 완성문은 확정으로
+                undo.append({"student_no": sno, "prev": dict(prev) if prev else None, "now": r["content"], "rid": r["id"], "confirmed_now": newly})
                 self._upsert_final(c, gid, item, sno, r["content"], f"record:{r['id']}", {"op": "record", "kind": "existing", "bulk": True})
         return len(seen), undo
 
@@ -720,6 +721,8 @@ class Records:
                 else:
                     c.execute("UPDATE finals SET text=?, source=?, meta=?, stale=?, updated_at=datetime('now','localtime') WHERE group_id=? AND item=? AND student_no=?",
                               (p["text"], p["source"], p["meta"], p["stale"], int(gid), item, sno))
+                if u.get("confirmed_now") and u.get("rid"):  # 이 일괄로 확정 표시한 기록은 확정 전으로(글은 그대로)
+                    c.execute("UPDATE records SET confirmed=0, confirmed_at=NULL WHERE id=? AND content=?", (int(u["rid"]), u["now"]))
                 done += 1
         return done, skipped
 
@@ -1322,12 +1325,26 @@ class Records:
                                f"result:{r['id']}", {"op": r["op"], "created_at": r["created_at"], **json.loads(r["meta"] or "{}")})
 
     def adopt_record(self, rid):
-        """기록(예: 이미 쓴 생기부)을 그대로 최종안으로."""
+        """기록(예: 이미 쓴 생기부)을 그대로 최종안으로. 그 기록은 확정으로 표시한다(학생 목록 '확정/전체')."""
         r = self.record(rid)
         self.require_open(r["group_id"], r["item"], r["student_no"])
         with self.d.tx() as c:
+            self._mark_confirmed(c, r["id"])
             self._upsert_final(c, r["group_id"], r["item"], r["student_no"], r["content"], f"record:{r['id']}",
                                {"op": "record", "kind": r["kind"]})
+
+    @staticmethod
+    def _mark_confirmed(c, rid):
+        """글은 그대로 두고 확정 표시만(최종안에 그대로 쓴 기록). 최종안 stale은 건드리지 않는다. 반환: 새로 확정했는지."""
+        return c.execute("UPDATE records SET confirmed=1, confirmed_at=datetime('now','localtime') WHERE id=? AND COALESCE(confirmed,0)=0",
+                         (int(rid),)).rowcount > 0
+
+    def mark_record_confirmed(self, rid):
+        """[그대로 최종안으로]를 이어 붙이기 등으로 했을 때: 그 기록을 확정으로 표시만."""
+        r = self.record(rid)
+        self.require_open(r["group_id"], r["item"], r["student_no"])
+        with self.d.tx() as c:
+            self._mark_confirmed(c, r["id"])
 
     def final_append(self, gid, item, sno, text):
         """저장된 최종안 뒤에 이어 붙인다(없으면 그 글로). 반환: 바꾸기 전 글."""
