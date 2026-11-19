@@ -1755,4 +1755,5 @@ button.is-next, .rec-final .sec-title > button.btn-join.is-next { box-shadow: no
 .tv-slot > :last-child { border-bottom-left-radius: 7px; border-bottom-right-radius: 7px; }
 .tv-class > :last-child { border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
 /* 태그별 기록의 확정 기록은 상자 안 한 줄이라 상자 테두리와 겹치는 네모 테두리 대신 윗줄 구분선만 */
-.tv-slot > .tv-rec.confirmed { border: none; border-top: 1px solid color-mix(in srgb, var(--st-final) 30%, white); }
+.tv-slot > .tv-rec.confirmed { border: none; border-top: 1px solid color-mix(in srgb, var(--st-final) 30%, white); }/* 항목별 기록: 오른쪽 작업 영역 바탕을 그 항목 버튼 색(파스텔)으로 은은하게 */
+.main[data-item="autonomy"], .main[data-item="career"], .main[data-item="behavior"], .main[data-item="subject"], .main[data-item="club"] { background: var(--category-bg); }

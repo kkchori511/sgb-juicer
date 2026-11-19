@@ -426,6 +426,7 @@
   function markNav() {
     const it = panel === 'records' && R.slot ? R.slot.item : null;
     $('recBody').dataset.item = it || '';
+    $('main').dataset.item = it || ''; // 항목별 기록이면 오른쪽 작업 영역 바탕을 그 항목 색으로
     document.querySelectorAll('.nav').forEach((b) => b.classList.toggle('active', b.dataset.item ? b.dataset.item === it : (!!b.dataset.panel && b.dataset.panel === panel)));
     $('navRecFold').classList.toggle('open-parent', panel === 'records');
   }
