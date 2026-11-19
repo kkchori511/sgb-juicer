@@ -4716,8 +4716,7 @@
       sum.append(el('span', { class: 'tv-bulk-note' }, [`최근 일괄 작업: ${b.text} `, el('button', { type: 'button', class: 'link', text: '되돌리기', onclick: () => tvBulkUndo() })]));
     }
     if (TV.tag > 0) sum.append(el('div', { class: 'cw-tip tv-ai-tip' }, ['💡 한 명으로 먼저 기록 카드의 [AI 변환] › ', el('b', { text: '[🪄 프롬프트 마법사]' }), '에서 대화해 원하는 결과를 만들고, ', el('b', { text: '[🧪 대화 내용 스킬화]' }),
-      '로 저장하면 이 태그의 나머지 기록에 한꺼번에 적용할 수 있습니다. 결과를 골라 확정하면 항목별 기록의 확정 기록에도 들어갑니다.']));
-    sum.append(el('span', { class: 'tv-note', text: '이 태그가 붙은 기록만 보입니다(학생별 미입력 현황이 아님). 기록을 고쳐도 최종안 문장은 자동으로 바뀌지 않습니다. [되돌리기]는 이 학년도에서 이 화면을 쓰는 동안 남습니다.' }));
+      '로 저장하면 이 태그의 나머지 기록에 한꺼번에 적용할 수 있습니다.']));
   }
   function tvClassOf(r) {
     if (!r.grade || !r.class_no) return { key: 'c:-', label: '반 정보 없음' };

@@ -1787,3 +1787,5 @@ button.is-next, .rec-final .sec-title > button.btn-join.is-next { box-shadow: no
 button, input, select, textarea { font-family: inherit; }
 /* 페이퍼로지는 진짜 Black 굵기라 항목 메뉴 글씨는 굵게(700)까지만 */
 .nav.nav-item, .nav.nav-item span, .nav.nav-item.active, .nav.nav-item.active:hover { font-weight: 700; }
+/* 태그별 기록 안내 한 줄: 글씨 크게 */
+.tv-ai-tip { font-size: 15px; line-height: 1.6; padding: 10px 14px; }
