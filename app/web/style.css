@@ -1774,4 +1774,4 @@ button.is-next, .rec-final .sec-title > button.btn-join.is-next { box-shadow: no
 .col-strip > span { writing-mode: vertical-rl; letter-spacing: 0.1em; }
 .col-strip > b { font-size: 16px; }
 .col-strip:hover { background: var(--surface-2); color: var(--text); }
-@media (max-aspect-ratio: 1/1), (max-width: 1180px) { .rec-main .col-fold { display: none !important; } }
+@media (max-aspect-ratio: 1/1), (max-width: 1180px) { .rec-main .col-fold { display: none !important; } }.sec-title > .sec-label { font-weight: 800; font-size: 15px; color: var(--text); }

@@ -2435,7 +2435,8 @@
   const FOLD_KEY = 'sgb.fold';
   const fold = (() => { try { return JSON.parse(localStorage.getItem(FOLD_KEY) || '{}') || {}; } catch (e) { return {}; } })();
   // 최종안 칸은 '최종안'과 '후보'를 따로 접는다. 둘 다 접으면 칸 전체가 막대(제목은 늘 보임).
-  const syncFinalCol = () => $('recFinal').classList.toggle('folded-all', !!(fold.final && fold.results));
+  // 최종안 칸 전체 접기는 오른쪽 위 «로만. 안쪽 구역(최종안·확정 기록·후보) ▾는 그 구역만 접는다
+  const syncFinalCol = () => $('recFinal').classList.remove('folded-all');
   function setFold(key, v) {
     fold[key] = v;
     try { localStorage.setItem(FOLD_KEY, JSON.stringify(fold)); } catch (e) { /* 무시 */ }
@@ -2533,7 +2534,8 @@
     const v = { ...v0, records: v0.records.filter((r) => r.kind !== 'trait') }; // 행특 설계 카드는 따로(맨 위)
     const locked = closedNow();
     const nConf = v.records.filter((r) => r.confirmed).length;
-    const head = el('div', { class: 'sec-title' }, [foldBtn('records', box, `${v.student.name} 기록 ${v.records.length}건 · 확정 ${nConf}건`), el('span', { class: 'spacer' }),
+    box.classList.remove('folded'); // 기록 칸 접기는 오른쪽 위 «로만(예전 ▾ 접기 상태가 남아 있어도 펼침)
+    const head = el('div', { class: 'sec-title' }, [el('span', { class: 'sec-label', text: `${v.student.name} 기록 ${v.records.length}건 · 확정 ${nConf}건` }), el('span', { class: 'spacer' }),
       (() => { const m = menuBox('+ 기록 ▾', [
         el('button', { type: 'button', class: 'primary', disabled: locked, text: '+ 학생관찰기록', onclick: () => recordForm(null, 'record') }),
         el('button', { type: 'button', disabled: locked, text: '이미 쓴 생기부 넣기', onclick: () => recordForm(null, 'existing') }),
