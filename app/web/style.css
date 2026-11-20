@@ -2095,3 +2095,16 @@ textarea.cell-edit { font-size: calc(13px * var(--bs)); }
 
 /* 맞춤법 검사 버튼: 바깥 사이트로 여는 보조 버튼(흰 바탕, 앞에 돋보기) */
 .spell-btn::before { content: '🔍'; margin-right: 4px; font-size: .95em; }
+
+/* 설정 꾸러미(v0.33) */
+.share-body { display: flex; flex-direction: column; gap: 8px; max-height: 62vh; overflow: auto; }
+.share-sec { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; background: var(--surface); }
+.share-sec > summary { cursor: pointer; padding: 4px 0; }
+.share-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 5px 2px; border-top: 1px solid var(--border); margin: 0; font-weight: 400; }
+.share-row.share-one { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; background: var(--surface); }
+.share-row select { width: auto; height: 34px; padding: 3px 8px; }
+.share-row.warn { background: var(--warn-bg); }
+.share-warn { flex-basis: 100%; font-size: 13px; padding-left: 26px; }
+.card-head .small-note { margin: 0; align-self: center; }
+.share-nick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 4px; }
+.share-nick input { width: 220px; }

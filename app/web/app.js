@@ -1564,6 +1564,100 @@
     return data;
   }
 
+  // ---------- 설정 꾸러미(v0.33): 골라 담아 파일로 / 받은 파일에서 골라 넣기 ----------
+  const SHARE_SEC = [['prompts', '프롬프트'], ['examples', '예시 목록'], ['tags', '태그 프롬프트'], ['vocab', '세특 어휘'], ['banned', '기재 유의어'], ['trait_dict', '행특 설계 사전']];
+  async function shareExportSheet() {
+    const r = await call('share_catalog');
+    if (!r) return;
+    const c = r.catalog;
+    const boxes = {};
+    openSheet((box) => {
+      const body = el('div', { class: 'sheet-body share-body' });
+      let any = false;
+      SHARE_SEC.forEach(([sec, label]) => {
+        const v = c[sec];
+        if (Array.isArray(v)) {
+          if (!v.length) return;
+          any = true;
+          boxes[sec] = v.map((x) => ({ key: x.key, cb: el('input', { type: 'checkbox', checked: !x.warn.length }) }));
+          const all = el('input', { type: 'checkbox', checked: v.every((x) => !x.warn.length), onchange: (e) => boxes[sec].forEach((b) => { b.cb.checked = e.target.checked; }) });
+          body.appendChild(el('details', { class: 'share-sec', open: true }, [el('summary', {}, [el('b', { text: `${label} (${v.length})` }),
+            sec === 'tags' ? el('span', { class: 'muted', text: ` ${r.year}학년도 태그별 기록에서 확정한 설정` }) : null]),
+            el('label', { class: 'share-row share-all' }, [all, el('span', { class: 'muted', text: '모두 고르기 / 모두 빼기' })]),
+            ...v.map((x, i) => el('label', { class: 'share-row' + (x.warn.length ? ' warn' : '') }, [boxes[sec][i].cb, el('span', { text: x.name }), x.builtin ? el('span', { class: 'tag', text: '고친 기본' }) : null,
+              x.warn.length ? el('span', { class: 'danger-text share-warn', text: `⚠ 학생 정보처럼 보이는 말: ${x.warn.join(', ')} — 확인 후 담으세요` }) : null]))]));
+        } else if (v && v.available) {
+          any = true;
+          boxes[sec] = el('input', { type: 'checkbox', checked: true });
+          body.appendChild(el('label', { class: 'share-row share-one' }, [boxes[sec], el('b', { text: label }), el('span', { class: 'muted', text: ` 내가 고친 목록 통째로 (${v.count}개)` })]));
+        }
+      });
+      if (!any) body.appendChild(el('p', { class: 'muted', text: '담을 것이 없습니다. 직접 만들거나 고친 프롬프트·예시·어휘·유의어·사전, 확정한 태그 프롬프트가 있어야 합니다(고치지 않은 기본값은 받는 쪽에도 있습니다).' }));
+      body.appendChild(el('p', { class: 'hint', text: 'API 키·스캔(CLOVA) 설정·모델, 명렬·학번·이름·기록·최종안, 일정·분량 목표는 담지 않습니다. ⚠ 표시는 지금 명렬의 학생 이름이나 학번처럼 보이는 말이 글 속에 있다는 뜻이라 처음엔 빼 두었습니다.' }));
+      const nick = el('input', { type: 'text', maxlength: 20, placeholder: '예: 김쌤, 3학년부', value: localStorage.getItem('sgb_share_nick') || '' });
+      const fname = el('span', { class: 'muted' });
+      const showName = () => { const n = nick.value.replace(/[\\/:*?"<>|]/g, '').trim(); const day = new Date().toLocaleDateString('sv').replace(/-/g, '').slice(2); fname.textContent = `→ 파일 이름: ${n ? `${n}의 꾸러미` : '착즙기 꾸러미'}_${day}.sgbset`; };
+      nick.addEventListener('input', showName);
+      showName();
+      body.prepend(el('label', { class: 'share-nick' }, [el('b', { text: '누구의 꾸러미' }), nick, fname]));
+      const go = el('button', { type: 'button', class: 'primary', disabled: !any, text: '파일로 저장…', onclick: async () => {
+        const sel = {};
+        Object.entries(boxes).forEach(([sec, b]) => { sel[sec] = Array.isArray(b) ? b.filter((x) => x.cb.checked).map((x) => x.key) : b.checked; });
+        try { localStorage.setItem('sgb_share_nick', nick.value.trim()); } catch (e) { /* 무시 */ }
+        const out = await call('share_export', sel, nick.value.trim());
+        if (out && out.path) { closeSheet(); alertBox(`설정 꾸러미를 저장했습니다.\n${out.path}\n\n이 파일을 받은 선생님은 설정 › 백업·자료 › [꾸러미 가져오기]로 넣습니다.`); }
+      } });
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: '🎁 설정 꾸러미 만들기' }), el('span', { class: 'muted', text: '건넬 것만 고르세요' })]), body,
+        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }), go]));
+    });
+  }
+  async function shareImportSheet() {
+    const r = await call('share_open');
+    if (!r || !r.preview) return;
+    const pv = r.preview;
+    const pick = {};
+    const POL = { new: '새 이름으로 추가', overwrite: '덮어쓰기', skip: '건너뛰기' };
+    openSheet((box) => {
+      const body = el('div', { class: 'sheet-body share-body' });
+      SHARE_SEC.forEach(([sec, label]) => {
+        const v = pv[sec];
+        if (Array.isArray(v)) {
+          if (!v.length) return;
+          const tagsOff = sec === 'tags' && pv.tags_need_year;
+          pick[sec] = {};
+          const rows = v.map((x) => {
+            const opts = sec === 'tags' ? (x.has_conf ? ['skip', 'overwrite'] : ['overwrite', 'skip']) : x.exists ? (x.builtin && sec === 'prompts' ? ['skip', 'overwrite', 'new'] : ['new', 'overwrite', 'skip']) : ['new', 'skip'];
+            const s1 = el('select', { disabled: tagsOff }, opts.map((o) => el('option', { value: o, text: sec === 'tags' && o === 'overwrite' ? (x.has_conf ? '덮어쓰기' : x.exists ? '이 태그에 넣기' : '태그 새로 만들어 넣기') : POL[o] })));
+            if (tagsOff) s1.value = 'skip';
+            pick[sec][x.i] = s1;
+            return el('div', { class: 'share-row' }, [el('span', { text: x.name }), x.builtin ? el('span', { class: 'tag', text: '기본 항목' }) : null,
+              x.exists ? el('span', { class: 'muted', text: sec === 'tags' ? (x.has_conf ? ' / 이미 확정한 설정 있음' : ' / 같은 태그 있음') : ' / 같은 이름 있음' }) : null, el('span', { class: 'spacer' }), s1]);
+          });
+          body.appendChild(el('details', { class: 'share-sec', open: true }, [el('summary', {}, [el('b', { text: `${label} (${v.length})` }),
+            tagsOff ? el('span', { class: 'muted', text: ' 지금 학년도가 없거나 보관 학년도라 넣을 수 없습니다' }) : null]), ...rows]));
+        } else if (v) {
+          const s1 = el('select', {}, [['merge', '내 목록에 합치기'], ['replace', '통째로 바꾸기'], ['skip', '건너뛰기']].map(([k, t]) => el('option', { value: k, text: t })));
+          pick[sec] = s1;
+          body.appendChild(el('div', { class: 'share-row share-one' }, [el('b', { text: label }), el('span', { class: 'muted', text: ` ${v.count}개` }), el('span', { class: 'spacer' }), s1]));
+        }
+      });
+      body.appendChild(el('p', { class: 'hint', text: '가져오기 직전에 지금 설정 파일을 자료 폴더의 backups에 복사해 둡니다(문제가 생기면 그 파일로 되돌릴 수 있음).' }));
+      const go = el('button', { type: 'button', class: 'primary', text: '가져오기', onclick: async () => {
+        const choice = {};
+        Object.entries(pick).forEach(([sec, v]) => { choice[sec] = v instanceof HTMLElement ? v.value : Object.fromEntries(Object.entries(v).map(([i, s1]) => [i, s1.value])); });
+        const out = await call('share_import', choice);
+        if (!out) return;
+        closeSheet();
+        const d = out.done;
+        const said = SHARE_SEC.filter(([k]) => d[k]).map(([k, t]) => `${t} ${typeof d[k] === 'number' ? `${d[k]}개` : d[k] === 'merge' ? '합침' : '바꿈'}`);
+        alertBox(said.length ? `가져왔습니다: ${said.join(' / ')}${out.backup ? `\n\n가져오기 전 설정은 backups/${out.backup}에 있습니다.` : ''}` : '바뀐 것이 없습니다.');
+        if (panel === 'settings') renderSettings();
+      } });
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: '🎁 설정 꾸러미 가져오기' }), el('span', { class: 'muted', text: `${pv.author ? `${pv.author}의 꾸러미 / ` : ''}${r.name}${pv.made_at ? ` / ${pv.made_at} 만듦` : ''}${pv.app_version ? ` / v${pv.app_version}` : ''}` })]), body,
+        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }), go]));
+    });
+  }
+
   // ---------- 설정 ----------
   function showSettingsTab(name) {
     document.querySelectorAll('#settingsTabs .tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.stab === name));
@@ -5748,7 +5842,7 @@
   }
   const twConfLabel = (w) => {
     const sk = w.confirmed.skill, ed = w.confirmed.edit;
-    const head = ed ? (ed.by === '목록' ? `📚 '${ed.lib_name}' 프롬프트` : '✏️ 고친 설정')
+    const head = ed ? (ed.by === '목록' ? `📚 '${ed.lib_name}' 프롬프트` : ed.by === '가져오기' ? '🎁 설정 꾸러미에서 가져온 설정' : '✏️ 고친 설정')
       : sk ? `🧪 스킬화 프롬프트${sk.scores && sk.scores.length ? `(검증 ${sk.scores.join('·')}점)` : ''}` : `프롬프트 ${w.confirmed.ver_no || ''}번`;
     return `${head} / ${twChainText(w.confirmed.chain)}`;
   };
@@ -8704,6 +8798,8 @@
     $('vcSaveBtn').addEventListener('click', () => vocabSave('세특 어휘를 저장했습니다.'));
     $('vcOn').addEventListener('change', () => vocabSave($('vcOn').checked ? '세특 AI 변환에 어휘 목록을 붙입니다.' : '세특 어휘 목록을 붙이지 않습니다.'));
     ['vcVerbs', 'vcEvals'].forEach((id) => $(id).addEventListener('input', () => { $(id === 'vcVerbs' ? 'vcVerbsN' : 'vcEvalsN').textContent = `${vcWords($(id).value).length}개 (저장 전)`; }));
+    $('shareExportBtn').addEventListener('click', shareExportSheet);
+    $('shareImportBtn').addEventListener('click', shareImportSheet);
     $('vcImportBtn').addEventListener('click', async () => {
       const prev = await call('vocab_get');
       const r = await mutate('vocab_import');

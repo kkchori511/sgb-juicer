@@ -1371,6 +1371,70 @@ class Api:
             raise db.DbError("저장하지 못했습니다. 같은 파일이 Excel에서 열려 있으면 닫고 다시 시도해 주세요.")
         return {"path": path}
 
+    # ---------- 설정 꾸러미(v0.33): 골라서 다른 선생님에게 건네기 ----------
+    def _share_year(self, write=False):
+        """태그 프롬프트용 지금 학년도 자료(없거나 보관 학년도면 None)."""
+        year = config.load()["current_year"]
+        if not year or not db.year_path(year).exists():
+            return None
+        if write:
+            try:
+                self._editable()
+            except db.DbError:
+                return None
+        return db.open_year(year)
+
+    @safe
+    def share_catalog(self):
+        from . import share
+        d = self._share_year()
+        names = [r["name"] for r in d.q("SELECT name FROM students")] if d else []
+        return {"catalog": share.catalog(d, names), "year": config.load()["current_year"] if d else 0}
+
+    @safe
+    def share_export(self, sel, nick=""):
+        import unicodedata
+        from . import share
+        pkg = share.build(sel, self._share_year(), nick)
+        res = self._window.create_file_dialog(webview.SAVE_DIALOG, save_filename=share.file_name(nick), file_types=("설정 꾸러미 (*.sgbset)",))
+        if not res:
+            return {"ok": False, "cancelled": True}
+        path = res[0] if isinstance(res, (list, tuple)) else res
+        if not path.lower().endswith(".sgbset"):
+            path += ".sgbset"
+        p = Path(path)  # 파일 이름은 NFC(완성형)로: Mac 저장 창이 자소 분리(NFD)로 돌려줘도 Windows에서 깨져 보이지 않게
+        path = str(p.with_name(unicodedata.normalize("NFC", p.name)))
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(pkg, f, ensure_ascii=False, indent=1)
+        return {"path": path, "counts": {k: (len(v) if isinstance(v, list) else 1) for k, v in pkg["items"].items()}}
+
+    @safe
+    def share_open(self, path=None):
+        """꾸러미 파일을 읽어 미리보기(가져오기는 share_import로)."""
+        from . import share
+        if path is None:
+            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("설정 꾸러미 (*.sgbset)", "모든 파일 (*.*)"))
+            if not res:
+                return {"ok": False, "cancelled": True}
+            path = res[0] if isinstance(res, (list, tuple)) else res
+        pkg = share.read(path)
+        self._share_pkg = pkg
+        return {"preview": share.preview(pkg, self._share_year(write=True)), "name": Path(path).name}
+
+    @safe
+    def share_import(self, choice):
+        from . import share
+        pkg = getattr(self, "_share_pkg", None)
+        if not pkg:
+            raise db.DbError("가져올 꾸러미를 먼저 열어 주세요.")
+        if not any(v and v != "skip" for v in (choice or {}).values() if isinstance(v, str)) and not any(
+                x != "skip" for v in (choice or {}).values() if isinstance(v, dict) for x in v.values()):
+            raise db.DbError("가져올 항목을 하나 이상 고르세요.")
+        saved = share.backup_config(data_dir())
+        done = share.apply(pkg, choice, self._share_year(write=True))
+        self._share_pkg = None
+        return {"done": done, "backup": saved}
+
     @safe
     def trait_dict_get(self):
         from . import trait_dict
