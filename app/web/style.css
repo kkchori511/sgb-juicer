@@ -1506,9 +1506,9 @@ input:disabled, select:disabled, textarea:disabled { color: var(--disabled-text)
   .rec-body { grid-template-columns: 192px minmax(0, 1fr); }
   .main { padding-inline: 16px; }
 }
-/* 좁은 창·세로 화면: 기록/최종안 탭으로 한 영역만 크게 */
+/* 좁은 가로 창: 기록/최종안 탭으로 한 영역만 크게(세로로 긴 화면은 탭 없이 최종안 위·기록 아래로 쌓음, 아래 v0.31.2 블록) */
 .rec-tabs { display: none; }
-@media (max-aspect-ratio: 1/1), (max-width: 1180px) {
+@media (min-aspect-ratio: 1/1) and (max-width: 1180px) {
   .rec-tabs { display: flex; flex: none; gap: 8px; padding: 4px; border-radius: var(--radius-pill); background: var(--surface-2, #e8edf1); align-self: flex-start; }
   .rec-tabs > button { min-height: 36px; padding: 6px 18px; border-color: transparent; background: transparent; color: var(--muted); font-weight: 800; position: relative; }
   .rec-tabs > button:hover:not(.on) { background: var(--input); color: var(--text); }
@@ -2082,3 +2082,13 @@ textarea.cell-edit { font-size: calc(13px * var(--bs)); }
 .fs-val { min-width: 52px; font-size: 18px; color: #5420bd; }
 .fs-preview { border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); padding: 10px 14px; background: var(--surface); }
 .fs-preview .rcard-body { max-height: none; }
+/* 이미 보낸 행: 보낸 내용 칸이 표 남은 폭을 다 쓰게(앞 세 칸은 내용만큼) */
+.ib-sent-tbl td:not(:last-child) { width: 1%; white-space: nowrap; }
+.ib-sent-tbl .snip { max-width: none; max-height: 180px; font-size: calc(13px * var(--bs)); }
+
+/* 세로로 긴 화면(v0.31.2): 탭 없이 최종안을 맨 위, 기록을 그 아래에 쌓고 가운데 칸 전체를 한 번에 스크롤 */
+@media (max-aspect-ratio: 1/1) {
+  .rec-main { overflow-y: auto; }
+  .rec-main > .rec-final, .rec-main > .rec-final.folded-all { order: -1; flex: 0 0 auto !important; min-height: 0 !important; overflow: visible; }
+  .rec-main > .rec-records, .rec-main > .rec-records.folded { flex: 0 0 auto !important; min-height: 0 !important; overflow: visible; }
+}

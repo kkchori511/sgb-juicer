@@ -11,6 +11,7 @@
   let panel = 'dashboard';
   let dashSel = null;
   let semester = 1;
+  let semesterPicked = false; // 현황판에서 학기를 직접 고르기 전에는 2학기 과목이 있으면 2학기부터
   let rosterSel = null;
   let showInactive = true;
   let runCost = 0;
@@ -641,6 +642,10 @@
     const subjects = dash.groups.filter((g) => g.kind === 'subject');
     $('semesterSeg').hidden = !subjects.length;
     $('annualHint').hidden = !subjects.length;
+    if (!semesterPicked && subjects.length) {
+      const want = subjects.some((g) => g.semester === 2) ? 2 : 1;
+      if (want !== semester) { semester = want; document.querySelectorAll('#semesterSeg .seg').forEach((x) => x.classList.toggle('active', +x.dataset.sem === semester)); }
+    }
     return dash.groups.filter((g) => g.kind !== 'subject' || g.semester === semester);
   }
   function renderDashboard() {
@@ -2170,6 +2175,10 @@
     return [...mine.map(opt), base.length ? el('optgroup', { label: '📦 기본 프롬프트', class: 'opt-builtin' }, base.map(opt)) : null].filter(Boolean);
   }
   // wiz: 있으면 버튼 줄 맨 왼쪽에 [🪄 프롬프트 마법사](누르면 이 창을 닫고 wiz())
+  // v0.31.2 제목 넣어 시작: 기록 제목을 결과 글 앞쪽에(예: '방정식의 재구조화 활동을 통해 ~'). 마지막 선택을 기억
+  const titleLeadGet = () => localStorage.getItem('sgb_title_lead') === '1';
+  const titleLeadSet = (v) => { try { localStorage.setItem('sgb_title_lead', v ? '1' : '0'); } catch (e) { /* 무시 */ } };
+  const TITLE_LEAD_TIP = "기록 제목을 결과 글 앞쪽에 넣어 시작합니다. 예: 제목이 '방정식의 재구조화'면 '방정식의 재구조화 활동을 통해 ~'. 이어 주는 말은 AI가 문맥에 맞게 고릅니다. 제목이 없는 기록은 그대로입니다.";
   async function aiConfirm(title, rows, warn, kind, prefer, wiz) {
     let pick = '';
     let opts = '';
@@ -2204,6 +2213,7 @@
     const html = `<div class="ai-conf"><b>${escHtml(title)}</b> — AI로 실행할까요?<table>${rows.filter(Boolean).map(([k, v]) => `<tr><th>${escHtml(k)}</th><td>${escHtml(v)}</td></tr>`).join('')}`
       + (opts ? `<tr><th>프롬프트</th><td><select id="aiPrompt">${opts}</select></td></tr>` : '')
       + (exOpts ? `<tr><th>예시</th><td><select id="aiExample">${exOpts}</select><div class="muted ai-ex-prev" id="aiExPrev"></div></td></tr>` : '') + '</table>'
+      + (['refine', 'polish'].includes(kind) ? `<label class="inline ai-title-lead" title="${escHtml(TITLE_LEAD_TIP)}"><input type="checkbox" id="aiTitleLead"${titleLeadGet() ? ' checked' : ''}> 기록 제목을 넣어 시작 <span class="muted">(예: '방정식의 재구조화 활동을 통해 ~')</span></label>` : '')
       + `<label class="ai-extra-label" for="aiExtra">이번 추가 요구 사항 <span class="muted">(선택 / 이번 실행에만 / 저장된 지침은 그대로)</span></label>`
       + `<textarea id="aiExtra" rows="2" maxlength="1000" placeholder="예: 숫자는 빼 줘 / 탐구 과정을 더 강조 / 두 문장으로 짧게"></textarea>`
       + `<p class="hint">${warn ? `${escHtml(warn)}<br>` : ''}AI에는 글과 프롬프트만 보냅니다(명렬의 학번·이름은 보내지 않음). 글 속에 적힌 이름은 그대로 가니 확인하세요. 원문에 없는 활동·결과물은 지어내지 않게 합니다. 실행하면 크레딧이 듭니다.${wiz ? '<br>결과를 보며 대화로 고치고 싶으면 왼쪽 아래 [<i class="ico-hat"></i>프롬프트 마법사]를 누르세요.' : ''}</p></div>`;
@@ -2224,7 +2234,9 @@
       if (!ok) return null;
       const example = $('aiExample') ? $('aiExample').value : '';
       if ($('aiExample')) { try { localStorage.setItem(exKey, example); } catch (e) { /* 무시 */ } }
-      return { extra: ($('aiExtra') ? $('aiExtra').value : '').trim(), prompt: $('aiPrompt') ? $('aiPrompt').value : '', kind: kind || '', example };
+      const tl = $('aiTitleLead');
+      if (tl) titleLeadSet(tl.checked);
+      return { extra: ($('aiExtra') ? $('aiExtra').value : '').trim(), prompt: $('aiPrompt') ? $('aiPrompt').value : '', kind: kind || '', example, titleLead: !!(tl && tl.checked) };
     })
       .finally(() => { $('modalOk').classList.remove('ai-btn'); if (wb) wb.remove(); });
     if (goWiz) setTimeout(() => wiz(), 0);
@@ -2292,17 +2304,18 @@
   }
   // jobs: [{ label, run: () => api 결과 }] — api를 직접 불러 오류도 진행 창에서 모아 보여 준다.
   // remember=false: 고른 프롬프트를 작업별 기억값으로 저장하지 않는다(묶음마다 따로 기억하는 경우)
-  async function aiRun({ title, rows, warn, jobs, summary, skipConfirm, before, after, extra, kind, prompt, remember, concurrency, wiz, example }) {
+  async function aiRun({ title, rows, warn, jobs, summary, skipConfirm, before, after, extra, kind, prompt, remember, concurrency, wiz, example, titleLead }) {
     if (!skipConfirm) {
       const conf = await aiConfirm(title, rows, warn, kind, prompt, wiz);
       if (!conf) return null;
       extra = conf.extra;
       prompt = conf.prompt;
       example = conf.example;
+      titleLead = conf.titleLead;
     }
     if (before && !(await before())) return null; // [AI 실행]을 누른 뒤에만 설정을 저장(취소하면 아무것도 바뀌지 않음)
-    await api.ai_extra_set(extra || '', prompt || '', remember === false ? '' : kind || '', example || ''); // 이번 실행에만: 추가 요구 사항·고른 프롬프트·고른 예시(끝나면 지움)
-    try { return await aiRunJobs({ title, jobs, summary, after, concurrency }); } finally { await api.ai_extra_set('', '', '', ''); }
+    await api.ai_extra_set(extra || '', prompt || '', remember === false ? '' : kind || '', example || '', !!titleLead); // 이번 실행에만: 추가 요구 사항·고른 프롬프트·고른 예시·제목 넣어 시작(끝나면 지움)
+    try { return await aiRunJobs({ title, jobs, summary, after, concurrency }); } finally { await api.ai_extra_set('', '', '', '', false); }
   }
   // 여러 건은 동시에 AI_PARALLEL건씩 보낸다(concurrency로 바꿈: 앞 결과를 보고 쓰는 작업은 1).
   // out.notRun: 끝내지 못한 건의 번호(중지·장애로 보내지 않았거나 바로 중지로 버린 건) — 이어서 돌릴 때 쓴다.
@@ -2371,7 +2384,10 @@
   async function loadSlots() {
     const r = await call('slots');
     if (!r) return false;
-    R.slots = r.slots;
+    // 세특은 1·2학기가 함께 있으면 2학기 과목이 먼저(다른 항목 자리는 그대로)
+    const subj = r.slots.filter((x) => x.kind === 'subject');
+    const ordered = [...subj.filter((x) => x.semester === 2), ...subj.filter((x) => x.semester !== 2)];
+    R.slots = r.slots.map((x) => (x.kind === 'subject' ? ordered.shift() : x));
     return true;
   }
   function fillSlotSelect(sel, current, item) {
@@ -2538,7 +2554,7 @@
   async function loadStudent(keepScroll) {
     if (!R.sno) return;
     if (!(await flushFinal())) { toast(SAVE_FAIL_MSG, 5000); return; }
-    const scroll = [$('recRecords').scrollTop, $('recFinal').scrollTop];
+    const scroll = [$('recRecords').scrollTop, $('recFinal').scrollTop, $('recMain').scrollTop];
     const req = ++studentReq;
     const ctx = { year: ys.year, gid: R.slot.group_id, item: R.slot.item, sno: R.sno };
     const r = await call('student_view', ctx.gid, ctx.item, ctx.sno);
@@ -2563,7 +2579,7 @@
     // 좁은 창 탭: 학생을 새로 열면 다음 단계가 있는 쪽을 보여 주고, 같은 학생을 다시 그릴 때는 보던 탭을 둔다
     if (!keepScroll) setRecTab(['join', 'close'].includes(recNext()) ? 'final' : 'records');
     else setRecTab($('recMain').dataset.tab);
-    if (keepScroll) { $('recRecords').scrollTop = scroll[0]; $('recFinal').scrollTop = scroll[1]; }
+    if (keepScroll) { $('recRecords').scrollTop = scroll[0]; $('recFinal').scrollTop = scroll[1]; $('recMain').scrollTop = scroll[2]; }
     renderStudentList();
   }
   // 최종안 직접 수정: 쉬면 자동 저장, 학생·화면을 바꾸기 전에도 저장
@@ -2751,7 +2767,7 @@
     return { manual: '직접 입력', existing: '이미 쓴 생기부', 'existing-bulk': '일괄 넣기', 'record-bulk': '일괄 입력' }[src] || '직접 입력';
   }
   function candInfo(cd) {
-    alertBox(`작업: ${OP_LABEL[cd.op] || (typeof BUNDLE_OP !== 'undefined' && BUNDLE_OP[cd.op]) || cd.op}\n모델: ${cd.meta.model || '-'}${cd.meta.prompt_name ? `\n프롬프트: ${cd.meta.prompt_name}` : ''}${cd.meta.extra ? `\n추가 요구 사항: ${cd.meta.extra}` : ''}\n만든 때: ${cd.created_at}\n비용: ${fmtCredit(cd.cost)} 크레딧${cd.meta.ratios ? `\n비율: ${cd.meta.ratios.join(' / ')}%` : ''}${cd.meta.record_ids ? `\n근거 기록: ${cd.meta.record_ids.length}건` : ''}${cd.meta.level ? `\n성취수준: ${cd.meta.level}` : ''}\n\n[지침]\n${cd.meta.prompt || '-'}${cd.meta.example ? `\n\n[예시]\n${cd.meta.example}` : ''}${cd.meta.standards_text ? `\n\n[쓴 성취기준]\n${cd.meta.standards_text}` : ''}`);
+    alertBox(`작업: ${OP_LABEL[cd.op] || (typeof BUNDLE_OP !== 'undefined' && BUNDLE_OP[cd.op]) || cd.op}\n모델: ${cd.meta.model || '-'}${cd.meta.prompt_name ? `\n프롬프트: ${cd.meta.prompt_name}` : ''}${cd.meta.extra ? `\n추가 요구 사항: ${cd.meta.extra}` : ''}${cd.meta.title_lead ? '\n제목 넣어 시작: 예' : ''}\n만든 때: ${cd.created_at}\n비용: ${fmtCredit(cd.cost)} 크레딧${cd.meta.ratios ? `\n비율: ${cd.meta.ratios.join(' / ')}%` : ''}${cd.meta.record_ids ? `\n근거 기록: ${cd.meta.record_ids.length}건` : ''}${cd.meta.level ? `\n성취수준: ${cd.meta.level}` : ''}\n\n[지침]\n${cd.meta.prompt || '-'}${cd.meta.example ? `\n\n[예시]\n${cd.meta.example}` : ''}${cd.meta.standards_text ? `\n\n[쓴 성취기준]\n${cd.meta.standards_text}` : ''}`);
   }
   // 버튼 묶음 메뉴(▾·⋯): 펼치면 아래로. 안의 버튼을 누르거나 바깥을 누르면 닫힌다(bind의 문서 클릭)
   function menuBox(label, items, title) {
@@ -2805,6 +2821,16 @@
   const AI_OPS = new Set(['trait', 'chat', 'refine', 'polish', 'synth', 'tag_trial', 'tag_bulk']);
   const candKind = (op, conf) => (conf ? ' is-conf' : AI_OPS.has(op) ? ' is-ai' : ' is-plain');
   const confBadge = (conf) => (conf ? el('span', { class: 'conf-badge', text: '✔ 확정됨' }) : null);
+  // 결과 후보 하나 지우기(보이는 버튼). 기록의 AI 결과와 태그 시험 변환 후보만(태그 일괄 변환 결과·이전 반영본은 못 지움)
+  function candDelBtn(b, disabled, done, wrap = (fn) => fn()) {
+    const can = b.src === 'rec' || (b.src === 'tag' && b.op === 'tag_trial');
+    if (!can) return null;
+    return el('button', { type: 'button', class: 'small danger-text cand-del', disabled, title: '이 결과 후보 하나만 지웁니다', text: '🗑 삭제', onclick: async () => {
+      if (!(await confirmBox(`'${bundleLabel(b)}' 결과를 지웁니다. 되돌릴 수 없습니다.`, '삭제'))) return;
+      const ok = await wrap(() => (b.src === 'rec' ? mutate('delete_result', b.id) : mutate('tag_cand_delete', b.id)));
+      if (ok) { toast('결과를 지웠습니다.'); done(); }
+    } });
+  }
   function bundleItem(r, b, locked) {
     const cd = b.src === 'rec' ? r.candidates.find((x) => x.id === b.id) : null;
     const isConf = !!(r.confirmed && b.text === r.content);
@@ -2817,10 +2843,10 @@
         el('button', { type: 'button', class: "small btn-confirm", disabled: locked || (r.confirmed && b.text === r.content), text: '✔ 이걸로 확정', onclick: () => confirmText(r, b.text) }),
         el('button', { type: 'button', class: 'small', disabled: locked, text: '고쳐서 확정', title: '이 글을 [직접 작성] 칸에 불러와 고친 뒤 확정합니다', onclick: () => openDraft(r, b.text) }),
         el('span', { class: 'spacer' }),
+        candDelBtn(b, locked, () => loadStudent(true)),
         menuBox('⋯', [
           b.meta && b.meta.model ? el('button', { type: 'button', class: 'small', text: '정보', onclick: () => candInfo(cd || { op: b.op, meta: b.meta, created_at: b.created_at || '' }) }) : null,
-          b.src === 'rec' ? el('button', { type: 'button', class: 'small danger-text', disabled: locked, text: '삭제', onclick: async () => { if (await mutate('delete_result', b.id)) loadStudent(true); } }) : null,
-        ], '정보·삭제'),
+        ], '정보'),
       ]),
     ]);
   }
@@ -3801,6 +3827,8 @@
         t.appendChild(el('tr', {}, [el('td', { text: `${r.kind === 'existing' ? '기존 완성문' : r.seq + '회'} ${r.title || ''}`.trim() }), el('td', { text: `${r.bytes} Byte` }), el('td', {}, [inputs[r.id]]), el('td', { 'data-applied': r.id, class: 'auto-w' })]));
       });
       const chk = el('input', { type: 'checkbox', checked: sumCheck, onchange: (e) => { sumCheck = e.target.checked; redraw(); } });
+      const lead = el('input', { type: 'checkbox', checked: titleLeadGet(), onchange: (e) => titleLeadSet(e.target.checked) });
+      const titled = recs.filter((r) => (r.title || '').trim()).length;
       const model = el('select', {});
       fillModelSelect(model);
       model.value = $('recModel').value;
@@ -3808,7 +3836,7 @@
         const wm = {};
         recs.forEach((r) => { wm[r.id] = inputs[r.id].value; });
         const out = await busyRun(runBtn, `synth${R.sno}`, () => aiRun({
-          title: '비중으로 분량 맞추기', skipConfirm: true, remember: false,
+          title: '비중으로 분량 맞추기', skipConfirm: true, remember: false, titleLead: lead.checked,
           jobs: [{ label: `${R.view.student.name} / ${modelName(model)}`, run: () => api.ai_synth(R.slot.group_id, R.slot.item, R.sno, recs.map((r) => r.id), wm, model.value, sumCheck, null) }],
         }));
         if (!out || !out.done) return;
@@ -3824,7 +3852,8 @@
         el('div', { class: 'sheet-body' }, [
           el('p', { class: 'hint', text: '확정 기록마다 비중만큼의 분량으로 원문을 덜어내 한 글로 잇습니다. 새로 쓰지 않고, 덜 중요한 문장·문단을 빼거나 문장을 짧게 하며, 뺀 자리가 어색한 곳만 조금 다듬습니다. 이미 자기 몫보다 짧은 기록은 그대로 둡니다. 결과가 목표를 넘으면 자동으로 한두 번 더 줄입니다. 결과는 최종안에 바로 들어가지 않고 [AI 분량 맞춤 후보]에 쌓입니다. 비중을 비워 두면 기록 길이에 비례해 나눕니다. 입력한 비중은 기록에 저장됩니다.' }),
           t, sumLine,
-          el('div', { class: 'map-row' }, [el('label', {}, [chk, '비중 합계 100% 검사']), el('label', {}, ['모델', model])]),
+          el('div', { class: 'map-row' }, [el('label', {}, [chk, '비중 합계 100% 검사']),
+            el('label', { title: TITLE_LEAD_TIP }, [lead, '기록 제목을 넣어 시작', el('span', { class: 'muted', text: titled ? ` (제목 있는 기록 ${titled}건)` : ' (제목 있는 기록 없음)' })]), el('label', {}, ['모델', model])]),
           el('p', { class: 'hint', text: '[AI로 분량 맞추기]를 누르면 확인 창 없이 바로 실행합니다(고정 지침 / 프롬프트 목록과 상관없음). AI에는 명렬의 학번·이름 없이 기록 내용과 비율만 보냅니다(본문에 적힌 이름은 그대로 갑니다). 후보가 가득 차 있으면 잠그지 않은 가장 오래된 후보가 지워집니다.' }),
         ]),
         el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }), runBtn]),
@@ -5246,10 +5275,10 @@
           el('button', { type: 'button', class: 'small', disabled: !can, text: '고쳐서 확정', title: '이 글을 이 자리에서 고친 뒤 확정합니다',
             onclick: () => { ta.value = b.text; editBox.hidden = false; body.hidden = true; foot.hidden = true; ta.style.height = `${Math.min(Math.max(ta.scrollHeight + 2, 90), 420)}px`; ta.focus(); } }),
           el('span', { class: 'spacer' }),
+          candDelBtn(b, !can, () => renderTagView(true), tvOp) || '',
           menuBox('⋯', [
             b.meta && b.meta.model ? el('button', { type: 'button', class: 'small', text: '정보', onclick: () => candInfo({ op: b.op, meta: b.meta, created_at: b.created_at || '' }) }) : null,
-            b.src === 'rec' ? el('button', { type: 'button', class: 'small danger-text', disabled: !can, text: '삭제', onclick: () => act(() => mutate('delete_result', b.id), '결과를 지웠습니다.') }) : null,
-          ], '정보·삭제') || '');
+          ], '정보') || '');
         const isConf = !!(r.confirmed && b.text === r.content);
         items.appendChild(el('div', { class: 'cand bcand' + (b.src === 'tag' ? ' from-tag' : '') + candKind(b.op, isConf) }, [
           el('div', { class: 'cand-head' }, [el('b', { text: bundleLabel(b) }), (b.created_at || '').slice(5, 16), confBadge(isConf), el('span', { class: 'spacer' }), bytesEl(b.bytes, 0)]),
@@ -8553,6 +8582,7 @@
     });
     document.querySelectorAll('#semesterSeg .seg').forEach((b) => b.addEventListener('click', () => {
       semester = +b.dataset.sem;
+      semesterPicked = true;
       document.querySelectorAll('#semesterSeg .seg').forEach((x) => x.classList.toggle('active', x === b));
       renderDashboard();
     }));

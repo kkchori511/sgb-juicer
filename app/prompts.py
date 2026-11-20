@@ -176,7 +176,8 @@ def fit_plan(parts: list[dict], target_bytes: int, aim: float = 0.97) -> list[di
         share = target_bytes * p["ratio"]
         keep = now_b <= share
         out.append({"text": t, "ratio": p["ratio"], "now_c": now_c, "now_b": now_b, "share": round(share),
-                    "goal_c": now_c if keep else max(1, round(now_c * share * aim / now_b)), "keep": keep})
+                    "goal_c": now_c if keep else max(1, round(now_c * share * aim / now_b)), "keep": keep,
+                    "title": " ".join(str(p.get("title") or "").split())})
     return out
 
 
@@ -198,6 +199,8 @@ def build_fit_user(plan: list[dict], target_bytes: int = 0, only: int | None = N
         pct = round(p["ratio"] * 100)
         head = (f"[기록 {k}] 반영 비율 {pct}% · 지금 {p['now_c']}자(문장 {n}개) → 그대로 둠" if p["keep"]
                 else f"[기록 {k}] 반영 비율 {pct}% · 지금 {p['now_c']}자(문장 {n}개) → 목표 약 {p['goal_c']}자 (약 {p['now_c'] - p['goal_c']}자 덜어내기)")
+        if p.get("title"):
+            head += f"\n제목: 「{p['title']}」 — 이 기록 글은 제목을 앞쪽에 넣어 시작"
         if prev_c:
             head += f"\n※ 지난번에 {prev_c}자로 너무 많이 뺐다. 이번에는 문장을 더 남겨 목표 약 {p['goal_c']}자에 맞춘다."
         lines.append(f"{head}\n{body}")
@@ -222,11 +225,27 @@ def fit_clean(t: str) -> str:
     return re.sub(r"\n\s*\n+", "\n", t.strip())
 
 
-def fit_system() -> str:
-    return FIT_RULE + PRINCIPLE + FIT_OUT
+def fit_system(title: bool = False) -> str:
+    return FIT_RULE + (TITLE_FIT_RULE if title else "") + PRINCIPLE + FIT_OUT
 
 
-def fit_shrink_system(target_bytes: int, text: str) -> str:
+# v0.31.2 제목 넣어 시작: 기록 제목을 그 기록 글의 앞쪽에 넣어 시작한다(고정 멘트가 아니라 자연스럽게 이어 씀)
+TITLE_RULE = ("\n\n[제목 넣어 시작 — 이번 실행, 반드시 지킴]\n"
+              "- 기록에 '제목'이 주어지면, 그 기록에서 나온 글은 제목을 앞쪽에 넣어 시작한다. 예: 제목이 '방정식의 재구조화'면 '방정식의 재구조화 활동을 통해 ~'처럼 시작한다.\n"
+              "- 제목 글자는 그대로 쓴다. 제목 뒤에 이어 주는 말(활동에서, 활동을 통해, 탐구에서, 수업에서 등)은 문맥에 맞게 고르고, 여러 기록에서 같은 말을 되풀이하지 않는다.\n"
+              "- 제목이 없는 기록은 원래대로 쓴다. 제목을 넣었다고 원문에 없는 활동·결과를 지어내지 않는다.")
+TITLE_FIT_RULE = (TITLE_RULE + "\n"
+                  "- 원문에서 덜어내는 편집이어도, 제목을 넣으며 첫 문장 앞머리를 잇는 데 필요한 말만 더하는 것은 허용한다('그대로 둠' 기록도 제목은 앞에 넣는다). 늘어난 분량도 그 기록의 목표 글자 수 안에 넣는다.")
+
+
+def title_rule_one(title: str) -> str:
+    """기록 한 건 정제·다듬기: 이 기록의 제목으로 시작."""
+    t = " ".join(str(title or "").split())
+    return (f"\n\n[제목 넣어 시작 — 이번 실행, 반드시 지킴]\n- 이 기록의 제목은 「{t}」이다. 결과 글은 이 제목을 앞쪽에 넣어 시작한다"
+            f"(예: '{t} 활동을 통해 ~'). 제목 글자는 그대로 쓰고, 이어 주는 말은 문맥에 맞게 자연스럽게 고른다. 제목을 넣었다고 없는 활동·결과를 지어내지 않는다.") if t else ""
+
+
+def fit_shrink_system(target_bytes: int, text: str, keep_title: bool = False) -> str:
     """분량 맞추기 결과(기록 하나 또는 전체)가 몫을 넘을 때: 같은 방식(문장·꾸밈말 덜어내기)으로 지금 글자 수 → 목표 글자 수."""
     from .textutil import count_bytes
     now_b, now_c = max(count_bytes(text), 1), max(len(text), 1)
@@ -235,6 +254,7 @@ def fit_shrink_system(target_bytes: int, text: str) -> str:
             f"- 지금 공백 포함 {now_c}자다. 약 {goal_c}자(약 {now_c - goal_c}자 덜어내기)로 줄인다. 이보다 많이 줄이지 않는다.\n"
             "- 덜 중요한 문장을 통째로 빼는 것을 먼저 하고, 그래도 길 때만 문장 안의 꾸밈말·부연을 덜어낸다. 남는 문장은 원문 글자 그대로 둔다.\n"
             "- 뺀 자리 때문에 어색한 곳만 접속어·어미를 조금 고친다. 새 내용을 넣지 않는다. 줄바꿈 구성과 문체는 그대로 둔다."
+            + ("\n- 문단 첫머리에 들어간 활동 제목(예: '○○ 활동을 통해')은 빼지 않고 남긴다." if keep_title else "")
             + PRINCIPLE + OUTPUT_RULE)
 
 
@@ -245,6 +265,8 @@ def build_synth_user(parts: list[dict], target_bytes: int) -> str:
         pct = round(p["ratio"] * 100)
         approx = round(target_bytes * p["ratio"]) if target_bytes else 0
         head = f"[기록 {i}] 반영 비율 {pct}%" + (f"(약 {approx}바이트)" if approx else "")
+        if p.get("title"):
+            head += f" / 제목: 「{' '.join(str(p['title']).split())}」"
         lines.append(f"{head}\n{p['text'].strip()}")
     return "\n\n".join(lines)
 

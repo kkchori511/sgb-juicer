@@ -1763,12 +1763,14 @@ class Api:
 
     # 이번 실행에만 쓰는 교사의 추가 요구 사항(AI 실행 확인 창에서 입력). 저장된 프롬프트는 바꾸지 않는다.
     @safe
-    def ai_extra_set(self, text=None, prompt_id=None, kind=None, example_id=None):
-        """이번 실행에만: 추가 요구 사항, 고른 프롬프트, 고른 예시(v0.31, ''=프롬프트에 든 예시 그대로, 'none'=예시 없이).
+    def ai_extra_set(self, text=None, prompt_id=None, kind=None, example_id=None, title_lead=False):
+        """이번 실행에만: 추가 요구 사항, 고른 프롬프트, 고른 예시(v0.31, ''=프롬프트에 든 예시 그대로, 'none'=예시 없이),
+        제목 넣어 시작(v0.31.2: 기록 정제·다듬기·모아 변환에서 기록 제목을 글 앞쪽에).
         고른 프롬프트는 작업 종류마다 기억한다(다음 실행의 기본)."""
         self._ai_extra = (text or "").strip()[:1000]
         self._ai_prompt = str(prompt_id or "")
         self._ai_example = str(example_id or "")
+        self._ai_title = bool(title_lead)
         if prompt_id and kind in prompts.KINDS:
             picks = dict(config.load().get("prompt_pick") or {})
             if picks.get(kind) != prompt_id:
@@ -1872,6 +1874,9 @@ class Api:
         pr = self._prompt(op)
         target = rec.ai_target(r["group_id"], r["item"], r["student_no"]) if op in ("polish", "trait") else 0
         system = prompts.build_system(pr["prompt"], pr["example"], target)
+        lead = op in ("refine", "polish") and getattr(self, "_ai_title", False) and (r.get("title") or "").strip()
+        if lead:
+            system += prompts.title_rule_one(r["title"])
         key = ("record", r["id"])
         self._guard(key)
         try:
@@ -1883,6 +1888,8 @@ class Api:
                 src = r["original"] if r["original"] is not None else r["content"]
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, src, cfg["privacy_block"], item=r["item"])
             meta = {"model": model, "op": op, "prompt_name": pr["name"], "prompt": pr["prompt"], "example": pr["example"], "record_ids": [r["id"]]}
+            if lead:
+                meta["title_lead"] = True
             if op == "trait":  # 문단 사이 빈 줄 정리, 목표를 넘으면 한 번만 줄이기
                 text = re.sub(r"\n\s*\n+", "\n", text.strip())
                 first = count_bytes(text)
@@ -1928,14 +1935,15 @@ class Api:
         if not std_rule:  # 비중으로 분량 맞추기(v0.23): 원문을 덜어내 비율·목표에 맞춘다(고정 지침, 넘으면 최대 2번 더 줄이기)
             return self._fit(rec, gid, item, sno, cfg, model, chosen, ratios, target, check)
         pr = self._prompt("synth")
-        system = prompts.build_system(pr["prompt"] + std_rule + prompts.SYNTH_RULE, pr["example"], target)
-        user = prompts.build_synth_user([{"text": r["content"], "ratio": q} for r, q in zip(chosen, ratios)], target)
+        lead = getattr(self, "_ai_title", False) and any((r.get("title") or "").strip() for r in chosen)
+        system = prompts.build_system(pr["prompt"] + std_rule + prompts.SYNTH_RULE + (prompts.TITLE_RULE if lead else ""), pr["example"], target)
+        user = prompts.build_synth_user([{"text": r["content"], "ratio": q, "title": r.get("title") if lead else ""} for r, q in zip(chosen, ratios)], target)
         key = ("slot", int(gid), item, str(sno))
         self._guard(key)
         try:
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, system, user, cfg["privacy_block"], item=item)
             meta = {"model": model, "op": "synth", "prompt_name": pr["name"], "prompt": pr["prompt"], "example": pr["example"], "target": target,
-                    "record_ids": [r["id"] for r in chosen], "ratios": [round(q * 100, 1) for q in ratios], "sum_check": check, **std_meta}
+                    "record_ids": [r["id"] for r in chosen], "ratios": [round(q * 100, 1) for q in ratios], "sum_check": check, **std_meta, **({"title_lead": True} if lead else {})}
             nid, dropped = rec.add_result(gid, item, sno, "synth", text, self._xm(meta), cost)
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost, "ratios": meta["ratios"]})
         finally:
@@ -1945,21 +1953,22 @@ class Api:
         """비중으로 분량 맞추기: 기록마다 몫(목표×비율)만큼 원문을 덜어낸다. 한 번에 보내 기록별 태그로 받고,
         기록마다 바이트를 재서 몫을 3% 넘게 넘은 기록은 그 기록만 줄이고, 몫의 85%에 못 미치면 그 기록만 원문에서 다시 한다(최대 2번).
         그래도 전체가 목표를 넘으면 전체를 한 번 줄인다."""
-        plan = prompts.fit_plan([{"text": r["content"], "ratio": q} for r, q in zip(chosen, ratios)], target)
+        lead = bool(getattr(self, "_ai_title", False) and any((r.get("title") or "").strip() for r in chosen))
+        plan = prompts.fit_plan([{"text": r["content"], "ratio": q, "title": r.get("title") if lead else ""} for r, q in zip(chosen, ratios)], target)
         key = ("slot", int(gid), item, str(sno))
         self._guard(key)
         try:
             k, priv = cfg["openrouter_key"].strip(), cfg["privacy_block"]
-            if all(p["keep"] for p in plan):  # 모두 몫 안: 줄일 것이 없으니 AI 없이 원문을 잇는다
+            if all(p["keep"] for p in plan) and not lead:  # 모두 몫 안: 줄일 것이 없으니 AI 없이 원문을 잇는다(제목 넣기면 AI로)
                 text = "\n".join(p["text"] for p in plan)
                 meta = {"model": "", "op": "synth", "mode": "fit", "prompt_name": prompts.FIT_NAME + " / AI 없이 원문 그대로", "prompt": "", "example": "", "target": target,
                         "record_ids": [r["id"] for r in chosen], "ratios": [round(q * 100, 1) for q in ratios], "sum_check": check, "calls": 0}
                 nid, dropped = rec.add_result(gid, item, sno, "synth", text, self._xm(meta), 0)
                 return self._ai_out({"id": nid, "dropped": dropped, "cost": 0, "ratios": meta["ratios"], "bytes": count_bytes(text), "target": target})
-            raw, cost = self._call_ai(k, model, prompts.fit_system(), prompts.build_fit_user(plan, target), priv, extra=False, item=item)
+            raw, cost = self._call_ai(k, model, prompts.fit_system(lead), prompts.build_fit_user(plan, target), priv, extra=False, item=item)
             parts = prompts.fit_parse(raw, len(plan))
-            meta = {"model": model, "op": "synth", "mode": "fit", "prompt_name": prompts.FIT_NAME, "prompt": prompts.FIT_RULE, "example": "", "target": target,
-                    "record_ids": [r["id"] for r in chosen], "ratios": [round(q * 100, 1) for q in ratios], "sum_check": check, "calls": 1}
+            meta = {"model": model, "op": "synth", "mode": "fit", "prompt_name": prompts.FIT_NAME, "prompt": prompts.FIT_RULE + (prompts.TITLE_FIT_RULE if lead else ""), "example": "", "target": target,
+                    "record_ids": [r["id"] for r in chosen], "ratios": [round(q * 100, 1) for q in ratios], "sum_check": check, "calls": 1, **({"title_lead": True} if lead else {})}
             if parts is not None:
                 first = [count_bytes(x) for x in parts]
                 for _ in range(2):
@@ -1969,10 +1978,10 @@ class Api:
                             continue
                         b = count_bytes(parts[i])
                         if b > p["share"] * 1.03:  # 조금(3%) 넘는 것은 둔다(전체가 넘으면 아래에서 전체를 줄임)
-                            new, c2 = self._call_ai(k, model, prompts.fit_shrink_system(p["share"], parts[i]), parts[i], priv, extra=False, item=item)
+                            new, c2 = self._call_ai(k, model, prompts.fit_shrink_system(p["share"], parts[i], lead), parts[i], priv, extra=False, item=item)
                             new = prompts.fit_clean(new)
                         elif b < p["share"] * 0.85:
-                            got, c2 = self._call_ai(k, model, prompts.fit_system(), prompts.build_fit_user(plan, 0, only=i, prev_c=len(parts[i])), priv, extra=False, item=item)
+                            got, c2 = self._call_ai(k, model, prompts.fit_system(lead), prompts.build_fit_user(plan, 0, only=i, prev_c=len(parts[i])), priv, extra=False, item=item)
                             new = (prompts.fit_parse(got, 1) or [prompts.fit_clean(got)])[0]
                         else:
                             continue
@@ -1993,7 +2002,7 @@ class Api:
                 i = max(range(len(plan)), key=lambda j: count_bytes(parts[j]) - plan[j]["share"])
                 goal = count_bytes(parts[i]) - over - 10
                 if not plan[i]["keep"] and goal > 0:
-                    new, c2 = self._call_ai(k, model, prompts.fit_shrink_system(goal, parts[i]), parts[i], priv, extra=False, item=item)
+                    new, c2 = self._call_ai(k, model, prompts.fit_shrink_system(goal, parts[i], lead), parts[i], priv, extra=False, item=item)
                     new = prompts.fit_clean(new)
                     cost += c2
                     meta["calls"] += 1
@@ -2003,7 +2012,7 @@ class Api:
                         meta["shrunk_from"] = count_bytes(text)
                         text = "\n".join(x for x in parts if x)
             if target and count_bytes(text) > target:
-                short, c2 = self._call_ai(k, model, prompts.fit_shrink_system(target, text), text, priv, extra=False, item=item)
+                short, c2 = self._call_ai(k, model, prompts.fit_shrink_system(target, text, lead), text, priv, extra=False, item=item)
                 short = prompts.fit_clean(short)
                 cost += c2
                 meta["calls"] += 1
