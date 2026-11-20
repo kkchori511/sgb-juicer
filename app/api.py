@@ -3069,7 +3069,7 @@ class Api:
         return {"count": len(rows)}
 
     @safe
-    def export_xlsx(self, gid, item, only_closed, order, scope, default_name):
+    def export_xlsx(self, gid, item, only_closed, order, scope, default_name, split=False):
         rec = self._rec()
         rows = rec.export_rows(gid, item, bool(only_closed), order)
         result = self._window.create_file_dialog(webview.SAVE_DIALOG, save_filename=default_name or "생기부.xlsx", file_types=("Excel 파일 (*.xlsx)",))
@@ -3079,12 +3079,12 @@ class Api:
         if not path.lower().endswith(".xlsx"):
             path += ".xlsx"
         try:
-            export.write_xlsx(path, rows, scope, default_name.rsplit(".", 1)[0] if default_name else "생기부")
+            export.write_xlsx(path, rows, scope, default_name.rsplit(".", 1)[0] if default_name else "생기부", bool(split))
         except PermissionError:
             raise db.DbError("저장하지 못했습니다. 같은 파일이 Excel에서 열려 있으면 닫고 다시 시도해 주세요.")
         except ValueError as e:
             raise db.DbError(str(e))
-        return {"path": path, "count": len(rows)}
+        return {"path": path, "count": len(rows), "sheets": len(export.split_by_class(rows)) if split and rows else 1}
 
     # ---------- 백업·자료 ----------
     @safe

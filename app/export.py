@@ -23,11 +23,12 @@ def _value(row, key):
     return "" if v is None else v
 
 
-def write_xlsx(path: str, rows: list[dict], scope: str, sheet_title: str):
-    cols = columns(scope)
-    wb = Workbook()
-    ws = wb.active
-    ws.title = (sheet_title or "생기부")[:31].replace("/", "-").replace("\\", "-").replace("?", "").replace("*", "").replace("[", "(").replace("]", ")").replace(":", "-")
+def _sheet_name(t: str) -> str:
+    t = (t or "생기부").replace("/", "-").replace("\\", "-").replace("?", "").replace("*", "").replace("[", "(").replace("]", ")").replace(":", "-")
+    return t[:31] or "생기부"
+
+
+def _fill(ws, rows: list[dict], cols):
     ws.append([label for _, label in cols])
     for c in ws[1]:
         c.font = Font(bold=True)
@@ -51,6 +52,32 @@ def write_xlsx(path: str, rows: list[dict], scope: str, sheet_title: str):
         for c in row:
             c.alignment = Alignment(wrap_text=True, vertical="top")
     ws.freeze_panes = "A2"
+
+
+def class_label(r: dict) -> str:
+    g, c = r.get("grade"), r.get("class_no")
+    if not c:
+        return "반 없음"
+    return f"{g}학년 {c}반" if g else f"{c}반"
+
+
+def split_by_class(rows: list[dict]) -> list[tuple[str, list[dict]]]:
+    """반별로 나눔(학년·반 순). 반 안의 줄 순서는 그대로(학번순·이름순 정렬 유지)."""
+    groups: dict = {}
+    for r in rows:
+        groups.setdefault((r.get("grade") or 0, r.get("class_no") or 0), []).append(r)
+    return [(class_label(v[0]), v) for _, v in sorted(groups.items(), key=lambda kv: (kv[0][0] == 0 and kv[0][1] == 0, kv[0]))]
+
+
+def write_xlsx(path: str, rows: list[dict], scope: str, sheet_title: str, split: bool = False):
+    """split=True면 반별로 시트를 나눈다(시트 이름 'N학년 M반'). 학생이 없으면 빈 시트 하나."""
+    cols = columns(scope)
+    wb = Workbook()
+    parts = split_by_class(rows) if split and rows else [(sheet_title, rows)]
+    for k, (name, part) in enumerate(parts):
+        ws = wb.active if k == 0 else wb.create_sheet()
+        ws.title = _sheet_name(name)
+        _fill(ws, part, cols)
     wb.save(path)
 
 

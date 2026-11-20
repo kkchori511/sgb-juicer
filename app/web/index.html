@@ -145,6 +145,7 @@
           <div class="sheet-foot">
             <label class="inline" style="margin:0">복사 범위 <select id="expCols"><option value="full">학번·이름·상태·최종안</option><option value="text">최종안만</option></select></label>
             <label class="inline" style="margin:0"><input type="checkbox" id="expHeader" checked> 머리글 포함</label>
+            <label class="inline" style="margin:0" id="expSplitWrap" hidden title="세특 과목에 여러 반 학생이 있을 때 xlsx 시트를 어떻게 만들지 고릅니다">xlsx 시트 <select id="expSplit"><option value="one">한 시트로 합치기</option><option value="class">반별로 나누기</option></select></label>
             <span class="hint" style="margin:0">미마감은 노란색으로 표시하고, xlsx·복사에 '상태' 열로 알립니다. 최종안 문장에는 표시를 넣지 않습니다.</span>
             <span class="spacer"></span>
             <button type="button" id="expCopyBtn">클립보드 복사</button>

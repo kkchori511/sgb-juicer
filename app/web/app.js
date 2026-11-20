@@ -4626,6 +4626,11 @@
     ['expCopyBtn', 'expXlsxBtn'].forEach((id) => { $(id).disabled = combine; $(id).title = combine ? '합쳐 보기는 확인용입니다. 내보내기는 합쳐 보기를 끄고 학기별로 하세요.' : ''; });
     if (combine) { renderExportCombined(s, box); return; }
     E.rows = r.rows;
+    // 세특: 엑셀 시트를 반별로 나눌지(반이 둘 이상일 때만 보임). 고른 값은 기억
+    const nClass = new Set(r.rows.map((x) => `${x.grade ?? ''}-${x.class_no ?? ''}`)).size;
+    $('expSplitWrap').hidden = !(s.item === 'subject' && nClass > 1);
+    $('expSplit').value = localStorage.getItem('sgb_exp_split') === 'class' ? 'class' : 'one';
+    $('expSplit').options[1].textContent = `반별로 나누기(${nClass}개 시트)`;
     const closed = r.rows.filter((x) => x.closed).length;
     const empty = r.rows.filter((x) => !x.text).length;
     $('expSummary').textContent = `${r.rows.length}명 / 마감 ${closed} / 미마감 ${r.rows.length - closed} / 최종안 없음 ${empty}(빈칸) / 비활성 학생 제외`;
@@ -4655,8 +4660,9 @@
       if (r) toast(`${r.count}명 최종안을 복사했습니다.${open ? ` (미마감 ${open}명 포함)` : ''}`);
     } else {
       const name = `${ys.year}_${s.label.replace(/[\\/:*?"<>|·]/g, ' ').replace(/\s+/g, '_')}.xlsx`;
-      const r = await call('export_xlsx', s.group_id, s.item, onlyClosed, $('expOrder').value, $('expCols').value, name);
-      if (r) alertBox(`저장했습니다. (${r.count}명${open ? `, 미마감 ${open}명은 노란색` : ''})\n${r.path}`);
+      const split = !$('expSplitWrap').hidden && $('expSplit').value === 'class';
+      const r = await call('export_xlsx', s.group_id, s.item, onlyClosed, $('expOrder').value, $('expCols').value, name, split);
+      if (r) alertBox(`저장했습니다. (${r.count}명${r.sheets > 1 ? ` / 반별 시트 ${r.sheets}개` : ''}${open ? `, 미마감 ${open}명은 노란색` : ''})\n${r.path}`);
     }
   }
 
@@ -8752,6 +8758,7 @@
     $('recNext').addEventListener('click', () => moveStudent(1));
     ['expScopeRows', 'expOrder', 'expCombine'].forEach((id) => $(id).addEventListener('change', loadExport));
     $('expSlot').addEventListener('change', (e) => { E.slotKey = e.target.value; loadExport(); });
+    $('expSplit').addEventListener('change', (e) => { try { localStorage.setItem('sgb_exp_split', e.target.value); } catch (er) { /* 무시 */ } });
     $('expCopyBtn').addEventListener('click', () => doExport('copy'));
     $('expXlsxBtn').addEventListener('click', () => doExport('xlsx'));
     const addTag = async () => { if (await mutate('add_tag', $('tagNew').value)) { $('tagNew').value = ''; renderTags(); } };
