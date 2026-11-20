@@ -1,0 +1,175 @@
+# Windows에서 1.0 전 시험하기 (Claude Code용 작업 지침)
+
+이 문서는 **Windows PC의 PowerShell에서 Claude Code(CLI)를 켜고** v1.0 전 시험을 이어 하기 위한 것이다.
+Mac에서 쓰던 Claude의 메모는 넘어오지 않으므로, 필요한 규칙과 맥락을 모두 여기와 `docs/HANDOFF.md`에 적었다.
+시작할 때 이 문서 → `docs/HANDOFF.md` → `AGENTS.md` 순서로 읽는다.
+
+마지막 갱신: 2026-11-20 (Mac, v0.34.0 기준)
+
+---
+
+## 0. 지킬 규칙 (사용자 지정, Mac 세션과 같음)
+
+- **한국어로, 짧게** 말한다. 결과는 있는 그대로 보고한다(실패·건너뛴 것·확인 못 한 것도 적는다).
+- **커밋·push는 사용자가 말할 때만** 한다. 예외: 작업 묶음이 끝나면 `docs/HANDOFF.md`를 고쳐 커밋·push한다(사용자 지시).
+- **실제 학생 자료·실제 자료 폴더는 쓰지 않는다.** 시험은 더미 자료(임시 폴더, `SGB_DATA_DIR`)로만 한다.
+- **밖으로 보내는 일은 매번 허락을 받는다**(텔레그램, 웹 설문, 맞춤법 사이트에 진짜 글 보내기 등). 시험에서 AI는 가짜 응답을 쓴다(크레딧·학생 자료 안 나감).
+- 토큰·API 키는 화면·기록·커밋에 남기지 않는다.
+- 고칠 것이 보이면 **바로 고치지 말고** 번호를 붙여 보고 → 사용자 확인 후 고친다(한 항목씩 짧게: 원인 1~2줄, 고칠 방안, 선택지와 추천).
+- 버튼 크기, 색, 문구 같은 화면 규칙은 `docs/HANDOFF.md`의 '정해 둔 디자인 기준'을 따른다.
+- 화면에 보이는 띄어 쓴 구분 점(` · `)은 ` / `로 쓴다(붙여 쓴 `학번·이름`은 그대로).
+- 릴리스 절차는 `docs/HANDOFF.md` 맨 아래 '릴리스'를 따른다(1.0은 사용자 확인 후).
+- 그림·아이콘은 직접 그리지 않는다(Mac에서는 Codex에 맡겼음). Windows에서는 필요하면 사용자에게 묻는다.
+
+---
+
+## 1. 준비 (PowerShell)
+
+```powershell
+git clone https://github.com/kkchori511/sgb-juicer.git
+cd sgb-juicer
+git checkout feature/v0.19          # 작업 브랜치(원격에 main 없음)
+python -m venv .venv
+.\.venv\Scripts\pip install -r requirements.txt pytest playwright
+```
+
+- Python 3.12 권장(빌드와 같음). `python --version`으로 확인.
+- Playwright는 **브라우저를 따로 내려받지 않아도 된다**(앱의 WebView2에 붙기만 함). 붙을 때 "브라우저 없음" 오류가 나면 그때 `.\.venv\Scripts\python -m playwright install chromium`.
+- WebView2 런타임은 Windows 10/11에 보통 깔려 있다(Edge와 같이).
+
+---
+
+## 2. 시험 단계 한눈에
+
+| 단계 | 무엇을 | 어떻게 | 자동? |
+|---|---|---|---|
+| A | 백엔드 시험 47개 | `.\.venv\Scripts\python tests\run_all.py` | 자동 |
+| B | 소스 앱 + 더미 자료 + 가짜 AI로 화면 끝까지 | `scripts\demo_mac.py`를 원격 조종 포트와 함께 켜고 Playwright로 조작·캡처 | 자동(캡처는 Claude가 봄) |
+| C | 배포 exe로 같은 흐름 | 릴리스 exe를 임시 폴더에서 `SGB_DATA_DIR`로 켜고 조작(AI는 진짜라 건너뛰거나 사용자 확인) | 반자동 |
+| D | 업데이트·복원 | 이전 버전 exe → [지금 업데이트] → 종료·재실행 → 복원·복원 되돌리기 | 사용자가 손으로(Claude가 순서 안내·기록) |
+| E | 125% 배율·작은 화면·세로 화면 | Windows 디스플레이 설정을 사용자가 바꾸고 B를 다시 | 반자동 |
+
+각 단계 결과는 `docs/review/windows_test_v034.md`에 적는다(아래 6장 모양).
+
+---
+
+## 3. 단계 A — 백엔드 시험
+
+```powershell
+.\.venv\Scripts\python tests\run_all.py
+```
+- `tests/test_*.py`를 하나씩 따로 실행한다(한꺼번에 pytest로 돌리면 자료 폴더가 섞여 실패함). 47/47 통과가 정상.
+- GitHub 빌드(`.github/workflows/build-windows.yml`)도 같은 실행기를 쓴다. v0.34.0 빌드에서 Windows 47/47 통과 확인됨.
+
+---
+
+## 4. 단계 B — 화면 끝까지 (소스 앱 + 가짜 AI)
+
+### 4-1. 앱 켜기(원격 조종 포트 열기)
+
+```powershell
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
+.\.venv\Scripts\python scripts\demo_mac.py
+```
+- `demo_mac.py`는 이름만 mac이고 Windows에서도 같다. **임시 폴더에 더미 자료**(담임 2-3반, 공통수학1·2(1·2학기 합산), 통합과학, 과학탐구반, 태그·기록·최종안·마감·Inbox 묶음·성취기준·활동 개요)를 넣고 창을 띄운다.
+- AI는 가짜 응답(약 3초, 결과에 '(시험용 AI 결과)')이라 키·크레딧·학생 자료가 나가지 않는다.
+- 앱은 백그라운드로 켜 두고(Claude Code에서 run_in_background), 다음 단계에서 붙는다.
+
+### 4-2. Playwright로 붙기(뼈대)
+
+시험 스크립트는 `scripts/e2e_windows.py`에 만든다(아직 없음 — 이번 작업에서 만든다). 뼈대:
+
+```python
+from playwright.sync_api import sync_playwright
+
+with sync_playwright() as p:
+    b = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
+    page = next(pg for c in b.contexts for pg in c.pages if "index.html" in pg.url)
+    page.set_default_timeout(15000)
+    page.screenshot(path="e2e/00_start.png", full_page=True)
+    page.click("button.nav[data-panel='dashboard']")
+    # ... 아래 4-3 흐름대로
+```
+- 화면 요소는 `app/web/index.html`의 id(`#recMain`, `#expXlsxBtn` 등)와 `app/web/app.js`가 만드는 클래스로 찾는다. 글자로 찾을 때는 `page.get_by_role("button", name="…")`.
+- **운영체제 파일 창(저장·열기)은 자동으로 못 누른다.** 파일이 필요한 단계는 화면 대신 `page.evaluate("pywebview.api.export_xlsx(...)")`처럼 API를 부르거나 건너뛰고 '파일 창 미확인'으로 적는다. 앱의 API는 `app/api.py`의 `Api` 메서드(화면에서는 `window.pywebview.api.이름(...)`).
+- 확인 창(`#modal`)은 `#modalOk` / `#modalCancel`, 큰 창(`#sheet`)은 `#sheetBox` 안에서 찾는다. '확인' 글자를 입력해야 하는 위험 작업은 입력 칸에 `확인`을 넣는다.
+- 캡처는 `e2e/` 폴더에(커밋하지 않음 — `.gitignore`에 `e2e/`를 넣을 것). 캡처를 Claude가 직접 열어 보고 겹침·잘림·빈 화면을 판단한다.
+- 콘솔 오류도 모은다: `page.on("console", ...)`, `page.on("pageerror", ...)`. 오류가 하나라도 나오면 적는다.
+
+### 4-3. 따라갈 흐름(체크리스트)
+
+각 줄마다: 버튼이 보이는지 → 누르면 기대대로 바뀌는지 → 캡처 → 콘솔 오류 없음.
+
+1. **현황판**: 일정 줄, 카드, 세특 학기 보기(2학기 과목이 있으면 처음 2학기), 카드 누르면 표 바뀜, 표에서 학생 누르면 그 기록으로.
+2. **명렬 / 담당 관리**: 담당 추가·수정 창 열고 닫기, 학생 표(헤더·내용 가운데 정렬), 클립보드에서 추가 창 열기(붙여넣기는 API로 대체 가능).
+3. **자료 Inbox**: 더미 묶음 열기 → 학생 짝 확인 → 정제(가짜 AI) → 보내기 → '이미 보낸 행' 펼침(보낸 내용 칸이 표 끝까지 넓음).
+4. **태그별 기록**: 태그 고르기, 필터(항목·상태·검색), [필터된 N건 태그 바꾸기], 기록 칸 고치기·저장·되돌리기, [AI 변환](확인 창의 '기록 제목을 넣어 시작' 체크), 결과 묶음 [✔ 이걸로 확정]·[🗑 삭제], 태그 AI 변환 ① 시험 → 확정 → ② 나머지.
+5. **항목별 기록**(담임 진로, 세특 공통수학1·2):
+   - 학생 넘기기(Alt+↓), 기록 추가·수정·삭제, [AI 변환] → 결과 [✔ 이걸로 확정]·[고쳐서 확정]·[🗑 삭제]
+   - 확정 기록 → [이어 붙이기 → 최종안], [비중으로 분량 맞추기](☐ 기록 제목을 넣어 시작)
+   - 최종안 저장, [🔍 맞춤법 검사]는 **누르지 않는다**(바깥 사이트로 글이 감 — 사용자 허락 없이는 금지). 버튼이 보이고 크기가 옆 버튼과 같은지만 본다.
+   - 기재 유의어: 최종안에 'Zoom'·'유튜브' 같은 말을 넣고 칸을 벗어나면 형광펜·경고·보기/고치기 전환.
+   - [■ 마감] → 편집 잠김 → [마감 해제].
+   - 세특 1·2학기 합산 안내(2학기에서 남은 바이트).
+6. **프롬프트**: 목록, 📚 예시 탭(직접 만든 예시 이름 파란 글씨), 프롬프트 예시 칸 [📚 예시 목록에서 불러오기], 마법사 💬 Chat / 📋 Form 열고 닫기.
+7. **내보내기**: 공통수학1(여러 반) → 'xlsx 시트 [한 시트로 합치기 / 반별로 나누기]' 보임, 1·2학기 합쳐 보기, 클립보드 복사, xlsx 저장(파일 창 → API로 대체해 만든 파일을 openpyxl로 열어 시트 이름·행 수·노란색 확인).
+8. **설정**: 탭마다 열기. 🔠 글자 크기 150% → 항목별 기록·태그별 기록·내보내기 화면 다시 캡처(본문만 커지고 버튼·제목은 그대로, 넘치거나 겹치지 않는지). 🎁 설정 꾸러미 만들기(닉네임 → 파일 이름 `닉네임의 꾸러미_yymmdd.sgbset`) → 가져오기(API로 파일 경로를 넘겨 `share_open(path)`), 백업 [지금 백업] → [이 백업으로 복원] → [복원 되돌리기].
+9. **유의 사항**: 📋 유의 사항 탭이 먼저, 🛡️ 보안 / 개인정보 탭(빨강·노랑·초록 칸).
+10. **사용 안내**: 목차 12. 쓰기 도우미, 13. 설정 꾸러미가 있고, 🔍 기능 찾기에 '꾸러미'를 넣으면 그 장만 보임.
+
+### 4-4. 창 크기·화면 모양
+
+- 창 크기: `page.evaluate("pywebview")`로는 못 바꾸므로, 사용자가 창을 줄이거나 Windows 디스플레이 설정을 바꾸게 하고 캡처를 다시 찍는다.
+  - 1366×768(노트북), 좁은 가로 창(폭 1180 이하 → [📝 기록 / 📄 최종안] 탭), 세로 화면(세로 ≥ 가로 → 최종안 위·기록 아래).
+- 125% 배율: 설정 › 디스플레이 › 배율을 사용자가 바꾼 뒤 앱을 다시 켜 같은 캡처.
+
+---
+
+## 5. 단계 C·D — 배포 exe, 업데이트·복원 (사용자와 함께)
+
+### C. 배포 exe를 더미 자료로
+```powershell
+# 내려받기: https://github.com/kkchori511/sgb-juicer/releases/latest 의 SGB-Juicer.exe
+mkdir C:\sgb-test; cd C:\sgb-test        # 실제 쓰는 폴더와 따로
+$env:SGB_DATA_DIR = "C:\sgb-test\data"   # 실제 자료 폴더를 건드리지 않게
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
+.\SGB-Juicer.exe
+```
+- exe에는 가짜 AI가 없다. 처음 설정 마법사부터 손으로(또는 Playwright로) 하고, **AI 변환은 하지 않거나** 사용자가 무료 모델·더미 글로 해도 된다고 할 때만 한다.
+- 로딩 창(페이퍼로지 글꼴, 랜덤 문구 두 개, 보라 막대, 버전)이 보이는지.
+
+### D. 업데이트·복원(손으로, Claude는 순서 안내와 기록)
+1. 릴리스 페이지에서 **한 단계 이전 버전** exe(예: v0.33.2)를 받아 `C:\sgb-test`에 두고 더미 자료로 켠다(`SGB_DATA_DIR` 같게).
+2. 상단 새 버전 알림 → [지금 업데이트] → 백업 → 교체 안내. **새 버전은 저절로 켜지지 않는다** — 앱 종료 후 다시 실행.
+3. 다시 켠 뒤 버전 표시(상단 버튼)·자료가 그대로인지.
+4. 설정 › 💾 백업·자료: '업데이트전' 백업이 목록에 있는지 → [이 백업으로 복원](확인 입력) → 자료 되돌아옴 → [복원 되돌리기].
+5. 실패하면 화면 문구와 자료 폴더의 `업데이트_기록.txt`를 결과에 붙인다.
+
+---
+
+## 6. 결과 적는 곳
+
+`docs/review/windows_test_v034.md` (새로 만든다):
+
+```
+# Windows 시험 결과 (v0.34.0)
+- 환경: Windows 버전, 화면 해상도·배율, Python 버전, WebView2 버전
+## 요약: 통과 N / 문제 N / 확인 못 함 N
+## 문제 (심각한 순)
+### W1. 한 줄 제목
+- 화면·단계 / 재현 / 결과·기대 / 캡처 파일 / 콘솔 오류
+## 단계별 결과 (A~E, 4-3 체크리스트 번호마다 통과/문제/건너뜀)
+## 확인 못 한 것과 이유
+```
+- 캡처 파일(`e2e/`)은 커밋하지 않는다. 문제 캡처만 사용자에게 보여 준다.
+- 끝나면 `docs/HANDOFF.md`의 'v1.0까지 남은 것'에서 확인한 항목을 체크([x])하고 결과 파일 경로를 적는다.
+
+---
+
+## 7. 1.0 릴리스까지 (사용자가 '1.0 내자'고 할 때)
+
+1. 위 시험에서 나온 문제를 사용자와 하나씩 정해 고친다.
+2. '베타' 표시 지우기: `app/main.py`(창 제목 `(베타)`, 인트로 `v… 베타`), `app/web/index.html`(상단 `<span class="beta">`, 앱 정보 `(베타)`와 '1.0 미만으로 유지' 문장), `.github/workflows/build-windows.yml`(릴리스 제목 `(베타)`).
+3. 정식 지원 범위를 앱 정보·README에 적기: Windows exe(자동 업데이트), Mac은 소스 실행.
+4. 사용 안내·유의 사항을 마지막으로 한 번 훑기(사용자 지시: 1.0 전에 모든 기능·과정 확인 후 도움말 정리).
+5. `app/__init__.py`의 `VERSION = "1.0.0"`, README 변경 기록 → 커밋 → 사용자 확인 → 브랜치·태그 push → `gh release create v1.0.0 --notes-file …`. (`gh`가 없으면 `winget install GitHub.cli` 후 `gh auth login`은 사용자가 직접.)

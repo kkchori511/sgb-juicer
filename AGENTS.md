@@ -11,7 +11,7 @@
 ## 작업 넘겨주기 (2026-11-19 사용자 지정)
 
 - 다음 작업은 다른 컴퓨터(Windows 포함)에서 할 수 있다. **작업을 마칠 때마다(릴리스·큰 작업 묶음이 끝날 때) `docs/HANDOFF.md`를 고쳐** 지금 상태, 남은 확인, 이어서 할 일, 다른 컴퓨터로 넘어가지 않는 메모 요약을 적고, 커밋해 원격에 올려 둔다.
-- 새 세션을 시작하면 먼저 `git fetch`·`git pull` 후 `docs/HANDOFF.md`를 읽는다.
+- 새 세션을 시작하면 먼저 `git fetch`·`git pull` 후 `docs/HANDOFF.md`를 읽는다. Windows에서 1.0 전 시험을 할 때는 `docs/WINDOWS_TEST.md`부터 읽는다.
 
 ## 릴리스 전 확인
 

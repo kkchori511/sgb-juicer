@@ -10,3 +10,4 @@ dist/
 .DS_Store
 !tests/fixtures/*.sqlite
 .dorms-check/
+e2e/
