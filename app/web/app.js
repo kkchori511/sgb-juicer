@@ -8368,7 +8368,7 @@
     const [info0, basis] = await Promise.all([call('batch_info', s.group_id, s.item), isSub ? call('standards_get', s.group_id) : call('outline_get', s.group_id, s.item)]);
     if (!info0 || !basis) return;
     if (!(basis.text || '').trim()) {
-      const go = await modal(`${s.label}의 ${what}이(가) 아직 없습니다. 메뉴의 <b>[성취기준 / 활동 개요]</b>에서 먼저 넣어 주세요.`, true, true, `${what} 넣으러 가기`);
+      const go = await modal(`${escHtml(s.label)}의 ${what}이(가) 아직 없습니다. 메뉴의 <b>[성취기준 / 활동 개요]</b>에서 먼저 넣어 주세요.`, true, true, `${what} 넣으러 가기`);
       if (go) { SD.gid = s.group_id; SD.item = s.item; showPanel('standards'); }
       return;
     }
