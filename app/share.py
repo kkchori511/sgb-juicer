@@ -46,7 +46,7 @@ def _example_items():
             d = base.get(e["id"])
             if d and all(e[k] == d[k] for k in ("text", "subject", "area", "name", "item")):
                 continue
-        out.append({"key": e["id"], "name": e["label"], "builtin": e["builtin"],
+        out.append({"key": e["id"], "label": e["label"], "builtin": e["builtin"],
                     **{k: e[k] for k in ("item", "area", "subject", "name", "text", "source")}})
     return out
 
@@ -69,7 +69,7 @@ def _texts(sec, x):
     if sec == "prompts":
         return [x["name"], x["prompt"], x["example"]]
     if sec == "examples":
-        return [x["name"], x["text"]]
+        return [x["name"], x["subject"], x["text"]]
     if sec == "tags":
         return [x["name"]] + [s.get(k, "") for s in x["chain"]["steps"] for k in ("prompt", "example", "request")]
     return []
@@ -92,7 +92,7 @@ def catalog(d=None, names=()):
     """내보내기 화면용: 묶음별 담을 수 있는 것 + 개인 정보처럼 보이는 말."""
     out = {}
     for sec, items in (("prompts", _prompt_items()), ("examples", _example_items()), ("tags", _tag_items(d))):
-        out[sec] = [{"key": x["key"], "name": x["name"], "builtin": x.get("builtin", False),
+        out[sec] = [{"key": x["key"], "name": x.get("label") or x["name"], "builtin": x.get("builtin", False),
                      "warn": scan_personal(_texts(sec, x), names)} for x in items]
     v = vocab.load()
     out["vocab"] = {"available": not vocab.is_default(), "count": len(v["verbs"]) + len(v["evals"])}
@@ -168,6 +168,17 @@ def _clean_prompt(x):
             "prompt": str(x.get("prompt") or "")[:20000], "example": str(x.get("example") or "")[:20000], "made": str(x.get("made") or "")[:10]}
 
 
+def _tag_name(v):
+    """태그 이름: 공백만 정리(자르지 않음 — 미리보기와 넣기가 같은 이름을 보게, B3)."""
+    return " ".join(str(v or "").split())[:100]
+
+
+def _ex_label(x):
+    """예시 목록에 보이는 이름(이름이 비면 '[과목] 첫 구절') — 겹침 판단도 이 이름으로(B8)."""
+    name = " ".join(str(x.get("name") or "").split())[:80]
+    return name or examples.auto_name({"subject": " ".join(str(x.get("subject") or "").split())[:40], "text": x.get("text")})
+
+
 def preview(pkg, d=None):
     """가져오기 화면용: 꾸러미 안 항목과 겹침(같은 이름·같은 기본 항목이 이미 있는지)."""
     it = pkg["items"]
@@ -180,8 +191,8 @@ def preview(pkg, d=None):
     if isinstance(it.get("examples"), list):
         mine = examples.load()
         ids, labels = {e["id"] for e in mine}, {e["label"] for e in mine}
-        out["examples"] = [{"i": i, "name": str(x.get("name") or "")[:80] or examples.first_phrase(x.get("text")), "builtin": bool(x.get("builtin")),
-                            "exists": (bool(x.get("builtin")) and str(x.get("key")) in ids) or str(x.get("name") or "") in labels}
+        out["examples"] = [{"i": i, "name": _ex_label(x), "builtin": bool(x.get("builtin")),
+                            "exists": (bool(x.get("builtin")) and str(x.get("key")) in ids) or _ex_label(x) in labels}
                            for i, x in enumerate(y for y in it["examples"] if isinstance(y, dict))]
     if isinstance(it.get("tags"), list):
         have = {}
@@ -191,8 +202,8 @@ def preview(pkg, d=None):
             for t in d.q("SELECT id, name FROM tags"):
                 w = tw.work_for_tag(t["id"], create=False)
                 have[t["name"]] = bool(w and w["confirmed"])
-        out["tags"] = [{"i": i, "name": str(x.get("name") or "")[:40], "exists": str(x.get("name") or "") in have,
-                        "has_conf": have.get(str(x.get("name") or ""), False)}
+        out["tags"] = [{"i": i, "name": _tag_name(x.get("name")), "exists": _tag_name(x.get("name")) in have,
+                        "has_conf": have.get(_tag_name(x.get("name")), False)}
                        for i, x in enumerate(y for y in it["tags"] if isinstance(y, dict))]
         out["tags_need_year"] = d is None
     if isinstance(it.get("vocab"), dict):
@@ -204,13 +215,15 @@ def preview(pkg, d=None):
     return out
 
 
-def _new_name(name, taken, suffix=" (가져옴)"):
-    n = (name + suffix)[:60]
-    k = 2
-    while n in taken:
-        n = f"{name}{suffix[:-1]} {k})"[:60]
+def _new_name(name, taken, limit=60):
+    """겹치지 않는 이름: 붙일 말 자리를 먼저 비우고 원래 이름을 자른다(60자 이름도 끝나게, B2)."""
+    k = 1
+    while True:
+        suf = " (가져옴)" if k == 1 else f" (가져옴 {k})"
+        n = name[: max(1, limit - len(suf))] + suf
+        if n not in taken:
+            return n
         k += 1
-    return n
 
 
 def backup_config(data_dir):
@@ -218,11 +231,36 @@ def backup_config(data_dir):
     src = config.config_path()
     if not src.exists():
         return ""
-    name = f"설정_가져오기전_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     dst = data_dir / "backups"
     dst.mkdir(parents=True, exist_ok=True)
+    base = f"설정_가져오기전_{dt.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+    name, k = f"{base}.json", 2
+    while (dst / name).exists():  # 같은 때 두 번 가져와도 앞 백업을 덮지 않게(B5)
+        name, k = f"{base}_{k}.json", k + 1
     shutil.copy2(src, dst / name)
     return name
+
+
+def validate(pkg, choice):
+    """넣기 전에 고른 항목을 모두 검사한다 — 뒤에서 실패해 앞 항목만 들어가는 일이 없게(B4). 문제가 있으면 DbError."""
+    from .tagwork import norm_chain
+    it, ch = pkg["items"], choice or {}
+    pick = lambda sec, i: str((ch.get(sec) or {}).get(str(i)) or "skip")
+    for i, x in enumerate(y for y in (it.get("tags") or []) if isinstance(y, dict)):
+        if pick("tags", i) != "skip":
+            if not _tag_name(x.get("name")):
+                raise DbError("이름 없는 태그 프롬프트가 있습니다. 그 항목은 건너뛰기로 고르세요.")
+            norm_chain(x.get("chain"))
+    if str(ch.get("banned") or "skip") != "skip":
+        if not isinstance(it.get("banned"), list):
+            raise DbError("꾸러미의 기재 유의어 모양이 올바르지 않습니다.")
+        banned.normalize(it["banned"])
+    if str(ch.get("trait_dict") or "skip") != "skip":
+        t = trait_dict.normalize(it.get("trait_dict"))
+        if ch.get("trait_dict") == "replace" and not t["types"]:
+            raise DbError("꾸러미의 행특 설계 사전에 성격유형이 없어 통째로 바꿀 수 없습니다. 합치기나 건너뛰기를 고르세요.")
+    if str(ch.get("vocab") or "skip") != "skip":
+        vocab.normalize({"verbs": (it.get("vocab") or {}).get("verbs"), "evals": (it.get("vocab") or {}).get("evals")})
 
 
 def apply(pkg, choice, d=None):
@@ -267,13 +305,14 @@ def apply(pkg, choice, d=None):
             e = {k: x.get(k) for k in ("item", "area", "subject", "name", "text", "source")}
             tgt = None
             if how == "overwrite":
-                tgt = next((m for m in mine if (x.get("builtin") and m["id"] == str(x.get("key"))) or (x.get("name") and m["label"] == x.get("name"))), None)
+                tgt = next((m for m in mine if x.get("builtin") and m["id"] == str(x.get("key"))), None) \
+                    or next((m for m in mine if m["label"] == _ex_label(x)), None)
             if tgt:
                 examples.save({**e, "id": tgt["id"]})
             else:
                 labels = {m["label"] for m in mine}
-                if e.get("name") and e["name"] in labels:
-                    e["name"] = _new_name(e["name"], labels)
+                if _ex_label(x) in labels:  # 겹치면 이름을 붙여 구분(이름 없던 예시는 보이는 이름으로)
+                    e["name"] = _new_name(_ex_label(x), labels, 80)
                 examples.save({**e, "id": ""})
             n += 1
         if n:
@@ -291,10 +330,18 @@ def apply(pkg, choice, d=None):
     how = str(ch.get("banned") or "skip")
     if isinstance(it.get("banned"), list) and how in ("merge", "replace"):
         inc = banned.normalize(it["banned"])
-        if how == "merge":
+        if how == "merge":  # 겹치는 항목은 내 대체 표현을 두고 새 표기·제외할 말만 더한다(B6)
             cur = banned.load()
-            have = {t for e in cur for t in e["terms"]}
-            inc = cur + [e for e in inc if not (set(e["terms"]) & have)]
+            for e in inc:
+                same = next((c for c in cur if set(c["terms"]) & set(e["terms"])), None)
+                if same:
+                    same["terms"] += [t for t in e["terms"] if t not in same["terms"]]
+                    same["except"] += [t for t in e["except"] if t not in same["except"]]
+                    if not same["repl"]:
+                        same["repl"] = e["repl"]
+                else:
+                    cur.append(e)
+            inc = cur
         banned.save(inc)
         done["banned"] = how
     # 행특 설계 사전
@@ -303,11 +350,21 @@ def apply(pkg, choice, d=None):
         inc = trait_dict.normalize(it["trait_dict"])
         if how == "merge":
             cur = copy.deepcopy(trait_dict.load())
-            tn = {t["name"] for t in cur["types"]}
-            cur["types"] += [t for t in inc["types"] if t["name"] not in tn]
-            for a in trait_dict.AREAS:
-                kws = {e["kw"] for e in cur["areas"][a]}
-                cur["areas"][a] += [e for e in inc["areas"][a] if e["kw"] not in kws]
+            for t in inc["types"]:  # 같은 성격유형은 설명 문장을 합친다(B6)
+                same = next((c for c in cur["types"] if c["name"] == t["name"]), None)
+                if same:
+                    same["descs"] += [x for x in t["descs"] if x not in same["descs"]]
+                else:
+                    cur["types"].append(t)
+            for a in trait_dict.AREAS:  # 같은 키워드는 내 설명을 두고 추천 성격유형을 합친다
+                for e in inc["areas"][a]:
+                    same = next((c for c in cur["areas"][a] if c["kw"] == e["kw"]), None)
+                    if same:
+                        same["types"] += [x for x in e["types"] if x not in same["types"]]
+                        if not same["desc"]:
+                            same["desc"] = e["desc"]
+                    else:
+                        cur["areas"][a].append(e)
             inc = cur
         trait_dict.save(inc)
         done["trait_dict"] = how
@@ -318,7 +375,7 @@ def apply(pkg, choice, d=None):
         rec, tw, n = Records(d), TagWork(d), 0
         for i, x in enumerate(y for y in it["tags"] if isinstance(y, dict)):
             how = pick("tags", i)
-            name = " ".join(str(x.get("name") or "").split())[:40]
+            name = _tag_name(x.get("name"))
             if how == "skip" or not name:
                 continue
             row = d.q("SELECT id FROM tags WHERE name=?", (name,))

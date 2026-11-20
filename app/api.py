@@ -1430,8 +1430,14 @@ class Api:
         if not any(v and v != "skip" for v in (choice or {}).values() if isinstance(v, str)) and not any(
                 x != "skip" for v in (choice or {}).values() if isinstance(v, dict) for x in v.values()):
             raise db.DbError("가져올 항목을 하나 이상 고르세요.")
+        share.validate(pkg, choice)  # 넣기 전에 모두 검사(뒤에서 실패해 앞만 들어가지 않게)
         saved = share.backup_config(data_dir())
-        done = share.apply(pkg, choice, self._share_year(write=True))
+        try:
+            done = share.apply(pkg, choice, self._share_year(write=True))
+        except Exception:
+            if saved:  # 그래도 도중에 실패하면 설정 파일을 가져오기 전으로 되돌린다
+                shutil.copy2(data_dir() / "backups" / saved, config.config_path())
+            raise
         self._share_pkg = None
         return {"done": done, "backup": saved}
 

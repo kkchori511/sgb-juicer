@@ -39,6 +39,7 @@ def test_all():
     keys = {x["name"]: x for x in cat["prompts"]}
     assert "내 세특 지침" in keys and keys["내 세특 지침"]["warn"] == ["김하나"]  # 명렬 이름 점검
     assert not any(x["builtin"] for x in cat["prompts"])  # 고치지 않은 기본 프롬프트는 없음
+    assert [x["name"] for x in cat["examples"]] == ["[수학] 방정식을 다시 세움."]  # 이름 없는 예시도 목록 이름이 보임
     assert [x["name"] for x in cat["tags"]] == ["독서"] and cat["vocab"]["available"] and not cat["banned"]["available"]
 
     pkg = share.build({"prompts": [keys["깔끔 지침"]["key"]], "examples": [ex["id"]], "tags": ["독서"], "vocab": True}, d)
@@ -77,6 +78,66 @@ def test_all():
     assert not api.share_import({"prompts": {"0": "skip"}, "vocab": "skip"})["ok"]
 
 
+
+def test_codex_v033_fixes():
+    """Codex 점검(v0.33.0) B1~B8 재발 막기."""
+    import threading
+    import time as _t
+    from app import banned, prompts, trait_dict
+    from app.paths import data_dir
+    api = Api()
+    d = api._db()
+    # B1 같은 때 저장해도 ID가 겹치지 않고 하나만 지워짐
+    real = _t.time
+    _t.time = lambda: 1795158612.123
+    try:
+        a = examples.save({"item": "subject", "subject": "수학", "text": "같은 때 1."})
+        b = examples.save({"item": "subject", "subject": "수학", "text": "같은 때 2."})
+    finally:
+        _t.time = real
+    n0 = len(examples.load())
+    examples.delete(b["id"])
+    assert a["id"] != b["id"] and len(examples.load()) == n0 - 1
+    # B2 60자 이름도 끝나고 60자를 넘지 않음
+    done = []
+    th = threading.Thread(target=lambda: done.append(share._new_name("가" * 60, {"가" * 60, "가" * 54 + " (가져옴)"})), daemon=True)
+    th.start()
+    th.join(2)
+    assert done and len(done[0]) == 60 and done[0] not in {"가" * 60, "가" * 54 + " (가져옴)"}
+    # B3 긴 태그 이름이 잘려 다른 태그를 덮지 않음
+    long = "나" * 40
+    ok(api.add_tag(long))
+    pkg = {"format": "sgb-settings", "format_version": 1, "items": {"tags": [{"name": long + "다", "chain": {"src": "original", "steps": [{"prompt": "다른 지침"}]}}]}}
+    assert share.preview(pkg, d)["tags"][0]["exists"] is False
+    share.apply(pkg, {"tags": {"0": "overwrite"}}, d)
+    assert d.q("SELECT 1 FROM tags WHERE name=?", (long + "다",)) and d.q("SELECT 1 FROM tags WHERE name=?", (long,))
+    # B4 뒤 항목이 잘못되면 아무것도 넣지 않음
+    p = os.path.join(DATA, "b4.sgbset")
+    json.dump({"format": "sgb-settings", "format_version": 1, "items": {"prompts": [{"key": "x", "name": "넣으면안됨", "prompt": "p"}],
+                                                                       "trait_dict": {"types": [], "areas": {}}}}, open(p, "w", encoding="utf-8"))
+    ok(api.share_open(p))
+    assert not api.share_import({"prompts": {"0": "new"}, "trait_dict": "replace"})["ok"]
+    assert not any(x["name"] == "넣으면안됨" for x in prompts.build_library(config.load().get("prompt_lib"), None)[0])
+    # B5 같은 때 두 번 백업해도 덮지 않음
+    assert share.backup_config(data_dir()) != share.backup_config(data_dir())
+    # B6 합치기: 겹치는 항목 안의 새 표기·새 설명도 들어옴
+    banned.save([{"terms": ["원래말"], "repl": "대체", "except": []}])
+    share.apply({"format": "sgb-settings", "items": {"banned": [{"terms": ["원래말", "추가표기"], "repl": "다른", "except": []}]}}, {"banned": "merge"})
+    assert banned.load() == [{"terms": ["원래말", "추가표기"], "repl": "대체", "except": []}]
+    t0 = trait_dict.load()["types"][0]["name"]
+    share.apply({"format": "sgb-settings", "items": {"trait_dict": {"types": [{"name": t0, "descs": ["새 설명"]}], "areas": {}}}}, {"trait_dict": "merge"})
+    assert "새 설명" in trait_dict.load()["types"][0]["descs"]
+    # B8 이름 없는 예시: 보이는 이름으로 겹침을 알고, 덮어쓰기는 늘지 않음
+    examples.save({"item": "subject", "subject": "과학", "text": "실험 결과를 정리함."})
+    key = next(x["key"] for x in share.catalog()["examples"] if x["name"] == "[과학] 실험 결과를 정리함.")
+    pkg = share.build({"examples": [key]})
+    assert share.preview(pkg)["examples"][0]["exists"]
+    n0 = len(examples.load())
+    share.apply(pkg, {"examples": {"0": "overwrite"}})
+    assert len(examples.load()) == n0
+
+
 if __name__ == "__main__":
     test_all()
-    print("SHARE OK")
+    test_codex_v033_fixes()
+    print("SHARE FIXES OK")

@@ -5,7 +5,7 @@
 - 이름은 '[과목] 첫 구절'(이름을 비우면 자동).
 """
 import copy
-import time
+import uuid
 
 from . import config, examples_default
 from .db import DbError
@@ -50,15 +50,20 @@ def load():
     lib = config.load().get("example_lib")
     if not isinstance(lib, list):
         lib = _defaults()
-    out = []
+    out, seen, fixed = [], set(), False
     for e in lib:
         try:
             x = _norm(e)
         except DbError:
             continue
         if x["id"]:
+            if x["id"] in seen:  # 예전에 겹쳐 저장된 ID는 새 ID로 바꿔 둔다(한 개만 지워지게)
+                x["id"], fixed = f"my_{uuid.uuid4().hex[:12]}", True
+            seen.add(x["id"])
             x["label"] = x["name"] or auto_name(x)
             out.append(x)
+    if fixed:
+        _store(out)
     return out
 
 
@@ -81,7 +86,7 @@ def save(e):
         x["builtin"] = lib[old]["builtin"]
         lib[old] = x
     else:
-        x["id"] = f"my_{int(time.time() * 1000)}"
+        x["id"] = f"my_{uuid.uuid4().hex[:12]}"  # 시각만 쓰면 빠르게 여러 개 저장할 때 겹친다(B1)
         x["builtin"] = False
         lib.append(x)
     _store(lib)

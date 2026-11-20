@@ -1645,8 +1645,11 @@
       const go = el('button', { type: 'button', class: 'primary', text: '가져오기', onclick: async () => {
         const choice = {};
         Object.entries(pick).forEach(([sec, v]) => { choice[sec] = v instanceof HTMLElement ? v.value : Object.fromEntries(Object.entries(v).map(([i, s1]) => [i, s1.value])); });
+        go.disabled = true; // 두 번 눌러 두 번 들어가지 않게
         const out = await call('share_import', choice);
+        go.disabled = false;
         if (!out) return;
+        if (out.done.banned) await banLoad(); // 형광펜·경고가 새 유의어 목록을 쓰게
         closeSheet();
         const d = out.done;
         const said = SHARE_SEC.filter(([k]) => d[k]).map(([k, t]) => `${t} ${typeof d[k] === 'number' ? `${d[k]}개` : d[k] === 'merge' ? '합침' : '바꿈'}`);
@@ -3689,7 +3692,8 @@
       ta.style.height = `${Math.max(170, Math.ceil(ta.scrollHeight + edge + line))}px`;
     };
     ta.addEventListener('input', fit);
-    window.addEventListener('sgb-fs', () => requestAnimationFrame(fit));
+    const onFs = () => { if (!ta.isConnected) { window.removeEventListener('sgb-fs', onFs); return; } requestAnimationFrame(fit); }; // 다시 그려 사라진 칸은 떼어 냄
+    window.addEventListener('sgb-fs', onFs);
     const proto = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
     Object.defineProperty(ta, 'value', { configurable: true, get() { return proto.get.call(this); }, set(v) { proto.set.call(this, v); fit(); } });
     let w = 0;

@@ -2108,3 +2108,7 @@ textarea.cell-edit { font-size: calc(13px * var(--bs)); }
 .card-head .small-note { margin: 0; align-self: center; }
 .share-nick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 4px; }
 .share-nick input { width: 220px; }
+/* 글자 크기 배율을 받는 본문 더(확정 기록 본문, 태그 시험 지침 칸, 내보내기 본문) */
+.conf-text { font-size: calc(14px * var(--bs)); }
+.tw-prompt { font-size: calc(13px * var(--bs)); }
+.exp-text { font-size: calc(13.5px * var(--bs)); }
