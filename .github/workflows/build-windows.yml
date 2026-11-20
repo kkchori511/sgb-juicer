@@ -27,44 +27,11 @@ jobs:
         run: python -m pip install -r requirements.txt pyinstaller
 
       - name: Backend tests
-        run: |
-          python tests/test_backend.py
-          python tests/test_records.py
-          python tests/test_inbox.py
-          python tests/test_scan.py
-          python tests/test_standards.py
-          python tests/test_move_batch.py
-          python tests/test_review_fixes.py
-          python tests/test_recheck_fixes.py
-          python tests/test_roster_input.py
-          python tests/test_existing_import.py
-          python tests/test_pair_subject.py
-          python tests/test_stdformat.py
-          python tests/test_tag_view.py
-          python tests/test_basis_gen.py
-          python tests/test_close_bulk.py
-          python tests/test_fill_tidy.py
-          python tests/test_update_download.py
-          python tests/test_ai_cancel.py
-          python tests/test_config_safe.py
-          python tests/test_migrate_v12.py
-          python tests/test_tagwork.py
-          python tests/test_tagwork_edges.py
-          python tests/test_tag_fields.py
-          python tests/test_prompt_wizard_ai.py
-          python tests/test_tag_src.py
-          python tests/test_tag_skill.py
-          python tests/test_inbox_shared.py
-          python tests/test_inbox_rounds.py
-          python tests/test_confirm_join.py
-          python tests/test_xlsx_backup.py
-          python tests/test_rec_bulk.py
-          python tests/test_trait.py
-          python tests/test_migrate_v13.py
-          python tests/test_migrate_v14.py
-          python tests/test_inbox_columns.py
-          python tests/test_adopt_confirm.py
-          python tests/test_migrate_v16.py
+        # 시험 파일을 모두(tests/test_*.py 자동 수집) 따로 실행하고, 하나라도 실패하면 빌드를 멈춘다(v0.34).
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: '1'
+        run: python tests/run_all.py
 
       - name: Version info
         shell: pwsh

@@ -137,7 +137,45 @@ def test_codex_v033_fixes():
     assert len(examples.load()) == n0
 
 
+
+def test_tag_import_atomic():
+    """v0.34(Codex 1.0 평가): 태그 프롬프트를 넣다 도중에 실패하면 태그·확정 설정·설정 파일이 모두 그대로."""
+    from app import prompts
+    from app.tagwork import TagWork
+    api = Api()
+    d = api._db()
+    ok(api.add_tag("처음 태그"))
+    tid = d.q("SELECT id FROM tags WHERE name='처음 태그'")[0]["id"]
+    w = TagWork(d).work_for_tag(tid)
+    with d.tx() as c:
+        c.execute("UPDATE tag_works SET confirmed=? WHERE id=?", (json.dumps({"chain": {"src": "original", "steps": [{"prompt": "원래 확정 지침"}]}}), w["id"]))
+    n_tags = d.q("SELECT COUNT(*) n FROM tags")[0]["n"]
+    p = os.path.join(DATA, "atomic.sgbset")
+    json.dump({"format": "sgb-settings", "format_version": 1, "items": {
+        "prompts": [{"key": "z", "name": "되돌려질 프롬프트", "prompt": "p"}],
+        "tags": [{"name": "처음 태그", "chain": {"src": "original", "steps": [{"prompt": "자료만 사용"}]}},
+                 {"name": "둘째 태그", "chain": {"src": "original", "steps": [{"prompt": "둘째"}]}}]}}, open(p, "w", encoding="utf-8"), ensure_ascii=False)
+    ok(api.share_open(p))
+    real, calls = share.json.dumps, []
+
+    def boom(obj, **kw):  # 두 번째 태그 설정을 쓰는 순간 실패
+        if isinstance(obj, dict) and (obj.get("edit") or {}).get("by") == "가져오기":
+            calls.append(1)
+            if len(calls) == 2:
+                raise OSError("디스크 쓰기 실패(시험)")
+        return real(obj, **kw)
+    share.json.dumps = boom
+    try:
+        assert not api.share_import({"prompts": {"0": "new"}, "tags": {"0": "overwrite", "1": "overwrite"}})["ok"]
+    finally:
+        share.json.dumps = real
+    assert TagWork(d).work_for_tag(tid)["confirmed"]["chain"]["steps"][0]["prompt"] == "원래 확정 지침"
+    assert d.q("SELECT COUNT(*) n FROM tags")[0]["n"] == n_tags  # 둘째 태그도 생기지 않음
+    assert not any(x["name"] == "되돌려질 프롬프트" for x in prompts.build_library(config.load().get("prompt_lib"), None)[0])
+
+
 if __name__ == "__main__":
     test_all()
     test_codex_v033_fixes()
+    test_tag_import_atomic()
     print("SHARE FIXES OK")

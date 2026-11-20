@@ -168,6 +168,13 @@ def _clean_prompt(x):
             "prompt": str(x.get("prompt") or "")[:20000], "example": str(x.get("example") or "")[:20000], "made": str(x.get("made") or "")[:10]}
 
 
+def _j_conf(v):
+    try:
+        return json.loads(v) if v else None
+    except ValueError:
+        return None
+
+
 def _tag_name(v):
     """태그 이름: 공백만 정리(자르지 않음 — 미리보기와 넣기가 같은 이름을 보게, B3)."""
     return " ".join(str(v or "").split())[:100]
@@ -368,27 +375,34 @@ def apply(pkg, choice, d=None):
             inc = cur
         trait_dict.save(inc)
         done["trait_dict"] = how
-    # 태그 프롬프트(지금 학년도)
+    # 태그 프롬프트(지금 학년도): 한 트랜잭션으로 — 하나라도 실패하면 태그·확정 설정이 모두 그대로(v0.34, Codex 1.0 평가)
     if isinstance(it.get("tags"), list) and d is not None:
-        from .records import Records
-        from .tagwork import TagWork, norm_chain
-        rec, tw, n = Records(d), TagWork(d), 0
+        from .tagwork import norm_chain
+        todo = []
         for i, x in enumerate(y for y in it["tags"] if isinstance(y, dict)):
             how = pick("tags", i)
             name = _tag_name(x.get("name"))
-            if how == "skip" or not name:
-                continue
-            row = d.q("SELECT id FROM tags WHERE name=?", (name,))
-            tid = row[0]["id"] if row else rec.add_tag(name)
-            w = tw.work_for_tag(tid)
-            if w["confirmed"] and how != "overwrite":
-                continue
-            conf = {"cand_id": None, "record_id": None, "chain": norm_chain(x.get("chain")), "ver_no": None,
-                    "edit": {"by": "가져오기", "at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}}
+            if how != "skip" and name:
+                todo.append((name, how, norm_chain(x.get("chain"))))
+        n = 0
+        if todo:
+            at = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             with d.tx() as c:
-                c.execute("UPDATE tag_works SET confirmed=?, updated_at=datetime('now','localtime') WHERE id=?",
-                          (json.dumps(conf, ensure_ascii=False), w["id"]))
-            n += 1
+                for name, how, chain in todo:
+                    row = c.execute("SELECT id FROM tags WHERE name=?", (name,)).fetchone()
+                    tid = row[0] if row else c.execute("INSERT INTO tags(name) VALUES(?)", (name,)).lastrowid
+                    w = c.execute("SELECT id, confirmed FROM tag_works WHERE tag_id=? ORDER BY id DESC LIMIT 1", (tid,)).fetchone()
+                    if w is None:
+                        wid = c.execute("INSERT INTO tag_works(tag_id, tag_name) VALUES(?,?)", (tid, name)).lastrowid
+                        had = False
+                    else:
+                        wid, had = w[0], bool(_j_conf(w[1]))
+                    if had and how != "overwrite":
+                        continue
+                    conf = {"cand_id": None, "record_id": None, "chain": chain, "ver_no": None, "edit": {"by": "가져오기", "at": at}}
+                    c.execute("UPDATE tag_works SET confirmed=?, tag_name=?, updated_at=datetime('now','localtime') WHERE id=?",
+                              (json.dumps(conf, ensure_ascii=False), name, wid))
+                    n += 1
         if n:
             done["tags"] = n
     return done

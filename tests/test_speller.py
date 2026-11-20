@@ -4,6 +4,7 @@ import re
 import sys
 import tempfile
 import urllib.parse
+import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -18,18 +19,18 @@ def test_all():
     a = Api()
     r = a.open_speller("안녕하세여 반갑습니다")
     assert r["ok"] and not r["cut"]
-    page = Path(urllib.parse.urlparse(OPENED[-1]).path)
+    page = Path(urllib.request.url2pathname(urllib.parse.urlparse(OPENED[-1]).path))
     h = page.read_text(encoding="utf-8")
     assert "method='post' action='https://nara-speller.co.kr/old_speller/results'" in h
     assert re.search(r"<textarea name='text1' hidden>(.*?)</textarea>", h).group(1) == "안녕하세여 반갑습니다"
     a.open_speller("<b>&태그</b>")
-    page = Path(urllib.parse.urlparse(OPENED[-1]).path)
+    page = Path(urllib.request.url2pathname(urllib.parse.urlparse(OPENED[-1]).path))
     assert "&lt;b&gt;&amp;태그&lt;/b&gt;" in page.read_text(encoding="utf-8")  # 글 속 기호는 이스케이프
     r = a.open_speller("가" * 3500)
     assert r["cut"] and r["chars"] == 3000
     assert not page.exists()  # 새로 열 때 지난번 페이지는 지움
     assert not a.open_speller("  ")["ok"]
-    Path(urllib.parse.urlparse(OPENED[-1]).path).unlink()
+    Path(urllib.request.url2pathname(urllib.parse.urlparse(OPENED[-1]).path)).unlink()
 
 
 if __name__ == "__main__":
