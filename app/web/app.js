@@ -165,6 +165,16 @@
   function banMark(node, text) { const hits = banFind(text); if (hits.length) node.replaceChildren(...banNodes(text, hits)); }
   const banSummary = (hits) => [...new Map(hits.map((h) => [h.word, `${h.word} → ${h.repl || '일반적인 말로'}`])).values()];
   // 입력 칸(최종안·태그별 기록): 칸을 벗어나 있으면 형광펜이 든 '보기'를 보여 주고, 누르면 입력 칸으로(고치는 동안은 표시 없음). 아래에 경고 줄
+  // 맞춤법 검사(바른한글): 기본 브라우저로 검사기를 열고 원문 칸에 글을 채운다. [검사하기]는 교사가 누른다
+  const SPELL_TIP = '기본 브라우저로 바른한글(부산대 맞춤법 검사기)을 열고 원문 칸에 이 글을 채웁니다. [검사하기]는 직접 누르세요. 글은 검사기 사이트로 가고 브라우저 방문 기록에 남습니다(글 속 이름도 함께 감).';
+  function spellBtn(getText) {
+    return el('button', { type: 'button', class: 'small spell-btn', title: SPELL_TIP, text: '맞춤법 검사', onclick: async () => {
+      const t = String(getText() || '').trim();
+      if (!t) { toast('검사할 글이 없습니다.'); return; }
+      const r = await call('open_speller', t);
+      if (r) toast(r.cut ? `글이 길어 앞 ${r.chars}자만 검사기에 넣었습니다. 브라우저에서 [검사하기]를 누르세요.` : '브라우저에서 검사기가 열립니다. 글이 채워져 있으니 [검사하기]를 누르세요.', 5000);
+    } });
+  }
   function banWrap(ta) {
     const view = el('div', { class: 'ban-view', hidden: true, title: '눌러서 고치기' });
     const warn = el('div', { class: 'ban-warn', hidden: true });
@@ -3933,7 +3943,7 @@
     // [옵션 ▾]: 최종안 다듬기(AI) · 🪄 마법사
     const conf = v.records.filter((r) => r.confirmed);
     const optMenu = el('details', { class: 'opt-menu' }, [el('summary', { text: '옵션 ▾' }), el('div', { class: 'opt-list' }, [polishBtn, polishWiz])]);
-    fb.append(banWrap(ta), el('div', { class: 'final-actions' }, [bc, saveState, el('span', { class: 'spacer' }), saveBtn, optMenu, closeBtn]));
+    fb.append(banWrap(ta), el('div', { class: 'final-actions' }, [bc, saveState, el('span', { class: 'spacer' }), spellBtn(() => ta.value), saveBtn, optMenu, closeBtn]));
     if (closed) fb.appendChild(el('div', { class: 'hint', text: `■ ${f.closed_at || ''} 마감 — 기록·AI·최종안 편집이 잠겼습니다. 조회·복사·내보내기는 됩니다.` }));
     finSec.appendChild(fb);
 
@@ -5175,7 +5185,7 @@
       can && r.kind !== 'existing' ? el('button', { type: 'button', class: 'link', text: '날짜·활동명 수정', 'aria-label': `${who} 날짜·활동명 수정`, onclick: () => { metaEdit.hidden = !metaEdit.hidden; if (!metaEdit.hidden) ti.focus(); } }) : null,
       lock ? el('span', { class: `tv-lock ${lock.cls}`, text: lock.text }) : null, el('span', { class: 'spacer' }), badges, bytes]),
     metaEdit, el('div', { class: 'rcard-label' + (r.confirmed ? ' conf' : '') , text: r.confirmed ? '✔ 확정본' : r.orig !== r.content ? '↩ 이전 반영본(확정 전) — 원문은 아래 결과에' : (r.kind === 'existing' ? '기존 완성문' : '원문') }), banWrap(ta),
-    el('div', { class: 'tv-rec-foot' }, [chips, el('span', { class: 'spacer' }), state,
+    el('div', { class: 'tv-rec-foot' }, [chips, el('span', { class: 'spacer' }), state, spellBtn(() => ta.value),
       can && !r.confirmed && String(r.orig || '').trim() ? (() => { const b = el('button', { type: 'button', class: 'ai-btn small', title: '원문을 AI로 변환해 아래 결과 묶음 맨 위에 더합니다(확정은 따로). 확인 창에서 프롬프트 마법사로 대화할 수도 있습니다', text: 'AI 변환' }); b.addEventListener('click', () => tvAiRecord(r, b)); return b; })() : null]),
     tvBundle(r, can));
     if (r.confirmed) card.classList.add('confirmed');

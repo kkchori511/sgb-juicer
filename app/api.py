@@ -309,6 +309,39 @@ class Api:
             webbrowser.open(url)
         return {"ok": True}
 
+    SPELLER_URL = "https://nara-speller.co.kr/speller/"
+    SPELLER_MAX = 3000  # 글자. 검사기 한 번에 넣기 좋은 길이(넘으면 앞부분만)
+
+    @safe
+    def open_speller(self, text):
+        """맞춤법 검사(바른한글, 부산대·나라인포테크): 기본 브라우저로 검사기를 열고 원문 칸에 글을 채워 둔다.
+        [검사하기]는 교사가 누른다(앱이 대신 보내지 않음). 글이 길면 주소가 길어 Windows에서 바로 열 때 잘릴 수 있어,
+        잠깐 쓰는 로컬 페이지로 열어 그 페이지가 검사기 주소로 넘긴다(페이지는 곧 지움)."""
+        import tempfile
+        import urllib.parse
+        t = str(text or "").strip()
+        if not t:
+            raise db.DbError("검사할 글이 없습니다.")
+        cut = len(t) > self.SPELLER_MAX
+        t = t[: self.SPELLER_MAX]
+        url = self.SPELLER_URL + "?" + urllib.parse.urlencode({"speller-text": t})
+        page = ("<!doctype html><meta charset='utf-8'><meta name='referrer' content='no-referrer'><title>맞춤법 검사기로 이동</title>"
+                f"<script>location.replace({json.dumps(url)});</script><p>맞춤법 검사기로 이동합니다…</p>")
+        fd, path = tempfile.mkstemp(prefix="sgb-speller-", suffix=".html")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(page)
+        webbrowser.open(Path(path).as_uri())
+        for old in Path(tempfile.gettempdir()).glob("sgb-speller-*.html"):  # 지난번에 못 지운 것(앱을 바로 닫은 경우)
+            if str(old) != path:
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+        tm = threading.Timer(60, lambda: os.path.exists(path) and os.remove(path))  # 브라우저가 읽은 뒤 지움(글이 남지 않게)
+        tm.daemon = True  # 앱을 닫을 때 기다리지 않게
+        tm.start()
+        return {"cut": cut, "chars": len(t)}
+
     @safe
     def read_clipboard(self):
         return {"text": _read_clipboard()}

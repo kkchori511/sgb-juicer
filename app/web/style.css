@@ -2092,3 +2092,6 @@ textarea.cell-edit { font-size: calc(13px * var(--bs)); }
   .rec-main > .rec-final, .rec-main > .rec-final.folded-all { order: -1; flex: 0 0 auto !important; min-height: 0 !important; overflow: visible; }
   .rec-main > .rec-records, .rec-main > .rec-records.folded { flex: 0 0 auto !important; min-height: 0 !important; overflow: visible; }
 }
+
+/* 맞춤법 검사 버튼: 바깥 사이트로 여는 보조 버튼(흰 바탕, 앞에 돋보기) */
+.spell-btn::before { content: '🔍'; margin-right: 4px; font-size: .95em; }
