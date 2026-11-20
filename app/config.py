@@ -13,6 +13,8 @@ CONFIG_NAME = "생기부착즙기_설정.json"
 KEY_FIELDS = ("openrouter_key", "clova_url", "clova_secret")
 FREE_MODEL = "google/gemma-4-31b-it:free"
 
+BODY_SCALE_MIN, BODY_SCALE_MAX = 80, 150
+
 DEFAULTS = {
     "openrouter_key": "",
     "clova_url": "",
@@ -42,6 +44,8 @@ DEFAULTS = {
     "prompt_pick": {},
     # 종합 비중 합계 100% 검사(기본 꺼짐)
     "weight_sum_check": False,
+    # 본문 글자 크기(%) — 기록·결과·입력 칸 글. 제목·버튼은 그대로(v0.31.2)
+    "body_scale": 100,
 }
 
 _lock = threading.Lock()
@@ -81,6 +85,10 @@ def _normalize(cfg: dict) -> dict:
             cfg[k] = None
     for k in ("privacy_block", "setup_done", "menu_collapsed", "weight_sum_check"):
         cfg[k] = bool(cfg.get(k))
+    try:
+        cfg["body_scale"] = min(BODY_SCALE_MAX, max(BODY_SCALE_MIN, int(round(float(cfg.get("body_scale") or 100) / 5) * 5)))
+    except (TypeError, ValueError):
+        cfg["body_scale"] = 100
     try:
         cfg["current_year"] = int(cfg.get("current_year") or 0)
     except (TypeError, ValueError):

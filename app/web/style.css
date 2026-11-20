@@ -2058,3 +2058,27 @@ mark.ban { background: #fff176; color: inherit; border-radius: 3px; padding: 0 1
 #exList .ex-item, #exList .ex-item b, .ex-pick, .ex-pick .ex-name { font-weight: 400; }
 #exList .ex-item.active, #exList .ex-item.active .ex-name { font-weight: 700; }
 #exList .pr-group > summary b, .ex-pick-list .pr-group > summary b, .ex-pick-list > .col-label { font-weight: 800; }
+
+/* 직접 만든 예시 이름은 파란 글씨 */
+.ex-name.ex-mine, option.ex-mine { color: #1d5bd8; }
+
+/* 본문 글자 크기(v0.31.2): 설정 › 글자 크기의 배율 --bs. 기록·결과·입력 칸 글만, 제목·버튼은 그대로 */
+:root { --bs: 1; }
+textarea { font-size: calc(15px * var(--bs)); }
+.rcard-body { font-size: calc(14.5px * var(--bs)); }
+.cand-body { font-size: calc(14px * var(--bs)); }
+.final-box textarea, .tv-ta { font-size: calc(14.5px * var(--bs)); }
+.prompt-cols textarea, .vc-col textarea { font-size: calc(14px * var(--bs)); }
+textarea.cell-edit { font-size: calc(13px * var(--bs)); }
+.cmp-text, .tw-cand-text, .tw-rv-cols textarea { font-size: calc(13.5px * var(--bs)); }
+.tw-rv-cols .cmp-text { font-size: calc(13px * var(--bs)); }
+.cw-cand-text { font-size: calc(12.5px * var(--bs)); }
+.cw-msg.ai .cw-text { font-size: calc(15.5px * var(--bs)); }
+.ban-view { font-size: calc(15px * var(--bs)); }
+.fs-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 6px 0 14px; }
+.fs-row input[type="range"] { flex: 0 1 320px; accent-color: #7132f5; }
+.fs-step { width: 40px; height: 40px; padding: 0; border-radius: 50%; font-size: 13px; font-weight: 800; }
+.fs-step.fs-up { font-size: 20px; }
+.fs-val { min-width: 52px; font-size: 18px; color: #5420bd; }
+.fs-preview { border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); padding: 10px 14px; background: var(--surface); }
+.fs-preview .rcard-body { max-height: none; }

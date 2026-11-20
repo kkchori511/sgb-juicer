@@ -265,6 +265,7 @@
           <button type="button" class="tab-btn" data-stab="trait">🧩 행특 사전</button>
           <button type="button" class="tab-btn" data-stab="vocab">🔤 세특 어휘</button>
           <button type="button" class="tab-btn" data-stab="banned">🚫 기재 유의어</button>
+          <button type="button" class="tab-btn" data-stab="font">🔠 글자 크기</button>
           <button type="button" class="tab-btn" data-stab="data">💾 백업·자료</button>
           <button type="button" class="tab-btn" data-stab="about">ℹ️ 앱 정보</button>
           <button type="button" class="tab-btn" data-stab="suggest">📮 제안하기</button>
@@ -429,6 +430,24 @@
               <button type="button" class="danger-text" id="bnResetBtn">기본 목록으로 되돌리기</button>
             </div>
             <p class="hint">엑셀은 '기재 유의어 / 한글·다른 표기 / 대체 표현 / 제외할 말' 열을 읽습니다(내려받은 파일 모양).</p>
+          </div>
+        </div>
+
+        <div class="stab" data-stab-content="font" hidden>
+          <div class="card">
+            <div class="card-head"><h2>🔠 글자 크기</h2></div>
+            <p class="hint">기록 카드, AI 결과 상자, 최종안 / 기록 입력 칸처럼 <b>읽고 쓰는 본문 글</b>의 크기를 바꿉니다. 제목, 버튼, 메뉴, 학생 목록은 그대로입니다. 바꾸면 바로 적용되고, 설정에 저장됩니다.</p>
+            <div class="fs-row">
+              <button type="button" class="fs-step" id="fsDown" title="작게(5%)" aria-label="작게">가</button>
+              <input type="range" id="fsRange" min="80" max="150" step="5" aria-label="본문 글자 크기">
+              <button type="button" class="fs-step fs-up" id="fsUp" title="크게(5%)" aria-label="크게">가</button>
+              <b class="fs-val" id="fsVal">100%</b>
+              <button type="button" id="fsReset">보통(100%)으로</button>
+            </div>
+            <div class="fs-preview">
+              <div class="muted">미리보기</div>
+              <div class="rcard-body">수학 시간에 이차함수의 그래프를 탐구하며 꼭짓점의 이동을 표로 정리하고, 모둠 친구들에게 그 과정을 설명함. 계수가 바뀔 때 그래프가 어떻게 달라지는지 스스로 질문을 세워 확인함.</div>
+            </div>
           </div>
         </div>
 

@@ -1557,6 +1557,7 @@
     if (name === 'trait') renderTraitDictSettings();
     if (name === 'vocab') renderVocabSettings();
     if (name === 'banned') renderBannedSettings();
+    if (name === 'font') renderFontSettings();
     if (name === 'suggest') $('diagText').value = diagInfo();
   }
   function renderSettings() {
@@ -1582,6 +1583,25 @@
   // 여러 칸을 연달아 바꿔도 모두 저장되도록 대기 중 변경을 합친다
   let cfgPending = {};
   let cfgTimer = null;
+  // ---------- 본문 글자 크기(v0.31.2): 기록·결과·입력 칸 글만 --bs 배율로 ----------
+  function applyBodyScale(v) {
+    const n = Math.min(150, Math.max(80, Math.round((Number(v) || 100) / 5) * 5));
+    document.documentElement.style.setProperty('--bs', String(n / 100));
+    window.dispatchEvent(new Event('sgb-fs'));
+    return n;
+  }
+  function renderFontSettings() {
+    const r = $('fsRange');
+    const show = (n) => { r.value = n; $('fsVal').textContent = `${n}%`; $('fsDown').disabled = n <= 80; $('fsUp').disabled = n >= 150; };
+    const set = (v) => { const n = applyBodyScale(v); cfg.body_scale = n; show(n); saveCfg({ body_scale: n }); };
+    show(cfg.body_scale || 100);
+    if (r.dataset.bound) return;
+    r.dataset.bound = '1';
+    r.addEventListener('input', () => set(r.value));
+    $('fsDown').addEventListener('click', () => set(Number(r.value) - 5));
+    $('fsUp').addEventListener('click', () => set(Number(r.value) + 5));
+    $('fsReset').addEventListener('click', () => set(100));
+  }
   function saveCfg(patch) {
     Object.assign(cfgPending, patch || {});
     clearTimeout(cfgTimer);
@@ -2172,7 +2192,7 @@
       const here = R.slot ? String(R.slot.label || '').replace(/\s+/g, '') : '';
       const item = R.slot ? R.slot.item : '';
       const sameSubj = (e) => here && e.subject && here.includes(e.subject.replace(/\s+/g, ''));
-      const o = (e) => `<option value="${escHtml(e.id)}"${e.id === exPick ? ' selected' : ''}>${escHtml(e.label)}</option>`;
+      const o = (e) => `<option value="${escHtml(e.id)}"${e.builtin ? '' : ' class="ex-mine"'}${e.id === exPick ? ' selected' : ''}>${escHtml(e.label)}</option>`;
       const top = exList.filter(sameSubj), mine = exList.filter((e) => !e.builtin && !sameSubj(e));
       const rest = exList.filter((e) => e.builtin && !sameSubj(e) && (!item || e.item === item));
       const areas = [...new Set(rest.map((e) => e.area || '기타'))];
@@ -3537,6 +3557,7 @@
       ta.style.height = `${Math.max(170, Math.ceil(ta.scrollHeight + edge + line))}px`;
     };
     ta.addEventListener('input', fit);
+    window.addEventListener('sgb-fs', () => requestAnimationFrame(fit));
     const proto = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
     Object.defineProperty(ta, 'value', { configurable: true, get() { return proto.get.call(this); }, set(v) { proto.set.call(this, v); fit(); } });
     let w = 0;
@@ -6267,7 +6288,7 @@
     const q = EX.q.replace(/\s+/g, '');
     const hit = (e) => !q || `${e.label}${e.area}${e.subject}${e.text}`.replace(/\s+/g, '').includes(q);
     const item = (e) => el('button', { type: 'button', class: 'pr-item ex-item' + (e.id === EX.id ? ' active' : ''), title: e.text.slice(0, 200), onclick: () => { EX.id = e.id; exDrawList(); exFill(); } },
-      [e.item !== 'subject' ? el('span', { class: 'tag' }, [EX_ITEM[e.item]]) : null, el('span', { class: 'ex-name', text: e.label })]);
+      [e.item !== 'subject' ? el('span', { class: 'tag' }, [EX_ITEM[e.item]]) : null, el('span', { class: 'ex-name' + (e.builtin ? '' : ' ex-mine'), text: e.label })]);
     const mine = EX.list.filter((e) => !e.builtin && hit(e));
     mine.forEach((e) => box.appendChild(item(e)));
     const base = EX.list.filter((e) => e.builtin && hit(e));
@@ -6315,7 +6336,7 @@
         list.innerHTML = '';
         const k = q.value.replace(/\s+/g, '');
         const hit = (e) => !k || `${e.label}${e.area}${e.subject}${e.text}`.replace(/\s+/g, '').includes(k);
-        const row = (e) => el('button', { type: 'button', class: 'ex-pick', onclick: () => { closeSheet(); resolve(e); } }, [el('span', { class: 'ex-name', text: e.label }), el('span', { class: 'muted', text: `${e.text.slice(0, 90)}${e.text.length > 90 ? '…' : ''}` })]);
+        const row = (e) => el('button', { type: 'button', class: 'ex-pick', onclick: () => { closeSheet(); resolve(e); } }, [el('span', { class: 'ex-name' + (e.builtin ? '' : ' ex-mine'), text: e.label }), el('span', { class: 'muted', text: `${e.text.slice(0, 90)}${e.text.length > 90 ? '…' : ''}` })]);
         const mine = all.filter((e) => !e.builtin && hit(e));
         if (mine.length) list.append(el('div', { class: 'col-label', text: `직접 만든 예시 (${mine.length})` }), ...mine.map(row));
         const base = all.filter((e) => e.builtin && hit(e));
@@ -8862,6 +8883,7 @@
       return;
     }
     setCollapsed(cfg.menu_collapsed);
+    applyBodyScale(cfg.body_scale);
     fillSoon();
     bind();
     fillConfigInputs();
