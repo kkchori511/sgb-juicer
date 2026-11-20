@@ -8704,6 +8704,10 @@
     }));
     $('addGroupBtn').addEventListener('click', () => openGroupForm());
     document.querySelectorAll('#settingsTabs .tab-btn').forEach((b) => b.addEventListener('click', () => showSettingsTab(b.dataset.stab)));
+    document.querySelectorAll('#noticeTabs .tab-btn').forEach((b) => b.addEventListener('click', () => { // 유의 사항: 보안 / 개인정보 · 유의 사항 탭
+      document.querySelectorAll('#noticeTabs .tab-btn').forEach((x) => x.classList.toggle('active', x === b));
+      document.querySelectorAll('.ntab').forEach((x) => { x.hidden = x.dataset.ntabContent !== b.dataset.ntab; });
+    }));
     $('schedAddBtn').addEventListener('click', () => addSchedule($('schedDate'), $('schedTitle'), renderSchedTable));
     $('newYearBtn').addEventListener('click', () => {
       const y = +$('newYear').value;

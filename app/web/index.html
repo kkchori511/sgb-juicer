@@ -760,6 +760,11 @@
 
       <!-- ===== 유의 사항 ===== -->
       <section class="panel" data-panel-content="notice">
+        <div class="tab-bar" id="noticeTabs">
+          <button type="button" class="tab-btn active" data-ntab="notice">📋 유의 사항</button>
+          <button type="button" class="tab-btn" data-ntab="security">🛡️ 보안 / 개인정보</button>
+        </div>
+        <div class="ntab" data-ntab-content="notice">
         <div class="card notice-page">
           <h2>유의 사항 및 안내</h2>
           <h3>스캔 PDF(CLOVA OCR)</h3>
@@ -787,6 +792,49 @@
           <ul>
             <li>AI가 만든 문장은 초안입니다. 학생의 실제 활동과 맞는지 선생님이 반드시 확인한 뒤 마감해 주세요.</li>
           </ul>
+        </div>
+        </div>
+        <div class="ntab" data-ntab-content="security" hidden>
+          <div class="card notice-page sec-page">
+            <h2>🛡️ 이 앱의 보안 / 개인정보 한눈에 보기</h2>
+            <p class="hint">학생 자료가 어디에 저장되고, 무엇이 바깥(AI·인터넷)으로 나가는지 정리했습니다. <b class="sec-r">빨강 위험</b>은 꼭 지켜야 할 것, <b class="sec-y">노랑 경고</b>는 알고 써야 할 것, <b class="sec-g">초록 안전</b>은 앱이 지켜 주는 것입니다.</p>
+
+            <section class="sec-block sec-danger">
+              <div class="sec-head"><span class="sec-sign" aria-hidden="true">⛔</span><h3>위험 — 꼭 지켜 주세요</h3></div>
+              <ul>
+                <li><b>자료 폴더는 암호화되어 있지 않습니다.</b> 학생 자료(명렬·기록·최종안)와 API 키가 <code>생기부착즙기_데이터</code> 폴더에 평문으로 저장됩니다. 폴더를 통째로 남에게 주거나, 학교 공유 폴더·클라우드 동기화 폴더(OneDrive·구글 드라이브 등) 안에 두지 마세요. 프로그램을 건넬 때는 <b>exe 파일만</b> 주세요.</li>
+                <li><b>기록 본문에 직접 적은 이름·민감 정보는 그대로 AI로 갑니다.</b> 앱은 명렬의 학번·이름만 빼고 보냅니다. 본문 속 친구 이름, 가정사·건강·상담 내용 같은 민감 정보는 걸러 주지 않으니 AI 실행 전에 본문을 확인하세요.</li>
+                <li><b>스캔 PDF는 이미지 그대로 네이버 CLOVA OCR로 갑니다.</b> 손으로 쓴 이름·학번도 함께 갑니다. 걱정되면 스캔하기 전에 인적사항을 가려 주세요.</li>
+                <li><b>공용 PC에서는</b> 사용 후 <b>설정 › 키 초기화</b>를 누르고, 자료 폴더도 정리해 주세요(키 초기화는 학생 자료를 지우지 않습니다).</li>
+              </ul>
+            </section>
+
+            <section class="sec-block sec-warn">
+              <div class="sec-head"><span class="sec-sign" aria-hidden="true">⚠️</span><h3>경고 — 알고 써 주세요</h3></div>
+              <ul>
+                <li><b>AI 제공자의 데이터 수집:</b> 'OpenRouter 학습 차단'은 처음에 꺼져 있습니다. 켜면 데이터를 수집·보관하지 않는 제공자에게만 보냅니다(설정 › 연결·모델). 무료 모델은 제공자가 데이터를 수집할 수 있습니다.</li>
+                <li><b>AI로 가는 것:</b> 고른 기록의 내용, 행특 설계(성격유형·키워드·사례), 프롬프트·예시, 성취기준·활동 개요, 세특 어휘·기재 유의어 목록, 이번 추가 요구 사항. 기록 제목은 '제목 넣어 시작'을 켰을 때만 갑니다.</li>
+                <li><b>맞춤법 검사:</b> 버튼을 누르면 그 글이 기본 브라우저를 거쳐 바른한글(부산대 맞춤법 검사기) 사이트로 가고, 브라우저 방문 기록에도 남습니다. 글 속 이름은 지우고 쓰세요.</li>
+                <li><b>내보낸 파일·복사한 글:</b> xlsx 내보내기, 엑셀 백업, 클립보드 복사에는 학번·이름과 최종안이 그대로 들어갑니다. 파일을 메일·메신저로 보낼 때 주의하세요.</li>
+                <li><b>설정 꾸러미:</b> 프롬프트·예시 글 속에 학생 이름이 있으면 ⚠로 알려 주지만, 어휘·유의어·사전 목록은 검사하지 않습니다. 받은 꾸러미는 믿을 수 있는 사람의 것만 가져오세요.</li>
+                <li><b>제안하기·진단 정보:</b> 설문지는 바깥 사이트입니다. 진단 정보의 오류 메시지에 학생 이름이 있으면 지우고 붙여 넣으세요.</li>
+                <li><b>AI 결과는 초안입니다.</b> 학생의 실제 활동과 맞는지 선생님이 확인한 뒤 마감하세요.</li>
+              </ul>
+            </section>
+
+            <section class="sec-block sec-safe">
+              <div class="sec-head"><span class="sec-sign" aria-hidden="true">✅</span><h3>안전 — 앱이 이렇게 지킵니다</h3></div>
+              <ul>
+                <li><b>학생 자료는 이 PC 안에만 있습니다.</b> 이 앱에는 자체 서버가 없고, 학생 자료를 인터넷에 올리거나 다른 곳에 보관하지 않습니다. 자동 백업도 이 PC의 자료 폴더 안에 만듭니다.</li>
+                <li><b>AI에는 명렬의 학번·이름을 빼고 내용만</b> 보냅니다. 어느 학생의 결과인지 잇는 일은 이 PC 안에서만 합니다.</li>
+                <li><b>바깥과 연결하는 곳은 정해져 있습니다:</b> OpenRouter(AI 실행·잔액 확인), 네이버 CLOVA(스캔 PDF를 읽을 때만), GitHub(업데이트 확인·내려받기, 학생 자료는 보내지 않음). 맞춤법 검사·제안 설문·안내 링크는 버튼을 누를 때만 기본 브라우저로 엽니다.</li>
+                <li><b>사용 기록을 모으지 않습니다.</b> 사용 통계·광고·추적 기능이 없습니다.</li>
+                <li><b>업데이트는 공식 저장소의 파일만</b> 받습니다(다른 주소의 파일은 받지 않음).</li>
+                <li><b>설정 꾸러미에는</b> API 키·스캔(CLOVA) 설정·모델, 명렬·학번·이름·기록·최종안이 담기지 않습니다.</li>
+                <li><b>API 키는</b> AI·OCR 서비스에 접속할 때만 쓰고, 다른 곳으로 보내지 않습니다.</li>
+              </ul>
+            </section>
+          </div>
         </div>
       </section>
     </main>
