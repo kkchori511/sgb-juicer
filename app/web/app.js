@@ -6266,8 +6266,8 @@
     box.innerHTML = '';
     const q = EX.q.replace(/\s+/g, '');
     const hit = (e) => !q || `${e.label}${e.area}${e.subject}${e.text}`.replace(/\s+/g, '').includes(q);
-    const item = (e) => el('button', { type: 'button', class: 'pr-item' + (e.id === EX.id ? ' active' : ''), title: e.text.slice(0, 200), onclick: () => { EX.id = e.id; exDrawList(); exFill(); } },
-      [e.item !== 'subject' ? el('span', { class: 'tag' }, [EX_ITEM[e.item]]) : null, el('b', { text: e.label })]);
+    const item = (e) => el('button', { type: 'button', class: 'pr-item ex-item' + (e.id === EX.id ? ' active' : ''), title: e.text.slice(0, 200), onclick: () => { EX.id = e.id; exDrawList(); exFill(); } },
+      [e.item !== 'subject' ? el('span', { class: 'tag' }, [EX_ITEM[e.item]]) : null, el('span', { class: 'ex-name', text: e.label })]);
     const mine = EX.list.filter((e) => !e.builtin && hit(e));
     mine.forEach((e) => box.appendChild(item(e)));
     const base = EX.list.filter((e) => e.builtin && hit(e));
@@ -6301,6 +6301,53 @@
     if (!r) return;
     toast(cur ? '예시를 저장했습니다.' : '새 예시를 만들었습니다.');
     renderExamples(r.example.id);
+  }
+  // 프롬프트 편집의 예시 칸: 📚 예시 목록에서 골라 넣기(칸에 글이 있으면 바꿀지 뒤에 붙일지 묻는다)
+  async function pickExampleIntoPrompt() {
+    const r = await call('examples_list');
+    if (!r) return;
+    const all = r.examples;
+    const picked = await new Promise((resolve) => openSheet((box) => {
+      box.style.height = 'min(640px, 86vh)'; box.style.width = 'min(720px, 94vw)';
+      const q = el('input', { type: 'search', placeholder: '과목 / 글 찾기' });
+      const list = el('div', { class: 'ex-pick-list' });
+      const draw = () => {
+        list.innerHTML = '';
+        const k = q.value.replace(/\s+/g, '');
+        const hit = (e) => !k || `${e.label}${e.area}${e.subject}${e.text}`.replace(/\s+/g, '').includes(k);
+        const row = (e) => el('button', { type: 'button', class: 'ex-pick', onclick: () => { closeSheet(); resolve(e); } }, [el('span', { class: 'ex-name', text: e.label }), el('span', { class: 'muted', text: `${e.text.slice(0, 90)}${e.text.length > 90 ? '…' : ''}` })]);
+        const mine = all.filter((e) => !e.builtin && hit(e));
+        if (mine.length) list.append(el('div', { class: 'col-label', text: `직접 만든 예시 (${mine.length})` }), ...mine.map(row));
+        const base = all.filter((e) => e.builtin && hit(e));
+        [...new Set(base.map((e) => e.area || '기타'))].forEach((a) => {
+          const g = base.filter((e) => (e.area || '기타') === a);
+          list.appendChild(el('details', { class: 'pr-group', open: !!k }, [el('summary', {}, [el('b', { text: `📦 ${a} (${g.length})` })]), ...g.map(row)]));
+        });
+        if (!mine.length && !base.length) list.appendChild(el('p', { class: 'hint', text: '찾는 예시가 없습니다.' }));
+      };
+      q.addEventListener('input', draw);
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: '📚 예시 목록에서 불러오기' })]), q, list,
+        el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '닫기', onclick: () => { closeSheet(); resolve(null); } })]));
+      draw();
+      setTimeout(() => q.focus(), 50);
+    }));
+    if (!picked) return;
+    const ta = $('prExample');
+    let text = picked.text;
+    if (ta.value.trim()) {
+      const mode = await new Promise((resolve) => openSheet((box) => {
+        box.style.height = 'auto'; box.style.width = 'min(480px, 92vw)';
+        box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: '예시 칸에 이미 글이 있습니다' })]), el('p', { text: `'${picked.label}'을(를) 어떻게 넣을까요?` }),
+          el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: () => { closeSheet(); resolve(null); } }),
+            el('button', { type: 'button', text: '뒤에 붙이기', onclick: () => { closeSheet(); resolve('append'); } }),
+            el('button', { type: 'button', class: 'primary', text: '바꾸기', onclick: () => { closeSheet(); resolve('replace'); } })]));
+      }));
+      if (!mode) return;
+      if (mode === 'append') text = `${ta.value.replace(/\s+$/, '')}\n\n${picked.text}`;
+    }
+    ta.value = text;
+    ta.dispatchEvent(new Event('input'));
+    toast(`'${picked.label}' 예시를 넣었습니다.`);
   }
   async function renderPrompts() {
     const r = await loadPromptList();
@@ -8677,6 +8724,7 @@
     $('prName').addEventListener('input', savePrompt);
     $('prPrompt').addEventListener('input', savePrompt);
     $('prExample').addEventListener('input', savePrompt);
+    $('prExPickBtn').addEventListener('click', pickExampleIntoPrompt);
     $('prNewBtn').addEventListener('click', () => newPrompt(null));
     document.querySelectorAll('#prTabs .tab-btn').forEach((b) => b.addEventListener('click', () => showPrTab(b.dataset.prtab)));
     $('exNewBtn').addEventListener('click', () => { EX.id = null; exDrawList(); exFill(); $('exText').focus(); });
