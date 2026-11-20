@@ -309,24 +309,26 @@ class Api:
             webbrowser.open(url)
         return {"ok": True}
 
-    SPELLER_URL = "https://nara-speller.co.kr/speller/"
-    SPELLER_MAX = 3000  # 글자. 검사기 한 번에 넣기 좋은 길이(넘으면 앞부분만)
+    SPELLER_URL = "https://nara-speller.co.kr/old_speller/results"  # 바른한글 '이전 버전' 검사기(보통 글 보내기 양식)
+    SPELLER_MAX = 3000  # 글자. 넘으면 앞부분만
 
     @safe
     def open_speller(self, text):
-        """맞춤법 검사(바른한글, 부산대·나라인포테크): 기본 브라우저로 검사기를 열고 원문 칸에 글을 채워 둔다.
-        [검사하기]는 교사가 누른다(앱이 대신 보내지 않음). 글이 길면 주소가 길어 Windows에서 바로 열 때 잘릴 수 있어,
-        잠깐 쓰는 로컬 페이지로 열어 그 페이지가 검사기 주소로 넘긴다(페이지는 곧 지움)."""
+        """맞춤법 검사(바른한글, 부산대·나라인포테크): 기본 브라우저로 검사 결과를 바로 연다.
+        새 버전(/speller/?speller-text=)은 한 번 방문한 브라우저에 사이트 앱(서비스 워커)이 깔리면 원문 칸이 비어(v0.32.1 제보),
+        이전 버전 양식(old_speller/results, POST text1)으로 보낸다. 잠깐 쓰는 로컬 페이지가 양식을 보내고(페이지는 곧 지움),
+        보내는 일은 교사가 버튼을 눌렀을 때 한 번만."""
+        import html
         import tempfile
-        import urllib.parse
         t = str(text or "").strip()
         if not t:
             raise db.DbError("검사할 글이 없습니다.")
         cut = len(t) > self.SPELLER_MAX
         t = t[: self.SPELLER_MAX]
-        url = self.SPELLER_URL + "?" + urllib.parse.urlencode({"speller-text": t})
-        page = ("<!doctype html><meta charset='utf-8'><meta name='referrer' content='no-referrer'><title>맞춤법 검사기로 이동</title>"
-                f"<script>location.replace({json.dumps(url)});</script><p>맞춤법 검사기로 이동합니다…</p>")
+        page = ("<!doctype html><meta charset='utf-8'><meta name='referrer' content='no-referrer'><title>맞춤법 검사기로 보내는 중</title>"
+                f"<form id='f' method='post' action='{self.SPELLER_URL}'><textarea name='text1' hidden>{html.escape(t)}</textarea>"
+                "<noscript><button>맞춤법 검사하기</button></noscript></form>"
+                "<p>맞춤법 검사기로 보내는 중입니다…</p><script>document.getElementById('f').submit();</script>")
         fd, path = tempfile.mkstemp(prefix="sgb-speller-", suffix=".html")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(page)

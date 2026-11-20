@@ -1,4 +1,4 @@
-"""맞춤법 검사 열기: 로컬 페이지가 검사기 주소(원문 칸 채움)로 넘기고, 길면 앞부분만, 빈 글은 거절."""
+"""맞춤법 검사 열기: 로컬 페이지가 이전 버전 검사기로 글을 보내고(POST text1), 길면 앞부분만, 빈 글은 거절."""
 import os
 import re
 import sys
@@ -19,9 +19,12 @@ def test_all():
     r = a.open_speller("안녕하세여 반갑습니다")
     assert r["ok"] and not r["cut"]
     page = Path(urllib.parse.urlparse(OPENED[-1]).path)
-    url = re.search(r'location\.replace\("(.*?)"\)', page.read_text(encoding="utf-8")).group(1)
-    assert url.startswith("https://nara-speller.co.kr/speller/?")
-    assert urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["speller-text"] == ["안녕하세여 반갑습니다"]
+    h = page.read_text(encoding="utf-8")
+    assert "method='post' action='https://nara-speller.co.kr/old_speller/results'" in h
+    assert re.search(r"<textarea name='text1' hidden>(.*?)</textarea>", h).group(1) == "안녕하세여 반갑습니다"
+    a.open_speller("<b>&태그</b>")
+    page = Path(urllib.parse.urlparse(OPENED[-1]).path)
+    assert "&lt;b&gt;&amp;태그&lt;/b&gt;" in page.read_text(encoding="utf-8")  # 글 속 기호는 이스케이프
     r = a.open_speller("가" * 3500)
     assert r["cut"] and r["chars"] == 3000
     assert not page.exists()  # 새로 열 때 지난번 페이지는 지움

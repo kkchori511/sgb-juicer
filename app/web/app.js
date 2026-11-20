@@ -166,13 +166,15 @@
   const banSummary = (hits) => [...new Map(hits.map((h) => [h.word, `${h.word} → ${h.repl || '일반적인 말로'}`])).values()];
   // 입력 칸(최종안·태그별 기록): 칸을 벗어나 있으면 형광펜이 든 '보기'를 보여 주고, 누르면 입력 칸으로(고치는 동안은 표시 없음). 아래에 경고 줄
   // 맞춤법 검사(바른한글): 기본 브라우저로 검사기를 열고 원문 칸에 글을 채운다. [검사하기]는 교사가 누른다
-  const SPELL_TIP = '기본 브라우저로 바른한글(부산대 맞춤법 검사기)을 열고 원문 칸에 이 글을 채웁니다. [검사하기]는 직접 누르세요. 글은 검사기 사이트로 가고 브라우저 방문 기록에 남습니다(글 속 이름도 함께 감).';
-  function spellBtn(getText) {
-    return el('button', { type: 'button', class: 'small spell-btn', title: SPELL_TIP, text: '맞춤법 검사', onclick: async () => {
+  const SPELL_TIP = '기본 브라우저로 바른한글(부산대 맞춤법 검사기, 이전 버전 화면)에 이 글을 보내 검사 결과를 바로 엽니다(클립보드에도 복사). 글은 검사기 사이트로 가고 브라우저 방문 기록에 남습니다(글 속 이름도 함께 감).';
+  function spellBtn(getText, small) {
+    return el('button', { type: 'button', class: (small ? 'small ' : '') + 'spell-btn', title: SPELL_TIP, text: '맞춤법 검사', onclick: async () => {
       const t = String(getText() || '').trim();
       if (!t) { toast('검사할 글이 없습니다.'); return; }
+      const cp = await rawCall('copy_text', t); // 원문 칸이 비어 있으면 붙여넣기(Ctrl+V)로 넣을 수 있게 미리 복사
       const r = await call('open_speller', t);
-      if (r) toast(r.cut ? `글이 길어 앞 ${r.chars}자만 검사기에 넣었습니다. 브라우저에서 [검사하기]를 누르세요.` : '브라우저에서 검사기가 열립니다. 글이 채워져 있으니 [검사하기]를 누르세요.', 5000);
+      const paste = cp && cp.ok !== false ? ' 글은 클립보드에도 복사해 두었습니다.' : '';
+      if (r) toast((r.cut ? `글이 길어 앞 ${r.chars}자만 보냈습니다. ` : '') + '브라우저에서 맞춤법 검사 결과가 열립니다.' + paste, 6000);
     } });
   }
   function banWrap(ta) {
@@ -5185,7 +5187,7 @@
       can && r.kind !== 'existing' ? el('button', { type: 'button', class: 'link', text: '날짜·활동명 수정', 'aria-label': `${who} 날짜·활동명 수정`, onclick: () => { metaEdit.hidden = !metaEdit.hidden; if (!metaEdit.hidden) ti.focus(); } }) : null,
       lock ? el('span', { class: `tv-lock ${lock.cls}`, text: lock.text }) : null, el('span', { class: 'spacer' }), badges, bytes]),
     metaEdit, el('div', { class: 'rcard-label' + (r.confirmed ? ' conf' : '') , text: r.confirmed ? '✔ 확정본' : r.orig !== r.content ? '↩ 이전 반영본(확정 전) — 원문은 아래 결과에' : (r.kind === 'existing' ? '기존 완성문' : '원문') }), banWrap(ta),
-    el('div', { class: 'tv-rec-foot' }, [chips, el('span', { class: 'spacer' }), state, spellBtn(() => ta.value),
+    el('div', { class: 'tv-rec-foot' }, [chips, el('span', { class: 'spacer' }), state, spellBtn(() => ta.value, true),
       can && !r.confirmed && String(r.orig || '').trim() ? (() => { const b = el('button', { type: 'button', class: 'ai-btn small', title: '원문을 AI로 변환해 아래 결과 묶음 맨 위에 더합니다(확정은 따로). 확인 창에서 프롬프트 마법사로 대화할 수도 있습니다', text: 'AI 변환' }); b.addEventListener('click', () => tvAiRecord(r, b)); return b; })() : null]),
     tvBundle(r, can));
     if (r.confirmed) card.classList.add('confirmed');
