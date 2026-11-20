@@ -233,8 +233,9 @@ class Records:
                     c.execute("UPDATE inbox_batches SET tag_ids=? WHERE id=?", (json.dumps([x for x in ids if x != int(tid)]), b[0]))
             c.execute("DELETE FROM tags WHERE id=?", (int(tid),))
 
-    def tag_records(self, record_ids, tag_ids, mode="add"):
-        """여러 기록의 태그를 한 번에. mode: add(=그 태그 하나로 바꾸기, 기록당 태그 하나) / remove(빼기)"""
+    def tag_records(self, record_ids, tag_ids, mode="add", allow_closed=False):
+        """여러 기록의 태그를 한 번에. mode: add(=그 태그 하나로 바꾸기, 기록당 태그 하나) / remove(빼기).
+        allow_closed: 태그별 기록의 '필터된 기록 태그 바꾸기' — 태그는 글이 아니므로 마감된 학생 기록도 바꾼다(글·확정본·최종안은 그대로)."""
         rids = [int(x) for x in record_ids or []]
         tids = [int(x) for x in tag_ids or []]
         if not rids:
@@ -243,7 +244,8 @@ class Records:
             tids = one_tag(tids)
         for rid in rids:
             r = self.record(rid)
-            self.require_open(r["group_id"], r["item"], r["student_no"])
+            if not allow_closed:
+                self.require_open(r["group_id"], r["item"], r["student_no"])
         with self.d.tx() as c:
             for rid in rids:
                 n = 0
@@ -258,14 +260,14 @@ class Records:
                     c.execute("UPDATE records SET tags_ver=COALESCE(tags_ver,0)+1 WHERE id=?", (rid,))
         return len(rids)
 
-    def tag_records_changed(self, record_ids, tag_ids, mode="add"):
+    def tag_records_changed(self, record_ids, tag_ids, mode="add", allow_closed=False):
         """tag_records와 같고, 실제로 바뀐 (기록, 태그, 바뀐 뒤 태그 버전)을 돌려준다(되돌리기용)."""
         rids = [int(x) for x in record_ids or []]
         tids = [int(x) for x in tag_ids or []]
         with self.d._lock:  # 확인·쓰기·버전 읽기 사이에 다른 저장이 끼지 않게(RLock이라 안쪽 tx도 같은 잠금)
             have = {(r["record_id"], r["tag_id"]) for r in self.d.q(
                 f"SELECT record_id, tag_id FROM record_tags WHERE record_id IN ({','.join('?' * len(rids)) or 'NULL'})", tuple(rids))}
-            self.tag_records(rids, tids, mode)
+            self.tag_records(rids, tids, mode, allow_closed)
             ver = {r["id"]: r["tags_ver"] or 0 for r in self.d.q(
                 f"SELECT id, tags_ver FROM records WHERE id IN ({','.join('?' * len(rids)) or 'NULL'})", tuple(rids))}
         if mode == "remove":
@@ -276,7 +278,7 @@ class Records:
             before.setdefault(r, t)
         return [[r, t, ver.get(r, 0), before.get(r, 0)] for r in rids for t in tids if (r, t) not in have]
 
-    def undo_tag_pairs(self, pairs, mode):
+    def undo_tag_pairs(self, pairs, mode, allow_closed=False):
         """일괄 태그 되돌리기: mode는 처음 실행한 동작(add면 지금 빼고, remove면 다시 붙인다).
         건너뜀: 마감·삭제된 기록, 지운 태그, 그 뒤 태그가 다시 바뀐 기록(태그 버전이 다름).
         → (되돌린 수, 건너뛴 수, 그 뒤 바뀌어 건너뛴 수)"""
@@ -287,7 +289,7 @@ class Records:
                 rid, tid = int(p[0]), int(p[1])
                 ver = int(p[2]) if len(p) > 2 else None
                 r = c.execute("SELECT group_id, item, student_no, COALESCE(tags_ver,0) FROM records WHERE id=?", (rid,)).fetchone()
-                if not r or self.is_closed(r[0], r[1], r[2]) or not c.execute("SELECT 1 FROM tags WHERE id=?", (tid,)).fetchone():
+                if not r or (not allow_closed and self.is_closed(r[0], r[1], r[2])) or not c.execute("SELECT 1 FROM tags WHERE id=?", (tid,)).fetchone():
                     skipped += 1
                     continue
                 if ver is not None and r[3] != ver + (1 if rid in bumped else 0):

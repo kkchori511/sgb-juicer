@@ -584,9 +584,9 @@ textarea.cell-edit { min-height: 54px; font-size: 13px; width: 100%; }
 /* v0.13: 칸 접기 — 접으면 제목 줄만 남는다 */
 .fold-btn { border: none; background: none; padding: 0 4px 0 0; font-weight: 800; font-size: 15px; color: var(--text); cursor: pointer; white-space: nowrap; }
 .fold-btn:hover { background: none; color: var(--accent-hover); border: none; }
-:is(.rec-records, .final-sec, .res-sec).folded > :not(.sec-title:first-child) { display: none !important; }
-:is(.rec-records, .final-sec, .res-sec).folded > .sec-title:first-child > :not(.fold-btn) { display: none !important; }
-:is(.rec-records, .final-sec, .res-sec).folded > .sec-title:first-child { margin: 0; }
+:is(.rec-records, .final-sec, .conf-sec, .res-sec).folded > :not(.sec-title:first-child) { display: none !important; }
+:is(.rec-records, .final-sec, .conf-sec, .res-sec).folded > .sec-title:first-child > :not(.fold-btn) { display: none !important; }
+:is(.rec-records, .final-sec, .conf-sec, .res-sec).folded > .sec-title:first-child { margin: 0; }
 .rec-main > .folded { flex: 0 0 auto !important; min-height: 0 !important; overflow: hidden; }
 /* 나란히 놓일 때 접은 칸은 세로 막대, 위아래로 쌓일 때는 제목 줄 */
 .rec-main > .folded { width: 46px; padding: 10px 6px; }
@@ -924,7 +924,7 @@ button.ai-btn::before { content: '✧'; font-size: 1.25em; line-height: 1; flex:
 .ai-conf select#aiPrompt { max-width: 260px; }
 
 /* 프롬프트 생성 마법사 */
-.wiz-btn { background: var(--input); border-color: var(--accent); color: var(--accent-hover); font-weight: 800; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.wiz-btn { background: var(--input); border-color: var(--accent); color: var(--accent-hover); font-weight: 800; display: inline-flex; align-items: center; justify-content: center; gap: 4px; white-space: nowrap; }
 .wiz-btn:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
 .wiz-btn:disabled { background: var(--surface-2); border-color: var(--border); color: var(--disabled-text); }
 /* AI 버튼 + 마법사 버튼을 한 덩어리로 */
@@ -1773,7 +1773,7 @@ button.is-next, .rec-final .sec-title > button.btn-join.is-next { box-shadow: no
 .col-fold { flex: none; margin-left: auto; width: 28px; height: 28px; min-height: 0; min-width: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center;
   border: 1.5px solid var(--card-border, var(--border)); border-radius: 8px; background: var(--input); color: var(--text-2); font-size: 16px; font-weight: 900; line-height: 1; }
 .col-fold:hover:not(:disabled) { border-color: var(--text); color: var(--text); background: var(--surface-2); }
-:is(.rec-records, .final-sec, .res-sec).folded > .sec-title:first-child > .col-fold { display: inline-flex !important; }
+:is(.rec-records, .final-sec, .conf-sec, .res-sec).folded > .sec-title:first-child > .col-fold { display: inline-flex !important; }
 .col-strip { display: none; }
 #recBody.col-list-off { grid-template-columns: 44px minmax(0, 1fr) !important; }
 #recBody.col-list-off > .rec-list { padding: 6px 2px !important; overflow: hidden !important; }
@@ -2012,3 +2012,39 @@ button.bundle-tgl:hover, .fold-btn.ai-title:hover { background: #ffeaa0 !importa
 .cand.is-ai, .bcand.is-ai, .tw-cand, .cw-cand { background: var(--ai-soft); border: 1.5px dashed var(--ai); }
 .cand.is-conf, .bcand.is-conf, .tw-cand.conf { background: var(--st-final-bg); border: 2px solid var(--st-final); box-shadow: none; }
 .cand-head .conf-badge { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: var(--radius-pill); background: var(--st-final); color: #fff; font-size: 12px; font-weight: 800; }
+/* 명렬 / 담당 관리 명렬 표: 머리처럼 내용도 가운데(짧은 값뿐이라) */
+.roster-tbl td { text-align: center; }
+.roster-tbl td input[type=text], .roster-tbl td input:not([type]), .roster-tbl td select { text-align: center; text-align-last: center; }
+/* 태그 고르기 메뉴를 일반 버튼 모양으로(필터된 기록 태그 바꾸기, 선택 기록 태그 바꾸기) — 옆 버튼과 같은 40px */
+.tag-menu.btn-menu > summary .btn-face { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 40px; padding: 8px 16px;
+  border: 1px solid var(--text); border-radius: var(--radius-pill); background: var(--input); color: var(--text); font-size: 14px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.tag-menu.btn-menu > summary .btn-face:hover { background: var(--surface-2); }
+/* 설정 › 세특 어휘 */
+.vc-on { margin: 6px 0 10px; font-weight: 700; }
+.vc-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 10px; }
+.vc-col { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+.vc-col textarea { width: 100%; min-height: 260px; font-size: 14px; line-height: 1.6; }
+@media (max-width: 760px) { .vc-cols { grid-template-columns: 1fr; } }
+/* 프롬프트 메뉴 › 프롬프트 / 예시 탭 */
+.pr-tabs { margin-bottom: 10px; }
+#exQ { width: 100%; box-sizing: border-box; }
+.ex-meta { gap: 14px; flex-wrap: wrap; }
+.ex-meta input { width: 160px; }
+#exText { width: 100%; min-height: 260px; line-height: 1.7; }
+.ai-conf select#aiExample { max-width: 100%; }
+.ai-ex-prev { margin-top: 4px; font-size: 12.5px; line-height: 1.5; max-width: 520px; }
+/* 항목별 기록 세 칸: 브라우저의 스크롤 자동 보정(scroll anchoring)을 끈다. 목록을 다시 그릴 때 보던 자리는 코드가 직접 지킨다 */
+.rec-list, .rec-records, .rec-final { overflow-anchor: none; }
+/* 기재 유의어: 형광펜, 최종안·태그 기록 '보기'(누르면 고치기), 경고 줄, 설정 표 */
+mark.ban { background: #fff176; color: inherit; border-radius: 3px; padding: 0 1px; box-shadow: 0 0 0 1px #f2c94c inset; cursor: help; }
+.ban-wrap { display: flex; flex-direction: column; gap: 4px; }
+.ban-view { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid var(--border-strong, var(--border)); border-radius: var(--radius-sm); background: var(--input);
+  white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.7; cursor: text; }
+.ban-view:hover { border-color: var(--text-2); }
+.ban-warn { padding: 6px 10px; border: 1px solid #f0b429; border-radius: var(--radius-sm); background: #fff8e6; color: #6b4500; font-size: 13px; font-weight: 700; line-height: 1.5; }
+.bn-rules { margin: 0 0 10px; padding-left: 20px; }
+.bn-wrap { max-height: 52vh; overflow: auto; margin: 8px 0; }
+.bn-tbl td input { width: 100%; box-sizing: border-box; }
+.bn-tbl th:last-child, .bn-tbl td:last-child { width: 52px; text-align: center; }
+.bn-tbl button.o-delbtn { width: 32px; height: 32px; min-height: 0; padding: 0; border: 1.5px solid var(--border); border-radius: 8px; background: var(--input); color: var(--text-2); font-size: 14px; font-weight: 800; }
+.bn-tbl button.o-delbtn:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }

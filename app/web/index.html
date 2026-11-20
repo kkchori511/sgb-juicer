@@ -190,7 +190,8 @@
         </div>
       </section>
       <section class="panel" data-panel-content="prompts">
-        <div class="card">
+        <div class="tabs pr-tabs" id="prTabs"><button type="button" class="tab-btn active" data-prtab="prompt">📝 프롬프트</button><button type="button" class="tab-btn" data-prtab="example">📚 예시</button></div>
+        <div class="card" data-prtab-content="prompt">
           <div class="card-head"><h2>프롬프트</h2><span class="tag">목록을 만들고, AI를 실행할 때 확인 창에서 골라 씁니다</span></div>
           <p class="hint">AI에 줄 지침과 예시를 프롬프트마다 저장합니다. AI 실행 확인 창에서 이번에 쓸 프롬프트를 고르고, 작업(종합·생성 / 기록 정제 / 다듬기)마다 마지막에 고른 것을 기억합니다. 분량·출력 형식·성취기준·다른 학생과 겹치지 않기 규칙과 '학번·이름은 보내지 않음'은 앱이 자동으로 붙입니다.</p>
           <div class="pr-wrap">
@@ -211,6 +212,28 @@
           </div>
           <label class="check-line"><input type="checkbox" id="weightCheck" data-cfg="weight_sum_check"> 종합할 때 비중 합계 100% 검사</label>
           <div class="hint">끄면 입력한 비중을 비율대로 맞춰 씁니다. 비중을 비워 둔 기록은 기록 길이에 비례해 나눕니다.</div>
+        </div>
+        <div class="card" data-prtab-content="example" hidden>
+          <div class="card-head"><h2>예시</h2><span class="tag">AI 실행 확인 창에서 하나를 골라 이번 실행의 예시로 씁니다</span></div>
+          <p class="hint">원하는 결과 모양의 생기부 문장을 모아 둡니다. AI 실행 확인 창의 <b>예시</b> 칸에서 하나를 고르면, 그 실행에서는 프롬프트에 든 예시 대신 이 예시를 씁니다(AI는 문체·형식만 참고하고 내용은 베끼지 않습니다). 기본 예시도 고치거나 지울 수 있습니다.</p>
+          <div class="pr-wrap">
+            <aside class="pr-list"><input type="search" id="exQ" placeholder="과목 / 글 찾기"><div class="pr-items" id="exList"></div><button type="button" class="primary" id="exNewBtn">+ 새 예시</button></aside>
+            <div class="pr-edit">
+              <div class="map-row">
+                <label class="grow">이름 <input type="text" id="exName" maxlength="80" placeholder="비우면 '[과목] 첫 구절'"></label>
+                <span class="muted" id="exState"></span>
+                <button type="button" class="danger-text" id="exDelBtn">삭제</button>
+              </div>
+              <div class="map-row ex-meta">
+                <label class="inline">항목 <select id="exItem"><option value="subject">과목별 세특</option><option value="autonomy">자율 활동</option><option value="career">진로 활동</option><option value="club">동아리 활동</option><option value="behavior">행동특성 및 종합의견</option></select></label>
+                <label class="inline">교과 <input type="text" id="exArea" maxlength="30" placeholder="예: 수학"></label>
+                <label class="inline">과목 <input type="text" id="exSubject" maxlength="40" placeholder="예: 확률과 통계"></label>
+              </div>
+              <textarea id="exText" class="tall" placeholder="원하는 결과 모양의 생기부 문장을 넣으세요."></textarea>
+              <div class="map-row"><span class="muted" id="exSource"></span><span class="spacer"></span><span class="muted" id="exBytes"></span><button type="button" class="primary" id="exSaveBtn">저장</button></div>
+              <div class="map-row"><span class="spacer"></span><button type="button" id="exResetBtn" title="기본 예시를 처음 모양으로 되돌리고 지운 기본 예시도 되살립니다. 직접 만든 예시는 그대로입니다">기본 예시로 되돌리기</button></div>
+            </div>
+          </div>
         </div>
       </section>
       <section class="panel" data-panel-content="standards">
@@ -240,6 +263,8 @@
           <button type="button" class="tab-btn" data-stab="year">🏫 역할·학년도</button>
           <button type="button" class="tab-btn" data-stab="sched">📅 분량·일정</button>
           <button type="button" class="tab-btn" data-stab="trait">🧩 행특 사전</button>
+          <button type="button" class="tab-btn" data-stab="vocab">🔤 세특 어휘</button>
+          <button type="button" class="tab-btn" data-stab="banned">🚫 기재 유의어</button>
           <button type="button" class="tab-btn" data-stab="data">💾 백업·자료</button>
           <button type="button" class="tab-btn" data-stab="about">ℹ️ 앱 정보</button>
           <button type="button" class="tab-btn" data-stab="suggest">📮 제안하기</button>
@@ -363,6 +388,47 @@
             </div>
             <p class="hint">엑셀은 '역량요소' 시트와 같은 8열(성격유형 / 성격유형에 따른 설명 / 학업역량 키워드 / 설명 / 학업태도 키워드 / 설명 / 인성 및 학업 외 소양 / 설명)입니다. 같은 줄의 성격유형은 그 키워드의 '추천 유형'이 됩니다. 올리면 바뀌는 수를 먼저 보여 주고, [바꾸기]를 눌러야 반영됩니다.</p>
             <div id="tdSummary"></div>
+          </div>
+        </div>
+
+        <div class="stab" data-stab-content="vocab" hidden>
+          <div class="card">
+            <div class="card-head"><h2>🔤 세특 어휘</h2><span class="spacer"></span><span class="muted" id="vcState"></span></div>
+            <p class="hint">과목별 세특을 AI로 만들거나 바꿀 때(정제·다듬기·분량 맞춤·성취기준으로 생성·태그 변환) 이 목록을 함께 보내, 문맥에 맞으면 골라 쓰게 합니다. 억지로 넣거나 되풀이하지 않고, 활동 동사는 자료에 적힌 행위에만, 평가 표현은 자료에 드러난 수준만큼만 쓰게 합니다(없는 사실을 지어내지 않는 대원칙이 먼저입니다).</p>
+            <label class="inline vc-on"><input type="checkbox" id="vcOn"> 세특 AI 변환에 이 어휘 목록을 붙입니다</label>
+            <div class="vc-cols">
+              <label class="vc-col"><span><b>활동 동사</b> <span class="muted" id="vcVerbsN"></span></span><textarea id="vcVerbs" rows="12" placeholder="한 줄에 하나(쉼표로 이어 써도 됩니다)"></textarea></label>
+              <label class="vc-col"><span><b>평가 / 정도 표현</b> <span class="muted" id="vcEvalsN"></span></span><textarea id="vcEvals" rows="12" placeholder="한 줄에 하나(쉼표로 이어 써도 됩니다)"></textarea></label>
+            </div>
+            <div class="row-btns">
+              <button type="button" class="primary" id="vcSaveBtn">저장</button>
+              <button type="button" class="file-xlsx" id="vcImportBtn">엑셀 올리기…</button>
+              <button type="button" class="file-xlsx" id="vcExportBtn">어휘 엑셀 내려받기</button>
+              <span class="spacer"></span>
+              <button type="button" class="danger-text" id="vcResetBtn">기본 목록으로 되돌리기</button>
+            </div>
+            <p class="hint">엑셀은 첫 시트를 읽습니다. 머리글에 '동사'·'평가'가 있으면 그 열로, 머리글이 없으면 1·2열을 활동 동사, 3열을 평가 / 정도 표현으로 읽습니다. 겹치는 단어는 하나로 합칩니다.</p>
+          </div>
+        </div>
+
+        <div class="stab" data-stab-content="banned" hidden>
+          <div class="card">
+            <div class="card-head"><h2>🚫 기재 유의어</h2><span class="spacer"></span><span class="muted" id="bnState"></span></div>
+            <p class="hint">생기부에 쓰지 않는 말(상표·서비스·기관 이름 등)과 대신 쓸 표현입니다. 기록·결과·최종안에 이 말이 있으면 <mark class="ban">형광펜</mark>으로 표시하고 아래에 경고를 띄우며, 모든 AI 변환에 '이 말 대신 대체 표현을 쓸 것'을 붙입니다.</p>
+            <ul class="hint bn-rules">
+              <li>표기는 쉼표로 여러 개(예: <code>YouTube, 유튜브</code>). 영어 표기는 대소문자·띄어쓰기를 가리지 않고 낱말 전체가 맞을 때만 찾습니다.</li>
+              <li>한글 표기는 글 속 어디든 찾습니다. 평범한 낱말과 겹치면 표기에서 빼거나(예: '다음'은 빼고 Daum만), '제외할 말'에 넣으세요(예: 메타 → 제외 '메타인지').</li>
+            </ul>
+            <div class="row-btns"><input type="search" id="bnQ" placeholder="찾기"><span class="muted" id="bnCount"></span><span class="spacer"></span>
+              <button type="button" id="bnAddBtn">+ 줄 추가</button><button type="button" class="primary" id="bnSaveBtn">저장</button></div>
+            <div class="tbl-wrap bn-wrap"><table class="tbl bn-tbl" id="bnTable"></table></div>
+            <div class="row-btns">
+              <button type="button" class="file-xlsx" id="bnImportBtn">엑셀 올리기…</button>
+              <button type="button" class="file-xlsx" id="bnExportBtn">유의어 엑셀 내려받기</button>
+              <span class="spacer"></span>
+              <button type="button" class="danger-text" id="bnResetBtn">기본 목록으로 되돌리기</button>
+            </div>
+            <p class="hint">엑셀은 '기재 유의어 / 한글·다른 표기 / 대체 표현 / 제외할 말' 열을 읽습니다(내려받은 파일 모양).</p>
           </div>
         </div>
 

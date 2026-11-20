@@ -130,7 +130,73 @@
     (children || []).forEach((c) => c !== null && c !== undefined && c !== false && e.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c));
     // 안내 문장 안의 원문자는 원래 글자를 보존하고 크기만 키운다(기록 본문·폼 값 제외).
     if (tag === 'p' || (tag === 'span' && e.classList.contains('muted'))) bigCircled(e);
+    if (attrs && typeof attrs.text === 'string' && (e.classList.contains('rcard-body') || e.classList.contains('cand-body')) && !e.classList.contains('rcard-empty')) banMark(e, attrs.text);
     return e;
+  }
+  // ---------- v0.31 기재 유의어: 찾기(app/banned.py find와 같은 규칙)·형광펜·최종안 보기/고치기 ----------
+  let BAN = [];
+  async function banLoad() { const r = await rawCall('banned_get'); BAN = (r && r.ok ? r.lib : []).map((e) => ({ ...e, re: e.terms.map(banRe) })); }
+  function banRe(t) {
+    const latin = /[A-Za-z]/.test(t) && !/[가-힣]/.test(t);
+    if (!latin) return new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+    const body = [...t.replace(/ /g, '')].map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
+    return new RegExp(`(?<![A-Za-z0-9])${body}(?![A-Za-z0-9])`, 'gi');
+  }
+  function banFind(text) {
+    const hits = [];
+    if (!text || !BAN.length) return hits;
+    BAN.forEach((e) => {
+      const ex = [];
+      e.except.forEach((w) => { let i = text.indexOf(w); while (i >= 0) { ex.push([i, i + w.length]); i = text.indexOf(w, i + 1); } });
+      e.re.forEach((re) => { re.lastIndex = 0; let m; while ((m = re.exec(text))) { const a = m.index, b = a + m[0].length; if (!ex.some(([x, y]) => x <= a && b <= y)) hits.push({ a, b, word: m[0], repl: e.repl }); if (!m[0].length) re.lastIndex++; } });
+    });
+    hits.sort((x, y) => x.a - y.a || (y.b - y.a) - (x.b - x.a));
+    const out = []; let end = -1;
+    hits.forEach((h) => { if (h.a >= end) { out.push(h); end = h.b; } });
+    return out;
+  }
+  function banNodes(text, hits) {
+    const out = []; let i = 0;
+    hits.forEach((h) => { if (h.a > i) out.push(text.slice(i, h.a)); out.push(el('mark', { class: 'ban', title: `기재 유의: ${h.word} → ${h.repl || '일반적인 말로'}`, text: text.slice(h.a, h.b) })); i = h.b; });
+    if (i < text.length) out.push(text.slice(i));
+    return out;
+  }
+  function banMark(node, text) { const hits = banFind(text); if (hits.length) node.replaceChildren(...banNodes(text, hits)); }
+  const banSummary = (hits) => [...new Map(hits.map((h) => [h.word, `${h.word} → ${h.repl || '일반적인 말로'}`])).values()];
+  // 입력 칸(최종안·태그별 기록): 칸을 벗어나 있으면 형광펜이 든 '보기'를 보여 주고, 누르면 입력 칸으로(고치는 동안은 표시 없음). 아래에 경고 줄
+  function banWrap(ta) {
+    const view = el('div', { class: 'ban-view', hidden: true, title: '눌러서 고치기' });
+    const warn = el('div', { class: 'ban-warn', hidden: true });
+    const wrap = el('div', { class: 'ban-wrap' }, [view, ta, warn]);
+    const refresh = () => {
+      const t = ta.value || '';
+      const hits = banFind(t);
+      warn.hidden = !hits.length;
+      warn.textContent = hits.length ? `⚠ 기재 유의어 ${banSummary(hits).length}개: ${banSummary(hits).join(' / ')}` : '';
+      const showView = hits.length && document.activeElement !== ta;
+      if (showView) {
+        if (ta.style.display !== 'none' && ta.offsetHeight) { // 보기 칸을 입력 칸과 같은 글꼴·여백·높이로
+          const cs = getComputedStyle(ta);
+          ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderRadius', 'backgroundColor'].forEach((k) => { view.style[k] = cs[k]; });
+          view.style.minHeight = `${ta.offsetHeight}px`;
+        }
+        view.replaceChildren(...banNodes(t, hits));
+        view.hidden = false; ta.style.display = 'none';
+      } else { view.hidden = true; ta.style.display = ''; }
+    };
+    view.addEventListener('click', () => {
+      if (window.getSelection && String(window.getSelection())) return; // 글을 끌어 고르는 중이면 그대로(복사용)
+      view.hidden = true; ta.style.display = '';
+      if (!ta.disabled && !ta.readOnly) ta.focus(); else setTimeout(refresh, 1500);
+    });
+    ta.addEventListener('blur', refresh);
+    ta.addEventListener('input', () => { const hits = banFind(ta.value || ''); warn.hidden = !hits.length; warn.textContent = hits.length ? `⚠ 기재 유의어 ${banSummary(hits).length}개: ${banSummary(hits).join(' / ')}` : ''; });
+    // 코드로 글을 넣을 때(이어 붙이기·최종안에 넣기 등)도 다시 표시
+    const own = Object.getOwnPropertyDescriptor(ta, 'value') || Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+    Object.defineProperty(ta, 'value', { configurable: true, get() { return own.get.call(this); }, set(v) { own.set.call(this, v); requestAnimationFrame(refresh); } });
+    requestAnimationFrame(refresh);
+    ta._banRefresh = refresh;
+    return wrap;
   }
   // 안내 글의 원문자(①…)를 글자 그대로 두고 크게만 보이게(입력칸·선택지는 건드리지 않음, textContent는 그대로)
   function bigCircled(root) {
@@ -222,7 +288,9 @@
     if (v === 0) return '0';
     return Math.abs(v) < 0.01 ? v.toFixed(5) : v.toFixed(4);
   }
-  function todayStr() { return info.today || new Date().toISOString().slice(0, 10); }
+  // 이 컴퓨터 시각(한국 시각)으로 'YYYY-MM-DD HH:MM:SS'. toISOString()은 세계 표준시(UTC)라 9시간 이르게 나온다(마법사 Chat 후보 시각 제보, v0.31)
+  function localStamp(d) { d = d || new Date(); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+  function todayStr() { return info.today || localStamp().slice(0, 10); }
   function daysUntil(date) {
     const a = new Date(todayStr() + 'T00:00:00'), b = new Date(date + 'T00:00:00');
     return Math.round((b - a) / 86400000);
@@ -468,7 +536,7 @@
     if (name === 'records') renderRecordsPanel();
     if (name === 'export') renderExport();
     if (name === 'tags') renderTags();
-    if (name === 'prompts') renderPrompts();
+    if (name === 'prompts') { renderPrompts(); showPrTab(localStorage.getItem('sgb_prtab') === 'example' ? 'example' : 'prompt'); }
     if (name === 'tagrec') renderTagView(true);
     if (name === 'inbox') renderInbox();
     if (name === 'standards') renderStandards();
@@ -849,7 +917,7 @@
     const inactiveCount = members.length - members.filter((m) => m.active).length;
     body.appendChild(el('div', { class: 'hint', text: `활성 ${members.length - inactiveCount}명${inactiveCount ? ` / 비활성 ${inactiveCount}명${showInactive ? '' : '(숨김)'}` : ''}. 비활성 학생은 매칭 후보·일괄 처리·내보내기에서 빠지며, 기록은 지우지 않습니다.` }));
     const wrap = el('div', { class: 'tbl-wrap' });
-    const t = el('table', { class: 'tbl' });
+    const t = el('table', { class: 'tbl roster-tbl' });
     const checkAll = el('input', { type: 'checkbox', onchange: (e) => t.querySelectorAll('.rowcheck').forEach((c) => { c.checked = e.target.checked; }) });
     const subj = g.kind === 'subject';
     t.appendChild(el('tr', {}, [el('th', {}, [checkAll]), ...['학년', '반', '번호', '이름', '학번', ...(subj ? ['수업'] : []), '상태'].map((h) => el('th', { text: h }))]));
@@ -1020,7 +1088,7 @@
     };
     const draw = () => {
       tableBox.innerHTML = '';
-      const t = el('table', { class: 'tbl' });
+      const t = el('table', { class: 'tbl roster-tbl' });
       const all = el('input', { type: 'checkbox', checked: rows.every((r) => r._sel), onchange: (e) => { rows.forEach((r) => { r._sel = e.target.checked; }); draw(); } });
       t.appendChild(el('tr', {}, [el('th', {}, [all]), ...['학년', '반', '번호', '이름', '학번', ...(isSub ? ['수업'] : []), '확인'].map((h) => el('th', { text: h }))]));
       rows.forEach((row) => {
@@ -1138,7 +1206,7 @@
         if (!D.rows.length) { note.textContent = ta.value.trim() ? '읽은 학생이 없습니다. 한 줄에 학번과 이름(또는 학년 반 번호 이름)을 적어 주세요.' : ''; return; }
         const bad = D.rows.filter((r) => r.issues && r.issues.length).length;
         note.textContent = `읽은 학생 ${D.rows.length}명${bad ? ` / 확인 필요 ${bad}명(빨간 줄)` : ''} / 칸을 눌러 직접 고칠 수 있습니다.${D.edited ? ' 직접 고친 칸이 있어 위 글을 고쳐도 다시 읽지 않습니다([글로 다시 읽기]를 누르면 고친 칸은 사라집니다).' : ''}`;
-        const t = el('table', { class: 'tbl direct-tbl' });
+        const t = el('table', { class: 'tbl direct-tbl roster-tbl' });
         t.appendChild(el('tr', {}, ['줄', '학년', '반', '번호', '이름', '학번', '확인'].map((h) => el('th', { text: h }))));
         D.rows.forEach((r) => {
           const cell = (k, w) => el('td', {}, [el('input', { type: 'text', value: r[k] || '', style: `width:${w}`, oninput: (e) => { r[k] = e.target.value.trim(); D.edited = true; revalidateDirect(); } })]);
@@ -1285,7 +1353,7 @@
           return { el: el('label', { class: 'inline' }, ['학년 열이 없습니다. 학년: ', inp]), value: () => inp.value };
         };
         const preview = (cols, gb) => {
-          const t = el('table', { class: 'tbl mini' });
+          const t = el('table', { class: 'tbl mini roster-tbl' });
           t.appendChild(el('tr', {}, ['학년', '반', '번호', '이름'].map((h) => el('th', { text: h }))));
           body.slice(0, 3).forEach((r) => t.appendChild(el('tr', {}, [
             el('td', { text: has(cols.grade) ? r[cols.grade] || '' : '(입력한 학년)' }), el('td', { text: r[cols.class_no] || '' }),
@@ -1390,7 +1458,7 @@
         updateSummary();
         return;
       }
-      const t = el('table', { class: 'tbl' });
+      const t = el('table', { class: 'tbl roster-tbl' });
       const vis = visibleRows();
       const all = el('input', { type: 'checkbox', checked: vis.length > 0 && vis.every((r) => r._sel), title: '보이는 줄 모두 체크', onchange: (e) => { vis.forEach((r) => { r._sel = e.target.checked; }); renderRows(); } });
       t.appendChild(el('tr', {}, [el('th', {}, [all]), ...['#', '학년', '반', '번호', '이름', '학번', ...(isSub ? ['수업'] : []), '확인', ''].map((h) => el('th', { text: h }))]));
@@ -1487,6 +1555,8 @@
     if (name === 'year') renderRoleCards($('roleCardsSettings'), ys.role, changeRole);
     if (name === 'sched') { renderTargets(); renderSchedTable(); }
     if (name === 'trait') renderTraitDictSettings();
+    if (name === 'vocab') renderVocabSettings();
+    if (name === 'banned') renderBannedSettings();
     if (name === 'suggest') $('diagText').value = diagInfo();
   }
   function renderSettings() {
@@ -2092,8 +2162,28 @@
         opts = r.prompts.filter((x) => !x.builtin).map(o1).join('') + (base.length ? `<optgroup label="📦 기본 프롬프트" class="opt-builtin">${base.map(o1).join('')}</optgroup>` : '');
       }
     }
+    // v0.31 예시 하나 고르기: '' = 프롬프트에 든 예시 그대로, 'none' = 예시 없이, 그 밖 = 예시 목록의 id. 지금 담당 과목과 같은 예시를 맨 위에
+    let exOpts = '', exList = [];
+    const exKey = `sgb_ex_pick:${kind || ''}:${R.slot ? slotKey(R.slot) : ''}`;
+    if (opts) {
+      const er = await rawCall('examples_list');
+      exList = er && er.ok ? er.examples : [];
+      const exPick = localStorage.getItem(exKey) || '';
+      const here = R.slot ? String(R.slot.label || '').replace(/\s+/g, '') : '';
+      const item = R.slot ? R.slot.item : '';
+      const sameSubj = (e) => here && e.subject && here.includes(e.subject.replace(/\s+/g, ''));
+      const o = (e) => `<option value="${escHtml(e.id)}"${e.id === exPick ? ' selected' : ''}>${escHtml(e.label)}</option>`;
+      const top = exList.filter(sameSubj), mine = exList.filter((e) => !e.builtin && !sameSubj(e));
+      const rest = exList.filter((e) => e.builtin && !sameSubj(e) && (!item || e.item === item));
+      const areas = [...new Set(rest.map((e) => e.area || '기타'))];
+      exOpts = `<option value=""${!exPick ? ' selected' : ''}>프롬프트에 든 예시 그대로</option><option value="none"${exPick === 'none' ? ' selected' : ''}>예시 없이</option>`
+        + (top.length ? `<optgroup label="이 과목 예시">${top.map(o).join('')}</optgroup>` : '')
+        + (mine.length ? `<optgroup label="직접 만든 예시">${mine.map(o).join('')}</optgroup>` : '')
+        + areas.map((a) => `<optgroup label="📦 ${escHtml(a)}">${rest.filter((e) => (e.area || '기타') === a).map(o).join('')}</optgroup>`).join('');
+    }
     const html = `<div class="ai-conf"><b>${escHtml(title)}</b> — AI로 실행할까요?<table>${rows.filter(Boolean).map(([k, v]) => `<tr><th>${escHtml(k)}</th><td>${escHtml(v)}</td></tr>`).join('')}`
-      + (opts ? `<tr><th>프롬프트</th><td><select id="aiPrompt">${opts}</select></td></tr>` : '') + '</table>'
+      + (opts ? `<tr><th>프롬프트</th><td><select id="aiPrompt">${opts}</select></td></tr>` : '')
+      + (exOpts ? `<tr><th>예시</th><td><select id="aiExample">${exOpts}</select><div class="muted ai-ex-prev" id="aiExPrev"></div></td></tr>` : '') + '</table>'
       + `<label class="ai-extra-label" for="aiExtra">이번 추가 요구 사항 <span class="muted">(선택 / 이번 실행에만 / 저장된 지침은 그대로)</span></label>`
       + `<textarea id="aiExtra" rows="2" maxlength="1000" placeholder="예: 숫자는 빼 줘 / 탐구 과정을 더 강조 / 두 문장으로 짧게"></textarea>`
       + `<p class="hint">${warn ? `${escHtml(warn)}<br>` : ''}AI에는 글과 프롬프트만 보냅니다(명렬의 학번·이름은 보내지 않음). 글 속에 적힌 이름은 그대로 가니 확인하세요. 원문에 없는 활동·결과물은 지어내지 않게 합니다. 실행하면 크레딧이 듭니다.${wiz ? '<br>결과를 보며 대화로 고치고 싶으면 왼쪽 아래 [<i class="ico-hat"></i>프롬프트 마법사]를 누르세요.' : ''}</p></div>`;
@@ -2103,7 +2193,19 @@
       onclick: () => { goWiz = true; $('modalCancel').click(); } }) : null;
     if (wb) $('modalCancel').before(wb);
     // 반환: 취소면 null, 실행이면 { extra(추가 요구 사항), prompt(고른 프롬프트 id), kind }
-    const out = await modal(html, true, true, 'AI 실행', '취소').then((ok) => (ok ? { extra: ($('aiExtra') ? $('aiExtra').value : '').trim(), prompt: $('aiPrompt') ? $('aiPrompt').value : '', kind: kind || '' } : null))
+    const shown = modal(html, true, true, 'AI 실행', '취소');
+    const exSel = $('aiExample');
+    if (exSel) {
+      const prev = () => { const e = exList.find((x) => x.id === exSel.value); $('aiExPrev').textContent = e ? `${e.text.slice(0, 110)}${e.text.length > 110 ? '…' : ''}` : exSel.value === 'none' ? '예시를 보내지 않습니다.' : '고른 프롬프트에 저장된 예시를 씁니다.'; };
+      exSel.addEventListener('change', prev);
+      prev();
+    }
+    const out = await shown.then((ok) => {
+      if (!ok) return null;
+      const example = $('aiExample') ? $('aiExample').value : '';
+      if ($('aiExample')) { try { localStorage.setItem(exKey, example); } catch (e) { /* 무시 */ } }
+      return { extra: ($('aiExtra') ? $('aiExtra').value : '').trim(), prompt: $('aiPrompt') ? $('aiPrompt').value : '', kind: kind || '', example };
+    })
       .finally(() => { $('modalOk').classList.remove('ai-btn'); if (wb) wb.remove(); });
     if (goWiz) setTimeout(() => wiz(), 0);
     return out;
@@ -2170,16 +2272,17 @@
   }
   // jobs: [{ label, run: () => api 결과 }] — api를 직접 불러 오류도 진행 창에서 모아 보여 준다.
   // remember=false: 고른 프롬프트를 작업별 기억값으로 저장하지 않는다(묶음마다 따로 기억하는 경우)
-  async function aiRun({ title, rows, warn, jobs, summary, skipConfirm, before, after, extra, kind, prompt, remember, concurrency, wiz }) {
+  async function aiRun({ title, rows, warn, jobs, summary, skipConfirm, before, after, extra, kind, prompt, remember, concurrency, wiz, example }) {
     if (!skipConfirm) {
       const conf = await aiConfirm(title, rows, warn, kind, prompt, wiz);
       if (!conf) return null;
       extra = conf.extra;
       prompt = conf.prompt;
+      example = conf.example;
     }
     if (before && !(await before())) return null; // [AI 실행]을 누른 뒤에만 설정을 저장(취소하면 아무것도 바뀌지 않음)
-    await api.ai_extra_set(extra || '', prompt || '', remember === false ? '' : kind || ''); // 이번 실행에만: 추가 요구 사항·고른 프롬프트(끝나면 지움)
-    try { return await aiRunJobs({ title, jobs, summary, after, concurrency }); } finally { await api.ai_extra_set('', '', ''); }
+    await api.ai_extra_set(extra || '', prompt || '', remember === false ? '' : kind || '', example || ''); // 이번 실행에만: 추가 요구 사항·고른 프롬프트·고른 예시(끝나면 지움)
+    try { return await aiRunJobs({ title, jobs, summary, after, concurrency }); } finally { await api.ai_extra_set('', '', '', ''); }
   }
   // 여러 건은 동시에 AI_PARALLEL건씩 보낸다(concurrency로 바꿈: 앞 결과를 보고 쓰는 작업은 1).
   // out.notRun: 끝내지 못한 건의 번호(중지·장애로 보내지 않았거나 바로 중지로 버린 건) — 이어서 돌릴 때 쓴다.
@@ -2337,6 +2440,7 @@
   }
   function renderStudentList() {
     const box = $('recList');
+    const keepTop = box.scrollTop; // 다시 그려도 보던 자리 그대로(최종안 수정·버튼마다 목록이 아래로 밀린다는 제보, v0.31)
     box.innerHTML = '';
     const search = el('input', { type: 'text', class: 'search', placeholder: '이름·학번 찾기', value: R.search, oninput: debounce((e) => { R.search = e.target.value; renderStudentList(); }, 200) });
     const filter = el('select', { onchange: (e) => { R.filter = e.target.value; renderStudentList(); } }, [
@@ -2377,6 +2481,7 @@
       ]));
     }
     if (!list.length) box.appendChild(el('p', { class: 'muted', text: '조건에 맞는 학생이 없습니다.' }));
+    box.scrollTop = keepTop;
   }
   // 묶음 색: 반·수업 이름으로 정해 화면이 바뀌어도 같은 색
   // 원색 계열(진하게). 머리 칸은 이 색으로 채우고 흰 글자를 쓰므로 흰 글자가 잘 읽히는 진하기로 둔다
@@ -2638,11 +2743,11 @@
   function tagChipMenu(cur, tags, onPick, opt) {
     opt = opt || {};
     const names = new Map((tags || []).map((t) => [t.id, t.name]));
-    const face = opt.label ? el('span', { class: 'tag tag-face', text: opt.label })
+    const face = opt.label ? el('span', { class: opt.button ? 'btn-face' : 'tag tag-face', text: opt.label })
       : cur ? el('span', { class: 'tag tag-face' + tagC(cur), text: `● ${names.get(cur) || '(지운 태그)'} ▾` }) : el('span', { class: 'tag tag-face', text: '태그 없음 ▾' });
     const list = (tags || []).map((t) => el('button', { type: 'button', class: 'tag tag-pick' + tagC(t.id) + (t.id === cur ? ' cur' : ''), text: `● ${t.name}${t.id === cur ? ' ✔' : ''}`, onclick: () => onPick(t.id, t.name) }));
     if (opt.none) list.push(el('button', { type: 'button', class: 'tag tag-pick' + (!cur ? ' cur' : ''), text: `태그 없음${!cur ? ' ✔' : ''}`, onclick: () => onPick(0, '태그 없음') }));
-    const d = el('details', { class: 'opt-menu menu-down tag-menu' }, [el('summary', { title: opt.title || '눌러서 태그 고르기' }, [face]), el('div', { class: 'opt-list tag-list' }, list)]);
+    const d = el('details', { class: 'opt-menu menu-down tag-menu' + (opt.button ? ' btn-menu' : '') }, [el('summary', { title: opt.title || '눌러서 태그 고르기' }, [face]), el('div', { class: 'opt-list tag-list' }, list)]);
     if (opt.disabled) d.addEventListener('toggle', () => { d.open = false; });
     return d;
   }
@@ -3075,6 +3180,60 @@
       done: () => { if (R.sno) loadStudent(true); } });
   }
   // ---------- 설정 › 행특 사전 ----------
+  // ---------- v0.31 기재 유의어(설정 › 기재 유의어) ----------
+  const BN = { rows: [], q: '', dirty: false };
+  async function renderBannedSettings() {
+    const r = await call('banned_get');
+    if (!r) return;
+    BN.rows = r.lib.map((e) => ({ terms: e.terms.join(', '), repl: e.repl, except: e.except.join(', ') }));
+    BN.dirty = false;
+    $('bnState').textContent = r.is_default ? '기본 목록' : '직접 고친 목록';
+    bnDraw();
+  }
+  function bnDraw() {
+    const t = $('bnTable');
+    t.innerHTML = '';
+    t.appendChild(el('tr', {}, ['표기(쉼표로 여러 개)', '대체 표현', '제외할 말', ''].map((h) => el('th', { text: h }))));
+    const q = BN.q.replace(/\s+/g, '').toLowerCase();
+    let shown = 0;
+    BN.rows.forEach((row, i) => {
+      if (q && !`${row.terms}${row.repl}${row.except}`.replace(/\s+/g, '').toLowerCase().includes(q)) return;
+      shown++;
+      const inp = (k, ph) => { const x = el('input', { type: 'text', value: row[k], placeholder: ph }); x.addEventListener('input', () => { row[k] = x.value; bnMarkDirty(); }); return x; };
+      t.appendChild(el('tr', {}, [el('td', {}, [inp('terms', '예: YouTube, 유튜브')]), el('td', {}, [inp('repl', '예: 동영상 플랫폼')]), el('td', {}, [inp('except', '(선택)')]),
+        el('td', {}, [el('button', { type: 'button', class: 'o-delbtn', title: '이 줄 지우기', text: '✕', onclick: () => { BN.rows.splice(i, 1); bnMarkDirty(); bnDraw(); } })])]));
+    });
+    $('bnCount').textContent = `${BN.rows.length}개${q ? ` 중 ${shown}개 보임` : ''}${BN.dirty ? ' / 저장 안 됨' : ''}`;
+  }
+  function bnMarkDirty() { BN.dirty = true; $('bnCount').textContent = `${BN.rows.length}개 / 저장 안 됨`; }
+  const bnLib = () => BN.rows.map((r) => ({ terms: r.terms.split(','), repl: r.repl, except: r.except.split(',') })).filter((e) => e.terms.some((x) => x.trim()));
+  async function bnAfter(lib, msg, prevLib) {
+    await banLoad();
+    await renderBannedSettings();
+    if (prevLib) actionToast(msg, '되돌리기', async () => { if (await mutate('banned_save', prevLib)) { await banLoad(); await renderBannedSettings(); toast('앞 목록으로 되돌렸습니다.'); } }, 20000);
+    else toast(msg);
+  }
+  // ---------- v0.31 세특 어휘(설정 › 세특 어휘) ----------
+  const vcWords = (t) => [...new Set(String(t || '').split(/[\n,]/).map((w) => w.replace(/\s+/g, ' ').trim()).filter(Boolean))];
+  function vcShow(v, isDefault) {
+    $('vcOn').checked = !!v.on;
+    $('vcVerbs').value = v.verbs.join('\n');
+    $('vcEvals').value = v.evals.join('\n');
+    $('vcVerbsN').textContent = `${v.verbs.length}개`;
+    $('vcEvalsN').textContent = `${v.evals.length}개`;
+    $('vcState').textContent = isDefault ? '기본 목록' : '직접 고친 목록';
+  }
+  async function renderVocabSettings() {
+    const r = await call('vocab_get');
+    if (r) vcShow(r.vocab, r.is_default);
+  }
+  async function vocabSave(msg) {
+    const prev = await call('vocab_get');
+    const r = await mutate('vocab_save', { on: $('vcOn').checked, verbs: vcWords($('vcVerbs').value), evals: vcWords($('vcEvals').value) });
+    if (!r) return;
+    vcShow(r.vocab, false);
+    if (msg && prev) actionToast(msg, '되돌리기', async () => { const u = await mutate('vocab_save', prev.vocab); if (u) { vcShow(u.vocab, false); toast('앞 목록으로 되돌렸습니다.'); } }, 20000);
+  }
   async function renderTraitDictSettings() {
     const r = await traitDict(true);
     if (!r) return;
@@ -3546,7 +3705,9 @@
             const res = r ? await mutate('update_record', r.id, data) : await mutate('add_record', R.slot.group_id, R.slot.item, R.sno, data);
             if (!res) return;
             closeSheet();
-            toast(r ? '고쳤습니다.' : '추가했습니다.');
+            const bh = banSummary(banFind(content.value));
+            if (bh.length) toast(`${r ? '고쳤습니다' : '추가했습니다'}. 기재 유의어 ${bh.length}개가 있습니다: ${bh.join(' / ')}`, 7000);
+            else toast(r ? '고쳤습니다.' : '추가했습니다.');
             const s = R.students.find((x) => x.student_no === R.sno);
             if (s && !r) s.records += 1;
             loadStudent(true);
@@ -3722,7 +3883,7 @@
     // [옵션 ▾]: 최종안 다듬기(AI) · 🪄 마법사
     const conf = v.records.filter((r) => r.confirmed);
     const optMenu = el('details', { class: 'opt-menu' }, [el('summary', { text: '옵션 ▾' }), el('div', { class: 'opt-list' }, [polishBtn, polishWiz])]);
-    fb.append(ta, el('div', { class: 'final-actions' }, [bc, saveState, el('span', { class: 'spacer' }), saveBtn, optMenu, closeBtn]));
+    fb.append(banWrap(ta), el('div', { class: 'final-actions' }, [bc, saveState, el('span', { class: 'spacer' }), saveBtn, optMenu, closeBtn]));
     if (closed) fb.appendChild(el('div', { class: 'hint', text: `■ ${f.closed_at || ''} 마감 — 기록·AI·최종안 편집이 잠겼습니다. 조회·복사·내보내기는 됩니다.` }));
     finSec.appendChild(fb);
 
@@ -4632,6 +4793,8 @@
     setBytes(st.ui.bytes, bytesOf(st.draft.content));
   }
   function tvEditable(r) { return !ys.archived && !r.closed && r.active && !r.gone; }
+  // 태그만은 마감된 기록도 바꿀 수 있다(글이 아니므로). 보관 학년도·비활성·지운 기록은 제외
+  function tvTaggable(r) { return !ys.archived && r.active && !r.gone; }
   function tvLock(r) {
     if (r.closed) return { cls: 'closed', text: '■ 마감됨 / 읽기 전용' };
     if (ys.archived) return { cls: 'other', text: '🔒 보관 학년도 / 읽기 전용' };
@@ -4809,6 +4972,10 @@
       (() => { const yet = d.records.filter((r) => tvEditable(r) && !r.has_final).length; return editable ? menuBox('선택 ▾', [
         el('button', { type: 'button', class: 'small', text: `이 조건 모두 선택 (${editable}건)`, title: '지금 필터에 맞는 기록 중 고칠 수 있는 것을 모두 고릅니다(더 보기 아래 기록 포함)', onclick: () => tvSelectAll(true) }),
         el('button', { type: 'button', class: 'small', disabled: !yet, title: '최종안이 아직 없는 학생(항목)의 기록만 고릅니다', text: `최종안 없는 학생 기록만 선택 (${yet}건)`, onclick: () => tvSelectAll(true, (r) => !r.has_final) })], '여러 기록 고르기') : null; })());
+    // 필터된 기록 태그 한꺼번에 바꾸기: 확정·마감된 기록도 포함(태그만 바뀌고 글은 그대로). 비활성 학생·보관 학년도는 제외
+    const taggable = d.records.filter(tvTaggable);
+    if (taggable.length) sum.appendChild(tagChipMenu(0, d.tags || [], (tid, tname) => tvTagFiltered(taggable, tid, tname),
+      { label: `🏷️ 필터된 ${taggable.length}건 태그 바꾸기 ▾`, title: '지금 필터에 맞는 기록(확정·마감 포함)의 태그를 한꺼번에 바꿉니다. 기록 글은 그대로입니다', none: true, button: true }));
     if (TV.bulk) {
       const b = TV.bulk;
       sum.append(el('span', { class: 'tv-bulk-note' }, [`최근 일괄 작업: ${b.text} `, el('button', { type: 'button', class: 'link', text: '되돌리기', onclick: () => tvBulkUndo() })]));
@@ -4957,7 +5124,7 @@
     card.append(el('div', { class: 'tv-rec-head' }, [cb, metaText,
       can && r.kind !== 'existing' ? el('button', { type: 'button', class: 'link', text: '날짜·활동명 수정', 'aria-label': `${who} 날짜·활동명 수정`, onclick: () => { metaEdit.hidden = !metaEdit.hidden; if (!metaEdit.hidden) ti.focus(); } }) : null,
       lock ? el('span', { class: `tv-lock ${lock.cls}`, text: lock.text }) : null, el('span', { class: 'spacer' }), badges, bytes]),
-    metaEdit, el('div', { class: 'rcard-label' + (r.confirmed ? ' conf' : '') , text: r.confirmed ? '✔ 확정본' : r.orig !== r.content ? '↩ 이전 반영본(확정 전) — 원문은 아래 결과에' : (r.kind === 'existing' ? '기존 완성문' : '원문') }), ta,
+    metaEdit, el('div', { class: 'rcard-label' + (r.confirmed ? ' conf' : '') , text: r.confirmed ? '✔ 확정본' : r.orig !== r.content ? '↩ 이전 반영본(확정 전) — 원문은 아래 결과에' : (r.kind === 'existing' ? '기존 완성문' : '원문') }), banWrap(ta),
     el('div', { class: 'tv-rec-foot' }, [chips, el('span', { class: 'spacer' }), state,
       can && !r.confirmed && String(r.orig || '').trim() ? (() => { const b = el('button', { type: 'button', class: 'ai-btn small', title: '원문을 AI로 변환해 아래 결과 묶음 맨 위에 더합니다(확정은 따로). 확인 창에서 프롬프트 마법사로 대화할 수도 있습니다', text: 'AI 변환' }); b.addEventListener('click', () => tvAiRecord(r, b)); return b; })() : null]),
     tvBundle(r, can));
@@ -5083,7 +5250,7 @@
     bar.hidden = false;
     const recs = TV.data.records.filter((r) => TV.sel.has(r.id));
     const n = new Set(recs.map((r) => r.student_no)).size;
-    const addSel = tagChipMenu(0, TV.data.tags || [], (tid, tname) => tvBulkRun([tid], tname, 'add', n), { label: '태그 바꾸기 ▾', title: '고른 기록을 그 태그 하나로 바꿉니다' });
+    const addSel = tagChipMenu(0, TV.data.tags || [], (tid, tname) => tvBulkRun([tid], tname, 'add', n), { label: '태그 바꾸기 ▾', title: '고른 기록을 그 태그 하나로 바꿉니다', button: true });
     const rmSel = el('button', { type: 'button', title: '고른 기록의 태그를 떼어 태그 없음으로', text: '태그 빼기', onclick: () => tvBulkRun((TV.data.tags || []).map((t) => t.id), '태그', 'remove', n) });
     const titleIn = el('input', { type: 'text', class: 'tv-bulk-in', placeholder: '활동명', 'aria-label': '고른 기록에 넣을 활동명' });
     const dateIn = el('input', { type: 'date', class: 'tv-bulk-in', 'aria-label': '고른 기록에 넣을 날짜' });
@@ -5150,6 +5317,23 @@
     tvSaveSummary();
     try { return await p; } finally { TV.ops.delete(p); tvSaveSummary(); }
   }
+  async function tvTagFiltered(recs, tid, tname) {
+    const n = new Set(recs.map((r) => r.student_no)).size;
+    const closed = recs.filter((r) => r.closed).length;
+    const what = tid ? `'${tname}' 태그로 바꿉니다` : '태그를 떼어 태그 없음으로 둡니다';
+    if (!(await confirmBox(`지금 필터에 맞는 ${n}명 ${recs.length}건의 ${what}.${closed ? ` 마감된 기록 ${closed}건도 태그만 바뀝니다(글·확정본·최종안은 그대로).` : ''} 바꾼 뒤 위 요약 줄의 [되돌리기]로 취소할 수 있습니다.`, '바꾸기'))) return;
+    if (!(await leaveOk())) return;
+    const ids = recs.map((r) => r.id);
+    const tids = tid ? [tid] : (TV.data.tags || []).map((t) => t.id);
+    const mode = tid ? 'add' : 'remove';
+    const r = await tvOp(() => mutate('tag_records_undoable', ids, tids, mode, TV.year, true));
+    if (!r) return;
+    tvApplyStates(r.states);
+    TV.bulk = { text: `필터된 ${n}명 ${ids.length}건 중 ${mode === 'add' ? r.pairs.length : new Set(r.pairs.map((p) => p[0])).size}건 ${tid ? `'${tname}' 태그로 바꿈` : '태그 뺌'}`, pairs: r.pairs, mode, allowClosed: true };
+    tvRenderSum();
+    toast(`${TV.bulk.text}. 위 요약 줄의 [되돌리기]로 취소할 수 있습니다.`, 5000);
+    renderTagView(true);
+  }
   async function tvBulkRun(tids, tname, mode, n) {
     if (!tids.length) return;
     if (!(await leaveOk())) return;
@@ -5190,7 +5374,7 @@
       toast(why ? `${u.done}건을 되돌렸습니다. ${why} 건너뛰었습니다.` : `${u.done}건을 되돌렸습니다.`, why ? 6000 : 3000);
       return;
     }
-    const u = await tvOp(() => mutate('undo_tag_records', b.pairs, b.mode, TV.year));
+    const u = await tvOp(() => mutate('undo_tag_records', b.pairs, b.mode, TV.year, !!b.allowClosed));
     if (!u) return;
     tvApplyStates(u.states);
     TV.bulk = null;
@@ -6058,6 +6242,66 @@
     if (r) P.data = r;
     return r;
   }
+  // ---------- v0.31 예시 목록(프롬프트 메뉴 › 📚 예시) ----------
+  const EX = { id: null, list: [], q: '' };
+  const EX_ITEM = { subject: '세특', autonomy: '자율', career: '진로', club: '동아리', behavior: '행특' };
+  function showPrTab(tab) {
+    document.querySelectorAll('#prTabs .tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.prtab === tab));
+    document.querySelectorAll('[data-prtab-content]').forEach((c) => { c.hidden = c.dataset.prtabContent !== tab; });
+    try { localStorage.setItem('sgb_prtab', tab); } catch (e) { /* 무시 */ }
+    if (tab === 'example') renderExamples();
+  }
+  async function renderExamples(keepId) {
+    const r = await call('examples_list');
+    if (!r) return;
+    EX.list = r.examples;
+    if (keepId !== undefined) EX.id = keepId;
+    if (EX.id && !EX.list.some((e) => e.id === EX.id)) EX.id = null;
+    if (EX.id === null && EX.list.length && keepId === undefined) EX.id = EX.list[0].id;
+    exDrawList();
+    exFill();
+  }
+  function exDrawList() {
+    const box = $('exList');
+    box.innerHTML = '';
+    const q = EX.q.replace(/\s+/g, '');
+    const hit = (e) => !q || `${e.label}${e.area}${e.subject}${e.text}`.replace(/\s+/g, '').includes(q);
+    const item = (e) => el('button', { type: 'button', class: 'pr-item' + (e.id === EX.id ? ' active' : ''), title: e.text.slice(0, 200), onclick: () => { EX.id = e.id; exDrawList(); exFill(); } },
+      [e.item !== 'subject' ? el('span', { class: 'tag' }, [EX_ITEM[e.item]]) : null, el('b', { text: e.label })]);
+    const mine = EX.list.filter((e) => !e.builtin && hit(e));
+    mine.forEach((e) => box.appendChild(item(e)));
+    const base = EX.list.filter((e) => e.builtin && hit(e));
+    const areas = [...new Set(base.map((e) => e.area || '기타'))];
+    areas.forEach((a) => {
+      const list = base.filter((e) => (e.area || '기타') === a);
+      const k = `sgb_ex_open:${a}`;
+      const open = !!q || list.some((e) => e.id === EX.id) || localStorage.getItem(k) === '1';
+      const d = el('details', { class: 'pr-group', open }, [el('summary', {}, [el('b', { text: `📦 ${a} (${list.length})` })]), ...list.map(item)]);
+      d.addEventListener('toggle', () => { try { localStorage.setItem(k, d.open ? '1' : '0'); } catch (e) { /* 무시 */ } });
+      box.appendChild(d);
+    });
+    if (!mine.length && !base.length) box.appendChild(el('p', { class: 'hint', text: q ? '찾는 예시가 없습니다.' : '예시가 없습니다. [+ 새 예시]로 더하세요.' }));
+  }
+  function exFill() {
+    const e = EX.list.find((x) => x.id === EX.id) || null;
+    $('exName').value = e ? e.name : '';
+    $('exName').placeholder = e ? e.label : "비우면 '[과목] 첫 구절'";
+    $('exItem').value = e ? e.item : 'subject';
+    $('exArea').value = e ? e.area : '';
+    $('exSubject').value = e ? e.subject : '';
+    $('exText').value = e ? e.text : '';
+    $('exSource').textContent = e && e.source ? `출처: ${e.source}` : '';
+    $('exState').textContent = e ? (e.builtin ? '기본 예시' : '직접 만든 예시') : '새 예시';
+    $('exDelBtn').hidden = !e;
+    $('exBytes').textContent = `${bytesOf($('exText').value)} Byte`;
+  }
+  async function exSave() {
+    const cur = EX.list.find((x) => x.id === EX.id) || null;
+    const r = await mutate('example_save', { id: cur ? cur.id : '', name: $('exName').value, item: $('exItem').value, area: $('exArea').value, subject: $('exSubject').value, text: $('exText').value, source: cur ? cur.source : '' });
+    if (!r) return;
+    toast(cur ? '예시를 저장했습니다.' : '새 예시를 만들었습니다.');
+    renderExamples(r.example.id);
+  }
   async function renderPrompts() {
     const r = await loadPromptList();
     if (!r) return;
@@ -6302,7 +6546,7 @@
     const out = await busyRun(btn, 'cwpaste', () => aiRun({ title: parent ? '이어서 고치기' : '대화 시작', skipConfirm: true,
       jobs: [{ label: '붙여넣은 글', run: () => api.prompt_chat_free(chain, text, model.value, parent ? parent.orig : CW.paste, turns) }] }));
     if (!out || !out.done) return;
-    const t = { id: `L${Date.now()}`, parent_id: parent ? parent.id : null, orig: parent ? parent.orig : CW.paste, turns, chain, text: out.results[0].text, model: modelName(model), locked: false, created_at: new Date().toISOString().replace('T', ' ') };
+    const t = { id: `L${Date.now()}`, parent_id: parent ? parent.id : null, orig: parent ? parent.orig : CW.paste, turns, chain, text: out.results[0].text, model: modelName(model), locked: false, created_at: localStamp() };
     CW.local.push(t);
     while (CW.local.length > 3) { const i = CW.local.findIndex((x) => !x.locked && x !== t); if (i < 0) break; CW.local.splice(i, 1); }
     CW.cur = t;
@@ -7037,7 +7281,7 @@
     let out;
     try {
       const failedIds = [];
-      out = await aiRun({ title: 'Inbox 자료 정제', skipConfirm: true, extra: conf.extra, prompt: conf.prompt, kind: 'refine', remember: !ibPromptKeyUse(b),
+      out = await aiRun({ title: 'Inbox 자료 정제', skipConfirm: true, extra: conf.extra, prompt: conf.prompt, example: conf.example, kind: 'refine', remember: !ibPromptKeyUse(b),
         jobs: rows.map((r) => ({ label: `${r.name || r.student_no || ''} ${(r.content || '').slice(0, 16)}`.trim(), run: () => api.ai_inbox_row(r.id, modelIndex), onFail: () => failedIds.push(r.id) })),
         after: (o) => { out = o; o.retry = [...failedIds, ...o.notRun.map((i) => rows[i].id)]; } });
     } finally { await jobEnd(); if (btn && btn.isConnected) { btn.disabled = false; btn.classList.remove('busy-btn'); } }
@@ -8341,6 +8585,31 @@
     $('tdEditBtn').addEventListener('click', openTraitDictEditor);
     $('tdExportBtn').addEventListener('click', async () => { const r = await call('trait_dict_export'); if (r && r.path) toast(`사전 엑셀을 저장했습니다: ${r.path}`, 6000); });
     $('tdImportBtn').addEventListener('click', tdImport);
+    $('vcSaveBtn').addEventListener('click', () => vocabSave('세특 어휘를 저장했습니다.'));
+    $('vcOn').addEventListener('change', () => vocabSave($('vcOn').checked ? '세특 AI 변환에 어휘 목록을 붙입니다.' : '세특 어휘 목록을 붙이지 않습니다.'));
+    ['vcVerbs', 'vcEvals'].forEach((id) => $(id).addEventListener('input', () => { $(id === 'vcVerbs' ? 'vcVerbsN' : 'vcEvalsN').textContent = `${vcWords($(id).value).length}개 (저장 전)`; }));
+    $('vcImportBtn').addEventListener('click', async () => {
+      const prev = await call('vocab_get');
+      const r = await mutate('vocab_import');
+      if (!r || r.cancelled) return;
+      vcShow(r.vocab, false);
+      actionToast(`'${r.name}'에서 활동 동사 ${r.vocab.verbs.length}개, 평가 / 정도 표현 ${r.vocab.evals.length}개를 읽어 바꿨습니다.`, '되돌리기', async () => { const u = await mutate('vocab_save', prev.vocab); if (u) { vcShow(u.vocab, prev.is_default); toast('앞 목록으로 되돌렸습니다.'); } }, 20000);
+    });
+    $('bnQ').addEventListener('input', () => { BN.q = $('bnQ').value.trim(); bnDraw(); });
+    $('bnAddBtn').addEventListener('click', () => { BN.rows.unshift({ terms: '', repl: '', except: '' }); BN.q = ''; $('bnQ').value = ''; bnMarkDirty(); bnDraw(); const f = $('bnTable').querySelector('tr:nth-child(2) input'); if (f) f.focus(); });
+    $('bnSaveBtn').addEventListener('click', async () => { const prev = await call('banned_get'); const r = await mutate('banned_save', bnLib()); if (r) bnAfter(r.lib, `기재 유의어 ${r.lib.length}개를 저장했습니다.`, prev && prev.lib); });
+    $('bnImportBtn').addEventListener('click', async () => { const prev = await call('banned_get'); const r = await mutate('banned_import'); if (r && !r.cancelled) bnAfter(r.lib, `'${r.name}'에서 기재 유의어 ${r.lib.length}개를 읽어 바꿨습니다.`, prev && prev.lib); });
+    $('bnExportBtn').addEventListener('click', async () => { const r = await call('banned_export'); if (r && r.path) toast(`저장했습니다: ${r.path}`, 5000); });
+    $('bnResetBtn').addEventListener('click', async () => {
+      if (!(await confirmBox('기재 유의어를 기본 목록으로 되돌립니다. 지금 목록은 지워집니다(먼저 엑셀로 내려받아 둘 수 있습니다).', '되돌리기'))) return;
+      const r = await mutate('banned_reset'); if (r) bnAfter(r.lib, '기본 목록으로 되돌렸습니다.');
+    });
+    $('vcExportBtn').addEventListener('click', async () => { const r = await call('vocab_export'); if (r && r.path) toast(`저장했습니다: ${r.path}`, 5000); });
+    $('vcResetBtn').addEventListener('click', async () => {
+      if (!(await confirmBox('세특 어휘를 기본 목록으로 되돌립니다. 지금 목록은 지워집니다(먼저 엑셀로 내려받아 둘 수 있습니다).', '되돌리기'))) return;
+      const r = await mutate('vocab_reset');
+      if (r) { vcShow(r.vocab, true); toast('기본 목록으로 되돌렸습니다.'); }
+    });
     $('tdUndoBtn').addEventListener('click', async () => { if (await mutate('trait_dict_undo')) tdAfter('앞 사전으로 되돌렸습니다.'); });
     $('tdResetBtn').addEventListener('click', async () => { if (!(await confirmBox('기본 사전으로 되돌립니다. 지금 사전은 [↩ 앞 사전으로]로 한 번 되살릴 수 있습니다.', '기본으로'))) return; if (await mutate('trait_dict_reset')) tdAfter('기본 사전으로 되돌렸습니다.'); });
     $('recJoinBulk').addEventListener('click', openJoinBulk);
@@ -8409,6 +8678,20 @@
     $('prPrompt').addEventListener('input', savePrompt);
     $('prExample').addEventListener('input', savePrompt);
     $('prNewBtn').addEventListener('click', () => newPrompt(null));
+    document.querySelectorAll('#prTabs .tab-btn').forEach((b) => b.addEventListener('click', () => showPrTab(b.dataset.prtab)));
+    $('exNewBtn').addEventListener('click', () => { EX.id = null; exDrawList(); exFill(); $('exText').focus(); });
+    $('exSaveBtn').addEventListener('click', exSave);
+    $('exText').addEventListener('input', () => { $('exBytes').textContent = `${bytesOf($('exText').value)} Byte`; });
+    $('exQ').addEventListener('input', () => { EX.q = $('exQ').value.trim(); exDrawList(); });
+    $('exDelBtn').addEventListener('click', async () => {
+      const e = EX.list.find((x) => x.id === EX.id);
+      if (!e || !(await confirmBox(`'${e.label}' 예시를 지웁니다.${e.builtin ? ' 기본 예시는 [기본 예시로 되돌리기]로 되살릴 수 있습니다.' : ''}`, '삭제'))) return;
+      if (await mutate('example_delete', e.id)) { toast('예시를 지웠습니다.'); EX.id = null; renderExamples(); }
+    });
+    $('exResetBtn').addEventListener('click', async () => {
+      if (!(await confirmBox('기본 예시를 처음 모양으로 되돌립니다(고친 내용은 사라지고, 지운 기본 예시는 되살아납니다). 직접 만든 예시는 그대로입니다.', '되돌리기'))) return;
+      if (await mutate('examples_reset_builtin')) { toast('기본 예시를 되돌렸습니다.'); renderExamples(); }
+    });
     // 후보 글에서 일부를 마우스로 고르면 [최종안에 넣기] 버튼을 띄운다
     const selBtn = el('button', { type: 'button', class: 'sel-insert', hidden: true, text: '⤵ 최종안에 넣기' });
     document.body.appendChild(selBtn);
@@ -8519,6 +8802,7 @@
     $('verText').textContent = 'v' + info.version.replace(/\.0$/, '');
     const c = await api.load_config();
     cfg = c.config;
+    await banLoad(); // 기재 유의어 목록(형광펜·경고)
     setTimeout(() => prefetchModelNames(), 1500);
     dataDir = c.data_dir || info.data_dir;
     const prob = c.problem || {};

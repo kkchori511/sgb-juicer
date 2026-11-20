@@ -103,6 +103,15 @@ def main():
     # W03: 충돌·마감 오류는 code로 구분
     assert api.update_record(a, {"content": "x", "expect": {"content": "옛"}})["code"] == "conflict"
     assert api.update_record(d, {"content": "x"})["code"] == "closed"
+    # 필터된 기록 태그 바꾸기: 마감된 기록(d)은 보통 일괄 태그로는 막히고, allow_closed면 태그만 바뀐다(글은 그대로)
+    assert api.tag_records_undoable([d], [t2], "add")["code"] == "closed"
+    before = [r for r in ok(api.tag_view(t, {}))["records"] if r["id"] == d][0]["content"]
+    pairs = ok(api.tag_records_undoable([d], [t2], "add", None, True))["pairs"]
+    rd = [r for r in ok(api.tag_view(t2, {}))["records"] if r["id"] == d][0]
+    assert rd["tags"] == [t2] and rd["content"] == before and rd["closed"]
+    assert api.undo_tag_records(pairs, "add")["done"] == 0  # 되돌리기도 allow_closed 없이는 마감 기록을 건너뜀
+    assert ok(api.undo_tag_records(pairs, "add", None, True))["done"] == 1
+    assert [r for r in ok(api.tag_view(t, {}))["records"] if r["id"] == d][0]["tags"] == [t]
     # W11: 학년도가 다르면 저장하지 않음
     assert not api.update_record(a, {"content": "x", "year": 2025})["ok"]
     # W04: 확인과 쓰기 사이에 다른 저장이 끼지 못함(같은 잠금) — 확인 중에 다른 스레드가 쓰려 하면 기다린다

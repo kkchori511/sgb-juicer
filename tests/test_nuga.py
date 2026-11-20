@@ -121,7 +121,7 @@ def test_all():
     assert all("항상 지킴" in x for x in sent[1:])
     cr = ok(api.add_record(hr, "career", "10403", {"content": "진로 탐색"}))["id"]
     ok(api.ai_record(cr))
-    assert "항상 지킴" not in sent[-1]
+    assert "[행동특성 및 종합의견 — 항상 지킴" not in sent[-1]  # 기재 유의어 지침(모든 항목)에도 '항상 지킴'이 있어 제목 전체로 본다
 
 
 if __name__ == "__main__":

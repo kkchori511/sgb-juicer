@@ -1146,17 +1146,17 @@ class Api:
         return {"record": self._rec().revert_record(rid, before or {}, after or {})}
 
     @safe
-    def tag_records_undoable(self, record_ids, tag_ids, mode="add", year=None):
+    def tag_records_undoable(self, record_ids, tag_ids, mode="add", year=None, allow_closed=False):
         self._editable(year)
         rec = self._rec()
-        pairs = rec.tag_records_changed(record_ids, tag_ids, mode)
+        pairs = rec.tag_records_changed(record_ids, tag_ids, mode, bool(allow_closed))
         return {"pairs": pairs, "states": {str(r): rec.record_state(r) for r in {p[0] for p in pairs}}}
 
     @safe
-    def undo_tag_records(self, pairs, mode, year=None):
+    def undo_tag_records(self, pairs, mode, year=None, allow_closed=False):
         self._editable(year)
         rec = self._rec()
-        done, skipped, changed = rec.undo_tag_pairs(pairs, mode)
+        done, skipped, changed = rec.undo_tag_pairs(pairs, mode, bool(allow_closed))
         ids = {int(p[0]) for p in pairs or []}
         states = {}
         for r in ids:
@@ -1228,6 +1228,113 @@ class Api:
     # ---------- v0.22 행특 설계 카드 ----------
     def _names(self):
         return [x["name"] for x in self._db().q("SELECT name FROM students")]
+
+    # ---------- v0.31 예시 목록(프롬프트 메뉴 › 예시) ----------
+    @safe
+    def examples_list(self):
+        from . import examples
+        return {"examples": examples.load()}
+
+    @safe
+    def example_save(self, e):
+        from . import examples
+        return {"example": examples.save(e), "examples": examples.load()}
+
+    @safe
+    def example_delete(self, eid):
+        from . import examples
+        examples.delete(eid)
+        return {"examples": examples.load()}
+
+    @safe
+    def examples_reset_builtin(self):
+        from . import examples
+        return {"examples": examples.reset_builtin()}
+
+    # ---------- v0.31 기재 유의어(설정 › 기재 유의어) ----------
+    @safe
+    def banned_get(self):
+        from . import banned
+        return {"lib": banned.load(), "is_default": banned.is_default()}
+
+    @safe
+    def banned_save(self, lib):
+        from . import banned
+        return {"lib": banned.save(lib)}
+
+    @safe
+    def banned_reset(self):
+        from . import banned
+        return {"lib": banned.reset()}
+
+    @safe
+    def banned_import(self, path=None):
+        from . import banned
+        if path is None:
+            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
+            if not res:
+                return {"ok": False, "cancelled": True}
+            path = res[0] if isinstance(res, (list, tuple)) else res
+        return {"lib": banned.save(banned.from_xlsx(path)), "name": Path(path).name}
+
+    @safe
+    def banned_export(self):
+        from . import banned
+        res = self._window.create_file_dialog(webview.SAVE_DIALOG, save_filename=f"기재_유의어_{time.strftime('%Y%m%d')}.xlsx", file_types=("Excel 파일 (*.xlsx)",))
+        if not res:
+            return {"ok": False, "cancelled": True}
+        path = res[0] if isinstance(res, (list, tuple)) else res
+        if not path.lower().endswith(".xlsx"):
+            path += ".xlsx"
+        try:
+            banned.to_xlsx(banned.load(), path)
+        except PermissionError:
+            raise db.DbError("저장하지 못했습니다. 같은 파일이 Excel에서 열려 있으면 닫고 다시 시도해 주세요.")
+        return {"path": path}
+
+    # ---------- v0.31 세특 어휘 ----------
+    @safe
+    def vocab_get(self):
+        from . import vocab
+        return {"vocab": vocab.load(), "is_default": vocab.is_default()}
+
+    @safe
+    def vocab_save(self, d):
+        from . import vocab
+        return {"vocab": vocab.save(d)}
+
+    @safe
+    def vocab_reset(self):
+        from . import vocab
+        return {"vocab": vocab.reset()}
+
+    @safe
+    def vocab_import(self, path=None):
+        """엑셀을 읽어 바로 바꾼다(앞 목록은 화면의 되돌리기로)."""
+        from . import vocab
+        if path is None:
+            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
+            if not res:
+                return {"ok": False, "cancelled": True}
+            path = res[0] if isinstance(res, (list, tuple)) else res
+        new = vocab.from_xlsx(path)
+        new["on"] = vocab.load()["on"]
+        return {"vocab": vocab.save(new), "name": Path(path).name}
+
+    @safe
+    def vocab_export(self):
+        from . import vocab
+        res = self._window.create_file_dialog(webview.SAVE_DIALOG, save_filename=f"세특_어휘_{time.strftime('%Y%m%d')}.xlsx", file_types=("Excel 파일 (*.xlsx)",))
+        if not res:
+            return {"ok": False, "cancelled": True}
+        path = res[0] if isinstance(res, (list, tuple)) else res
+        if not path.lower().endswith(".xlsx"):
+            path += ".xlsx"
+        try:
+            vocab.to_xlsx(vocab.load(), path)
+        except PermissionError:
+            raise db.DbError("저장하지 못했습니다. 같은 파일이 Excel에서 열려 있으면 닫고 다시 시도해 주세요.")
+        return {"path": path}
 
     @safe
     def trait_dict_get(self):
@@ -1656,10 +1763,12 @@ class Api:
 
     # 이번 실행에만 쓰는 교사의 추가 요구 사항(AI 실행 확인 창에서 입력). 저장된 프롬프트는 바꾸지 않는다.
     @safe
-    def ai_extra_set(self, text=None, prompt_id=None, kind=None):
-        """이번 실행에만: 추가 요구 사항과 고른 프롬프트. 고른 프롬프트는 작업 종류마다 기억한다(다음 실행의 기본)."""
+    def ai_extra_set(self, text=None, prompt_id=None, kind=None, example_id=None):
+        """이번 실행에만: 추가 요구 사항, 고른 프롬프트, 고른 예시(v0.31, ''=프롬프트에 든 예시 그대로, 'none'=예시 없이).
+        고른 프롬프트는 작업 종류마다 기억한다(다음 실행의 기본)."""
         self._ai_extra = (text or "").strip()[:1000]
         self._ai_prompt = str(prompt_id or "")
+        self._ai_example = str(example_id or "")
         if prompt_id and kind in prompts.KINDS:
             picks = dict(config.load().get("prompt_pick") or {})
             if picks.get(kind) != prompt_id:
@@ -1677,7 +1786,16 @@ class Api:
     def _prompt(self, kind):
         """이번 실행에 쓸 프롬프트 {id, name, prompt, example}."""
         lib, cfg = self._library()
-        return prompts.pick(lib, cfg.get("prompt_pick"), kind, getattr(self, "_ai_prompt", ""))
+        pr = prompts.pick(lib, cfg.get("prompt_pick"), kind, getattr(self, "_ai_prompt", ""))
+        ex = getattr(self, "_ai_example", "")
+        if ex == "none":
+            pr = {**pr, "example": ""}
+        elif ex:  # 확인 창에서 고른 예시로 이번 실행의 예시를 바꾼다(프롬프트는 그대로)
+            from . import examples
+            e = examples.get(ex)
+            if e:
+                pr = {**pr, "example": e["text"], "example_name": e["label"]}
+        return pr
 
     def _xm(self, meta):
         """결과 기록(meta)에 이번 추가 요구 사항을 남긴다."""
@@ -1688,6 +1806,12 @@ class Api:
         """item='behavior'(행동특성 및 종합의견)면 고정 지침(부정 표현 → 긍정·변화 가능성, 민감 정보·날짜 빼기)을 늘 붙인다(v0.23)."""
         if item == "behavior":
             system = system + prompts.BEHAVIOR_RULE
+        elif item == "subject":  # 세특 어휘(설정 › 세특 어휘, 켜져 있을 때)
+            from . import vocab
+            system = system + vocab.rule()
+        if item:  # 기재 유의어(설정 › 기재 유의어): 모든 항목의 생기부 글에 '이 말 대신 대체 표현'
+            from . import banned
+            system = system + banned.rule()
         x = getattr(self, "_ai_extra", "") if extra else ""
         if x:
             system = (system + "\n\n[이번 추가 요구 사항 — 교사가 이번 실행에만 준 요청]\n<요청>\n" + x + "\n</요청>\n"
@@ -1943,7 +2067,7 @@ class Api:
         try:
             what = "성취기준과 성취수준" if item == "subject" else "활동 개요"
             text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, prompts.build_system(pr["prompt"] + rule + prompts.SYNTH_RULE, pr["example"], target),
-                                       f"(학생관찰기록 없음 — {what}으로만 작성)", cfg["privacy_block"])
+                                       f"(학생관찰기록 없음 — {what}으로만 작성)", cfg["privacy_block"], item=item)
             meta.update({"model": model, "op": "synth", "prompt_name": pr["name"], "prompt": pr["prompt"], "example": pr["example"], "target": target})
             nid, dropped = rec.add_result(gid, item, sno, "synth", text, self._xm(meta), cost)
             return self._ai_out({"id": nid, "dropped": dropped, "cost": cost})
