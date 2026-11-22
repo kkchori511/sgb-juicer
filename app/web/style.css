@@ -2128,3 +2128,8 @@ textarea.cell-edit { font-size: calc(13px * var(--bs)); }
 .sec-warn h3 { color: #8a5a00; }
 .sec-safe { border-color: #2e9d4f; background: #e9f7ee; }
 .sec-safe h3 { color: #166534; }
+
+/* v0.35 하이브리드 OCR 차이 검토 */
+mark.ocr-a { background: #dbeafe; color: inherit; padding: 0 2px; border-radius: 3px; }
+mark.ocr-b { background: #fde68a; color: inherit; padding: 0 2px; border-radius: 3px; }
+.ocr-diff:focus { outline: 2px solid var(--accent, #6366f1); outline-offset: 2px; }

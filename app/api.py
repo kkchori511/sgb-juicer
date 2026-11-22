@@ -3092,6 +3092,35 @@ class Api:
         return self._ib().scan_decide(bid, page, data)
 
     @safe
+    def inbox_scan_suggest(self, bid, page):
+        """[AI 보정 제안 받기]: 차이 난 곳의 두 후보와 앞뒤 문맥만 글 AI에 보낸다(그림 없음, 이름·학번은 ○○).
+        모델은 설정의 'OCR 보정 모델'(빈칸이면 기본 모델). 제안은 미리 골라 두기만 하고 확정은 사람이."""
+        self._editable()
+        cfg = config.load()
+        if cfg["ocr_fix_model"]:
+            if not cfg["openrouter_key"].strip():
+                raise db.DbError("OpenRouter API 키가 없습니다. 설정에서 넣어 주세요.")
+            model = cfg["ocr_fix_model"]
+        else:
+            cfg, model = self._model(None)
+        ib = self._ib()
+        r = ib.scan_compare(bid, page)
+        cmp = r.get("cmp")
+        if not cmp or cmp["big"]:
+            raise db.DbError("이 쪽은 차이별 제안을 받을 수 없습니다(비교할 두 결과가 없거나 크게 다름).")
+        if not any(d["kind"] == "text" for d in cmp["diffs"]):
+            raise db.DbError("이 쪽에는 고를 차이가 없습니다.")
+        from . import ocr_compare
+        user = ocr_compare.fix_user(cmp["diffs"], ib.scan_privacy_clean(bid))
+        text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, ocr_compare.FIX_SYSTEM, user, cfg["privacy_block"], extra=False)
+        sugg = ocr_compare.parse_fix(openrouter.parse_json_object(text), cmp["diffs"])
+        if not sugg:
+            raise db.DbError("AI 제안을 해석하지 못했습니다. 다시 시도하거나 설정에서 OCR 보정 모델을 바꿔 보세요.")
+        out = ib.scan_store_suggest(bid, page, sugg, cost)
+        out["suggest_cost"] = cost
+        return out
+
+    @safe
     def inbox_scan_crop(self, bid, page, box, w, h):
         """차이 난 줄의 원본 확대 그림(이 PC 안에서만). box는 CLOVA 좌표(w×h 기준)."""
         return {"src": scan.render_crop(self._db().year, bid, page, box, w, h)}

@@ -236,3 +236,45 @@ def final_texts(sc: dict) -> list:
         else:
             out.append("")
     return out
+
+
+# ---------- 3단계: 글자 보정 제안(그림 없이 글만, 사용자가 버튼을 눌렀을 때만) ----------
+FIX_SYSTEM = (
+    "당신은 학생 학습지 OCR 결과를 비교하는 도우미입니다. 같은 손글씨 학습지를 두 OCR(CLOVA, AI)이 따로 읽었고, "
+    "두 결과가 다른 곳만 아래에 있습니다. 당신은 그림을 볼 수 없습니다.\n"
+    "각 차이마다 학생이 실제로 썼을 가능성이 높은 쪽을 고르세요.\n"
+    "- pick: \"clova\"(CLOVA 쪽), \"ai\"(AI 쪽), \"merge\"(두 후보의 글자를 섞은 것 — text에 씀) 중 하나.\n"
+    "- 목표는 학생이 쓴 글자 그대로입니다. 맞춤법이 맞다는 이유만으로 고르지 마세요(학생이 틀리게 썼을 수 있음). "
+    "앞뒤 문맥에서 실제로 있는 낱말·말이 되는 문장인지, 글자 모양이 비슷해 헷갈리기 쉬운지를 근거로 하세요.\n"
+    "- 한쪽이 '(없음)'이면 그 OCR이 글자를 빠뜨렸거나 다른 쪽이 덧붙인 것입니다.\n"
+    "- 두 후보에 없는 새 낱말이나 내용을 만들지 마세요.\n"
+    "- reason은 20자 안팎 한국어.\n"
+    "출력은 JSON 하나만: {\"items\": [{\"id\": \"d0\", \"pick\": \"clova\", \"text\": \"\", \"reason\": \"...\"}]}"
+)
+
+
+def fix_user(diffs, clean=lambda s: s):
+    """보낼 글: 차이 id, 앞뒤 문맥, 두 후보. clean으로 학번·이름을 지운다."""
+    out = []
+    for d in diffs:
+        if d["kind"] != "text":
+            continue
+        out.append(f"[{d['id']}] 앞: {clean(d['before'])} | CLOVA: {clean(d['clova']) or '(없음)'} | AI: {clean(d['ai']) or '(없음)'} | 뒤: {clean(d['after'])}")
+    return "\n".join(out)
+
+
+def parse_fix(obj, diffs):
+    """AI 답 → {id: {"pick", "text", "reason", "new"}}. new: 두 후보에 없는 글자를 만들었는지."""
+    by = {d["id"]: d for d in diffs if d["kind"] == "text"}
+    out = {}
+    for it in (obj or {}).get("items") or []:
+        if not isinstance(it, dict) or it.get("id") not in by or it.get("pick") not in ("clova", "ai", "merge"):
+            continue
+        d = by[it["id"]]
+        text = d["clova"] if it["pick"] == "clova" else d["ai"] if it["pick"] == "ai" else nfc(str(it.get("text") or ""))[:200]
+        pool = set(re.sub(r"\s", "", d["clova"] + d["ai"]))
+        new = any(ch not in pool for ch in re.sub(r"\s", "", text))
+        if it["pick"] == "merge" and text in (d["clova"], d["ai"]):
+            it["pick"] = "clova" if text == d["clova"] else "ai"
+        out[it["id"]] = {"pick": it["pick"], "text": text, "reason": str(it.get("reason") or "")[:80], "new": new}
+    return out

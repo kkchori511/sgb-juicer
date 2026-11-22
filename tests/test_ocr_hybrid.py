@@ -152,6 +152,25 @@ def test_api():
     assert d["unreviewed"] == 2 and d["figs"] is False and "실험햇다" in d["final"]
     crop = ok(api.inbox_scan_crop(bid, 0, d["cmp"]["diffs"][0]["box"], d["w"], d["h"]))
     assert crop["src"].startswith("data:image/png")
+    # 3단계 보정 제안: 글만 보내고 이름·학번은 ○○, 제안은 미리 표시만
+    SENT_AI = []
+    def fake_chat(key, model, system, user, privacy_block=False, history=None):
+        SENT_AI.append((model, system, user))
+        return '{"items":[{"id":"d0","pick":"clova","reason":"학생 오타 가능"},{"id":"d2","pick":"merge","text":"엷","reason":"짐작"}]}', 0.0002
+    openrouter.chat = fake_chat
+    ok(api.inbox_scan_decide(bid, 0, {"reset": True}))
+    ok(api.inbox_scan_decide(bid, 0, {"figs": True}))
+    sg = ok(api.inbox_scan_suggest(bid, 0))
+    model, system, user = SENT_AI[-1]
+    assert model == "m" and "그림을 볼 수 없습니다" in system and "가나다" not in user and "10399" not in user and "CLOVA: 햇 | AI: 했" in user, user
+    assert sg["unreviewed"] == 2 and sg["review"]["s"]["d0"]["pick"] == "clova" and sg["review"]["s"]["d2"]["new"] is True
+    config.save({"ocr_fix_model": "fix/model"})
+    ok(api.inbox_scan_suggest(bid, 0)); assert SENT_AI[-1][0] == "fix/model"
+    acc = ok(api.inbox_scan_decide(bid, 0, {"accept_suggest": True}))
+    assert acc["unreviewed"] == 0 and "넣어 준 엷은" in acc["final"] and "실험햇다" in acc["final"]
+    clean = api._ib().scan_privacy_clean(bid)
+    assert clean("가 나 다가 1 0 3 9 9번") == "○○가 ○○번"
+    ok(api.inbox_scan_decide(bid, 0, {"reset": True}))
     # 학생 묶기 확정: 최종 글이 쓰이고 학번·이름은 빠짐
     assert ok(api.inbox_scan_confirm(bid, [0, 1], []))["count"] == 2
     v = ok(api.inbox_view(bid))

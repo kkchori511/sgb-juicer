@@ -671,6 +671,11 @@ class Inbox:
         data = data or {}
         if data.get("reset"):
             rv = {"figs": rv.get("figs", True)}
+        if data.get("accept_suggest"):
+            dd = rv.get("d") or {}
+            for k, v in (rv.get("s") or {}).items():
+                dd[k] = {"pick": v["pick"]} if v["pick"] in ("clova", "ai") else {"pick": "edit", "text": v["text"]}
+            rv["d"] = dd
         if "figs" in data:
             rv["figs"] = bool(data["figs"])
         if "page" in data:
@@ -694,6 +699,40 @@ class Inbox:
         with self.d.tx() as c:
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
         return self.scan_compare(bid, page)
+
+    def scan_store_suggest(self, bid, page, sugg, cost):
+        """3단계 보정 제안을 저장(미리 골라 두기만 — 고른 것으로 치지 않음)."""
+        b = self._editable_batch(bid)
+        meta = b["meta"]
+        sc = meta.get("scan") or {}
+        rv_all = sc.get("review") or {}
+        rv = rv_all.get(str(int(page))) or {}
+        rv["s"] = sugg
+        rv_all[str(int(page))] = rv
+        sc["review"] = rv_all
+        sc["fix_cost"] = round(float(sc.get("fix_cost") or 0) + float(cost or 0), 6)
+        meta["scan"] = sc
+        with self.d.tx() as c:
+            self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
+        return self.scan_compare(bid, page)
+
+    def scan_privacy_clean(self, bid):
+        """보정 제안에 보낼 글에서 이 담당 명렬의 이름·학번을 ○○로 바꾸는 함수."""
+        b = self.batch(bid)
+        members = self.d.members(b["group_id"]) if b["group_id"] else []
+        pats = []
+        for m in members:
+            for v in (m.get("name") or "", str(m.get("student_no") or m.get("no") or "")):
+                v = re.sub(r"\s", "", v)
+                if len(v) >= 2:
+                    pats.append(re.compile(r"[ \t]*".join(re.escape(ch) for ch in v)))
+        pats.sort(key=lambda r: -len(r.pattern))
+
+        def clean(text):
+            for r in pats:
+                text = r.sub("○○", text)
+            return text
+        return clean
 
     def scan_review_counts(self, sc):
         """페이지별 남은 차이 수(하이브리드). 계산만 하고 저장하지 않는다."""

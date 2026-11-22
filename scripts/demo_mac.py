@@ -5,6 +5,7 @@
 - 실행: .venv/bin/python scripts/demo_mac.py
 - Windows exe가 아니라 같은 소스를 Mac에서 돌리는 확인용이다. 업데이트 교체 등 Windows 전용 동작은 다를 수 있다.
 """
+import json
 import os
 import sys
 import tempfile
@@ -32,6 +33,10 @@ def _fake_chat(key, model, system, user, privacy_block=False, history=None):
                 "- 요청: 원문의 발표 내용도 넣어 | 분류: 일반화 | 규칙: 원문에 발표·토론 활동이 있으면 빠뜨리지 않고 넣는다\n"
                 "- 요청: 세 번째 문장 빼 | 분류: 제외 | 규칙: 이 학생 글의 특정 문장을 가리켜 다른 학생에게 옮길 수 없음\n</요청 분석>\n"
                 "<프롬프트>\n# 역할\n(시험용 스킬화 프롬프트) 학생 활동 자료를 관찰자 시점으로 3문장 안팎 한 문단에 씁니다.\n</프롬프트>"), 0.0003
+    if "그림을 볼 수 없습니다" in system:  # OCR 보정 제안: 차이마다 번갈아 CLOVA/AI 쪽
+        import re as _re
+        ids = _re.findall(r"^\[(d\d+)\]", user, _re.M)
+        return json.dumps({"items": [{"id": d, "pick": "clova" if i % 2 == 0 else "ai", "reason": "(시험용) 문맥상 자연스러움"} for i, d in enumerate(ids)]}, ensure_ascii=False), 0.0001
     if history:  # 대화 누적(이어 고치기): 앞 결과를 조금 고친 척
         prev = history[-1][1].replace("(시험용 AI 결과) ", "")
         return f"(시험용 AI 결과·{len(history) + 1}단계) " + prev[: max(30, len(prev) - 15)], 0.0006
@@ -50,9 +55,37 @@ def ok(r, what=""):
     return r
 
 
+# v0.35 하이브리드 OCR: 더미 학습지(tests/fixtures/ocr_dummy)의 실제 응답을 돌려주는 가짜 CLOVA·AI(호출·비용 없음)
+_FX = os.path.join(ROOT, "tests", "fixtures", "ocr_dummy")
+
+
+def _fake_ocr():
+    from app import ocr, ocr_vision
+    clova = json.load(open(os.path.join(_FX, "clova_raw.json"), encoding="utf-8"))
+    qwen = [json.load(open(os.path.join(_FX, f"qwen_p{i}.json"), encoding="utf-8"))["result"] for i in (1, 2)]
+    ocr.call_once = lambda url, secret, data, name, lang: (time.sleep(2), clova)[1]
+    real_render = ocr_vision.render_png
+    which = {}
+
+    def render(pdf, page, mask=0.0, width=ocr_vision.RENDER_WIDTH):
+        png = real_render(pdf, page, mask, width)
+        which[png] = page
+        return png
+
+    def read(key, model, png, post=None):
+        time.sleep(3)
+        q = qwen[which.get(png, 0) % 2]
+        return {"lines": q["lines"], "figures": q["figures"], "cost": 0.0015, "provider": "(시험용)", "model": model}
+    ocr_vision.render_png = render
+    ocr_vision.read_page = read
+
+
+_fake_ocr()
+
+
 def seed():
     api = Api()
-    ok(api.save_config({"openrouter_key": "sk-demo-not-real", "setup_done": True}), "설정")
+    ok(api.save_config({"openrouter_key": "sk-demo-not-real", "setup_done": True, "clova_url": "https://demo.invalid/general", "clova_secret": "demo-not-real"}), "설정")
     year = time.localtime().tm_year if time.localtime().tm_mon >= 3 else time.localtime().tm_year - 1
     ok(api.create_year(year, "homeroom"), "학년도")
     hr = ok(api.add_group({"kind": "homeroom", "grade": 2, "class_no": 3}), "담임반")["id"]
@@ -140,7 +173,23 @@ def seed():
     ok(api.prompt_save({"name": "2학년 3반 진로활동 세특 — 학생 관심 분야와 탐구 과정 중심으로 길게 정리하는 프롬프트", "prompt": "학생의 관심 분야와 탐구 과정을 중심으로 정리하세요.", "example": "", "made": "대화", "tags": ["탐구", "발표"]}), "프롬프트")
     ok(api.prompt_save({"name": "동아리 짧게", "prompt": "동아리 활동을 짧게 정리하세요.", "example": "", "made": "양식"}), "프롬프트")
     _demo_xlsx(year, names)
+    _demo_scan(api, hr, year)
     return year
+
+
+def _demo_scan(api, hr, year):
+    """하이브리드로 이미 읽은 예시 묶음(더미 학습지 2쪽) — 차이 검토 화면을 바로 볼 수 있게."""
+    from app import db, ocr
+    from app.inbox import Inbox
+    bid = ok(api.inbox_create("과학 활동지(하이브리드 OCR 예시)", hr, "career"), "Inbox")["id"]
+    ib = Inbox(db.open_year(year))
+    ib.scan_set(bid, os.path.join(_FX, "dummy.pdf"), "더미학습지.pdf")
+    ib.scan_set_mode(bid, "hybrid", 1, 0.14, "qwen/qwen3-vl-235b-a22b-instruct")
+    clova = json.load(open(os.path.join(_FX, "clova_raw.json"), encoding="utf-8"))
+    ib.scan_store(bid, "clova", pages=[ocr.image_lines(im) for im in clova["images"]])
+    for i in (0, 1):
+        q = json.load(open(os.path.join(_FX, f"qwen_p{i + 1}.json"), encoding="utf-8"))["result"]
+        ib.scan_store(bid, "ai", ai_page=(i, {"lines": q["lines"], "figures": q["figures"], "cost": 0.0015, "provider": "(시험용)", "model": "qwen/qwen3-vl-235b-a22b-instruct"}))
 
 
 def _demo_xlsx(year, names):
@@ -167,6 +216,8 @@ def _demo_xlsx(year, names):
     for r in (["학번", "이름"], ["20201", "사아자"], ["20202", "차카타"]):
         ws.append(r)
     wb.save(os.path.join(out, "반별_명렬_시험용.xlsx"))
+    import shutil
+    shutil.copyfile(os.path.join(_FX, "dummy.pdf"), os.path.join(out, "스캔_더미학습지_2쪽.pdf"))
 
 
 if __name__ == "__main__":
