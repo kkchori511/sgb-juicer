@@ -358,7 +358,7 @@
   window.addEventListener('error', (e) => logErr('화면', e.message));
   window.addEventListener('unhandledrejection', (e) => logErr('화면', (e.reason && e.reason.message) || e.reason));
   // 제안 설문지 주소: 받으면 여기만 바꾼다. {ver}·{os}는 미리 채울 값(구글 폼 미리 채우기 링크의 자리에 넣기)
-  const SUGGEST_URL = '';
+  const SUGGEST_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSdjPPhgpMdhHg-pheHEnaqD2UnKC77A9NSRJc1igP6Q5MRUjg/viewform?usp=dialog';
   function diagInfo() {
     return [`앱: ${info.name} v${info.version}`, `운영체제: ${info.os || navigator.userAgent}`,
       `최근 오류: ${ERRLOG.length ? '' : '없음'}`, ...ERRLOG.map((x) => `- ${x}`)].join('\n');
@@ -442,6 +442,12 @@
     const v = await rawCall('student_view', ctx.gid, ctx.item, ctx.sno);
     return v && v.ok ? { text: v.final ? v.final.text || '' : '', target: v.target } : null;
   }
+  // 안내 창 본문: 큰 제목 + 1·2·3 번호 + 굵은 소제목 / 다음 줄 설명(사용자 지정 2026-11-22). 글은 앱이 만든 HTML(바깥 값은 escHtml로)
+  function stepsHtml(title, items, foot) {
+    return `<div class="steps-msg"><div class="steps-title">${title}</div><ol class="steps-list">`
+      + items.map(([t, d]) => `<li><b>${t}</b><span>${d}</span></li>`).join('')
+      + `</ol>${foot ? `<p class="steps-foot">${foot}</p>` : ''}</div>`;
+  }
   // 되돌릴 수 없는(치명적인) 작업: 안내를 읽고 '확인'을 직접 쳐야 [확인] 버튼이 눌린다.
   const TYPED_WORD = '확인';
   // 목적격 조사: 마지막 글자에 받침이 있으면 '을', 없으면 '를'(한글이 아니면 '를')
@@ -451,8 +457,8 @@
   }
   function typedConfirm(msg, okText) {
     const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    const html = `<div class="typed-conf"><div>${esc(msg).replace(/\n/g, '<br>')}</div>`
-      + `<p class="typed-warn">⚠ 되돌릴 수 없는 작업입니다. 계속하려면 아래 칸에 '<b>${TYPED_WORD}</b>'${eulReul(TYPED_WORD)} 그대로 입력하세요.</p>`
+    const html = `<div class="typed-conf"><div>${msg && msg.html ? msg.html : esc(msg).replace(/\n/g, '<br>')}</div>`
+      + `<p class="typed-warn"><span class="typed-warn-ico">⚠</span><span>되돌릴 수 없는 작업입니다.<br>계속하려면 아래 칸에 '<b>${TYPED_WORD}</b>'${eulReul(TYPED_WORD)} 그대로 입력하세요.</span></p>`
       + `<input type="text" id="typedConfInp" autocomplete="off" placeholder="${TYPED_WORD}"></div>`;
     const p = modal(html, true, true, okText);
     const ok = $('modalOk');
@@ -1138,7 +1144,7 @@
       const moves = rows.filter((r) => r.student_no !== r.orig_no);
       if (moves.length) {
         const list = moves.slice(0, 8).map((r) => `${r.orig_no} ${r.orig_name} → ${r.student_no}`).join('\n') + (moves.length > 8 ? `\n외 ${moves.length - 8}명` : '');
-        if (!(await confirmBox(`학번을 바꿉니다(${moves.length}명).\n${list}\n\n이 학년도의 모든 담당(담임반·과목·동아리)에서 기록·AI 결과·최종안·Inbox 연결을 새 학번으로 옮깁니다. 바꾸기 전에 자동으로 백업합니다.`, '학번 바꾸기'))) return;
+        if (!(await modal(stepsHtml(`학번을 바꿉니다(${moves.length}명)`, [['바뀌는 학번', escHtml(list).replace(/\n/g, '<br>')], ['함께 옮겨지는 것', '이 학년도의 모든 담당(담임반·과목·동아리)에서 기록·AI 결과·최종안·Inbox 연결을 새 학번으로 옮깁니다.'], ['백업', '바꾸기 전에 자동으로 백업합니다.']]), true, true, '학번 바꾸기'))) return;
       }
       const r = await mutate('roster_edit_apply', g.id, rows.map(plain));
       if (!r) return;
@@ -1924,7 +1930,7 @@
   }
   async function restoreBackup(name, label) {
     if (!(await leaveOk())) return;
-    if (!(await typedConfirm(`'${label}' 백업으로 지금 자료를 모두 바꿉니다.\n바꾸기 전에 지금 상태를 '복원하기 직전' 백업으로 먼저 남기므로, 잘못 복원했으면 그 백업으로 다시 복원해 되돌릴 수 있습니다.\n그 사이에 새로 입력한 내용은 되돌릴 때 사라집니다.`, '복원'))) return;
+    if (!(await typedConfirm({ html: stepsHtml(`'${escHtml(label)}' 백업으로 복원합니다`, [['바뀌는 것', '지금 자료를 이 백업의 자료로 모두 바꿉니다.'], ['되돌리기', "바꾸기 전 상태를 '복원하기 직전' 백업으로 먼저 남깁니다. 잘못 복원했으면 [복원 되돌리기]나 그 백업으로 되돌릴 수 있습니다."], ['주의', '복원한 뒤 새로 입력한 내용은 되돌릴 때 사라집니다.']]) }, '복원'))) return;
     const x = await mutate('restore_backup', name);
     if (!x) return;
     await reloadYear();
@@ -1985,7 +1991,7 @@
         el('div', { class: 'sheet-body' }, [
           el('div', { class: 'warn upd-warn', text: info.warning }),
           el('p', { class: 'hint', text: '업데이트 직전에 자료 전체를 백업합니다(설정 > 백업에서 복원 가능). 이 백업은 하루 백업에 밀려 지워지지 않게 따로 보관합니다.' }),
-          el('label', {}, [`내용을 확인했으면 아래 칸에 '${word}'${eulReul(word)} 그대로 입력하세요.`]), inp,
+          el('p', { class: 'typed-warn' }, [el('span', { class: 'typed-warn-ico', text: '⚠' }), el('span', {}, ['업데이트 전에 꼭 읽어야 하는 내용입니다.', el('br'), `내용을 확인했으면 아래 칸에 '`, el('b', { text: word }), `'${eulReul(word)} 그대로 입력하세요.`])]), inp,
         ]),
         el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: () => done(null) }), go]),
       );
@@ -2946,7 +2952,7 @@
     const can = b.src === 'rec' || (b.src === 'tag' && b.op === 'tag_trial');
     if (!can) return null;
     return el('button', { type: 'button', class: 'small danger-text cand-del', disabled, title: '이 결과 후보 하나만 지웁니다', text: '🗑 삭제', onclick: async () => {
-      if (!(await confirmBox(`'${bundleLabel(b)}' 결과를 지웁니다. 되돌릴 수 없습니다.`, '삭제'))) return;
+      if (!(await modal(`${escHtml(`'${bundleLabel(b)}' 결과를 지웁니다.`)}<p class="typed-warn"><span class="typed-warn-ico">⚠</span><span>되돌릴 수 없는 작업입니다.</span></p>`, true, true, '삭제'))) return;
       const ok = await wrap(() => (b.src === 'rec' ? mutate('delete_result', b.id) : mutate('tag_cand_delete', b.id)));
       if (ok) { toast('결과를 지웠습니다.'); done(); }
     } });
@@ -6310,7 +6316,7 @@
   async function twApply(list) {
     if (!list.length) return;
     if (!(await twFlushOrWarn())) return;
-    if (!(await confirmBox(`${list.length}건의 기록 내용을 변환 결과로 바꿉니다.\n처음 원문은 남고, 아래 '반영 기록'의 [되돌리기]로 이번 반영을 되돌릴 수 있습니다(앱을 껐다 켜도 가능).\n최종안은 바뀌지 않고 '확인 필요'로 표시됩니다.`, '반영'))) return;
+    if (!(await modal(stepsHtml(`${list.length}건의 기록을 변환 결과로 바꿉니다`, [['원문', '처음 원문은 남습니다.'], ['되돌리기', "아래 '반영 기록'의 [되돌리기]로 이번 반영을 되돌릴 수 있습니다(앱을 껐다 켜도 가능)."], ['최종안', "최종안은 바뀌지 않고 '확인 필요'로 표시됩니다."]]), true, true, '반영'))) return;
     const r = await mutate('tag_apply', TW.work.id, list.map((x) => x.cand.id), TW.year);
     if (!r) return;
     if (r.skipped.length) await alertBox(`${r.applied.length}건을 반영했습니다.\n반영하지 않은 ${r.skipped.length}건:\n${r.skipped.map((s) => `· ${(list.find((x) => x.record_id === s.record_id) || {}).name || s.record_id}: ${s.why}`).join('\n')}`);
@@ -7733,7 +7739,7 @@
     const ready = await call('clova_ready');
     if (!ready) return;
     if (!ready.ready) {
-      const go = await modal(`스캔 PDF를 글자로 읽으려면 <b>CLOVA OCR 키</b>나 <b>OpenRouter API 키</b>가 필요합니다.<br>CLOVA: 네이버 클라우드 플랫폼에 가입하고 CLOVA OCR을 설정한 뒤, 설정 &gt; 연결·모델에 ${ready.missing.join(', ')}를 넣어 주세요.<br>OpenRouter 키만 있으면 Qwen으로 읽기(시험 기능)를 쓸 수 있습니다.<br><span class="muted">가입·발급 안내가 설정 화면에 있습니다.</span>`, true, true, '설정으로 가기');
+      const go = await modal(stepsHtml('스캔 PDF를 읽으려면 키가 필요합니다', [['CLOVA OCR 키(기본)', `네이버 클라우드 플랫폼에 가입하고 CLOVA OCR을 설정한 뒤, 설정 › 연결·모델에 ${escHtml(ready.missing.join(', '))}를 넣어 주세요.`], ['OpenRouter API 키만 있으면', 'Qwen만(시험 기능)으로 읽을 수 있습니다.'], ['가입·발급 안내', '설정 › 연결·모델 화면에 순서대로 적어 두었습니다. 아래 [설정으로 가기]를 누르세요.']]), true, true, '설정으로 가기');
       if (go) { showPanel('settings'); showSettingsTab('conn'); $('clovaGuide').open = true; $('clovaGuide').scrollIntoView(); }
       return;
     }
@@ -7803,8 +7809,8 @@
   const OCR_MODES = [
     // 순서·기본값: CLOVA만(기본) → Qwen만(시험 기능) → 하이브리드(사용자 지정 2026-11-22)
     ['clova', 'CLOVA만 이용 (기본)', 'CLOVA OCR 하나로 읽습니다. 대부분의 학습지는 이것으로 충분합니다.'],
-    ['ai', 'Qwen만 (시험 기능)', 'CLOVA 키 없이 OpenRouter의 Qwen(그림을 보는 AI)으로 읽습니다. 손글씨 정확도는 아직 충분히 검증되지 않았습니다.'],
-    ['hybrid', '하이브리드', '원본 인식이 어렵고(흐린 손글씨, 작은 글씨, 표·그림이 섞인 학습지 등) 세밀한 스캔 확인이 필요할 때 씁니다. CLOVA와 Qwen이 따로 읽은 뒤, 서로 다르게 읽은 곳만 원본을 보며 고릅니다. 두 곳에 보내므로 시간·비용이 더 듭니다.'],
+    ['ai', 'Qwen만 (시험 기능)', 'CLOVA 키 없이 Qwen AI(그림을 보는 AI)로 읽습니다. 손글씨 정확도는 아직 검증 중입니다.'],
+    ['hybrid', '하이브리드', '원본 인식이 어려워(흐린 손글씨·작은 글씨·표·그림) 세밀한 확인이 필요할 때. 다르게 읽은 곳만 원본을 보며 고릅니다(시간·비용 더 듦).'],
   ];
   function renderScanStart(body, b, sc) {
     const box = el('div', {});
@@ -7824,24 +7830,27 @@
       };
       per.addEventListener('input', upd);
       upd();
-      const modeBox = el('div', { class: 'wsection' }, [el('h3', { text: '읽는 방식' })]);
+      const modeGrid = el('div', { class: 'ocr-modes' }); // 넓은 창에서는 세 상자를 나란히(한 화면에 [OCR 시작]까지 보이게)
+      const modeBox = el('div', { class: 'wsection' }, [el('h3', { text: '읽는 방식' }), modeGrid]);
       OCR_MODES.forEach(([m, label, desc]) => {
         const why = can[m] ? '' : m === 'clova' ? ' — CLOVA 키가 없습니다' : m === 'ai' ? ' — OpenRouter 키가 없습니다' : ` — ${!ready.clova ? 'CLOVA' : 'OpenRouter'} 키가 없습니다`;
-        modeBox.appendChild(el('label', { class: 'inline', style: `display:block;margin:6px 0;${can[m] ? '' : 'opacity:.5'}` }, [
+        // 선택지마다 상자: 첫 줄 이름, 다음 줄 설명. 고른 상자는 초록 테두리 + '✓ 선택함'(CSS :has)
+        modeGrid.appendChild(el('label', { class: 'ocr-mode' + (can[m] ? '' : ' off') }, [
           el('input', { type: 'radio', name: 'ocrMode', value: m, checked: SC.mode === m, disabled: !can[m], onchange: () => { SC.mode = m; drawOpts(); } }),
-          el('b', { text: ' ' + label }), el('span', { class: 'muted', text: ` ${desc}${why}` })]));
+          el('span', { class: 'ocr-mode-text' }, [el('span', { class: 'ocr-mode-head' }, [el('b', { class: 'ocr-mode-name', text: label }), el('span', { class: 'ocr-mode-on', text: '✓ 선택함' })]),
+            el('span', { class: 'ocr-mode-desc', text: `${desc}${why}` })])]));
       });
       if (!ready.clova || !ready.openrouter) modeBox.appendChild(el('p', { class: 'hint', text: '키는 설정 › 연결·모델에서 넣습니다.' }));
       const opts = el('div', {});
-      const warn = el('div', { class: 'warn', style: 'margin-top:12px' });
+      const warn = el('div', { class: 'warn ocr-warn', style: 'margin-top:12px' });
       const startBtn = el('button', { type: 'button', class: 'primary', text: 'OCR 시작' });
       const doneAi = ((sc.ai && sc.ai.pages) || []).filter((x) => x && !x.error).length;
       const doneC = (sc.clova || []).filter((x) => x && !x.fail).length;
       const resume = doneC || doneAi ? el('div', { class: 'tag', style: 'margin:8px 0', text: `이미 읽은 결과가 있습니다(${[doneC ? `CLOVA ${doneC}쪽` : '', doneAi ? `Qwen ${doneAi}쪽` : ''].filter(Boolean).join(', ')}). 다시 보내지 않고 남은 것만 읽습니다. 한쪽 결과만으로 넘어가려면 읽는 방식을 그쪽으로 고르세요.` }) : null;
       box.append(
-        el('div', { class: 'wsection', style: 'margin-top:0' }, [el('h3', { text: `🖨 ${sc.filename} / ${sc.pages}쪽` }),
-          el('div', { class: 'map-row' }, [el('label', {}, ['학생 1명당 페이지 수', per]), est]),
-          el('div', { class: 'hint', text: '단면 스캔은 1, 양면 스캔은 2입니다. 백지가 섞여 있어도 다음 단계에서 페이지를 빼거나 경계를 옮길 수 있습니다.' })]),
+        // 파일 줄은 한 줄로(이름·쪽 수, 학생당 페이지 수, 예상 인원) — 한 화면에 [OCR 시작]까지 보이게
+        el('div', { class: 'wsection ocr-file', style: 'margin-top:0' }, [el('div', { class: 'map-row' }, [el('b', { class: 'ocr-file-name', text: `🖨 ${sc.filename} / ${sc.pages}쪽` }),
+          el('label', { title: '백지가 섞여 있어도 다음 단계에서 페이지를 빼거나 경계를 옮길 수 있습니다.' }, ['학생 1명당 페이지 수 (단면 1 / 양면 2)', per]), est])]),
         resume || '', modeBox, opts, warn, // DOM append는 null을 'null' 글자로 붙인다(W10) — 빈 값은 ''로
         el('div', { class: 'sheet-foot' }, [el('button', { type: 'button', class: 'file-pdf', text: '다른 PDF 고르기', onclick: () => startScanPick(b) }), el('span', { class: 'spacer' }), startBtn]),
       );
@@ -7850,43 +7859,44 @@
         opts.innerHTML = '';
         const useAi = SC.mode !== 'clova';
         const lines = [];
-        if (SC.mode !== 'ai') lines.push('⚠ <b>스캔 이미지가 그대로 네이버 CLOVA OCR로 전송됩니다.</b> 손으로 쓴 이름·학번도 함께 전송됩니다.');
+        // 노란 안내: 줄마다 같은 갈색 굵은 글씨, 넓은 창에서는 한 줄씩(자세한 조건은 마우스를 올리면 보임)
+        if (SC.mode !== 'ai') lines.push('<div>⚠ 스캔 이미지가 그대로 네이버 CLOVA OCR로 전송됩니다(손으로 쓴 이름·학번 포함).</div>');
         if (useAi) {
-          lines.push(`⚠ <b>${unmasked && SC.mode === 'ai' ? '스캔 이미지 전체가' : '위쪽 머리글을 흰색으로 가린 스캔 이미지가'} OpenRouter의 Qwen(${escHtml(ready.ai_model_label)})로 전송됩니다.</b> 학습 차단·보존 안 함 조건을 받는 제공업체에만 보내고, 없으면 보내지 않습니다. 쪽마다 한 번만 보내며 쪽당 약 1~3원이 듭니다(모델 단가 기준 추정).`);
+          lines.push(`<div title="학습 차단·보존 안 함 조건을 받는 제공업체에만 보내고, 없으면 보내지 않습니다. 쪽마다 한 번만 보내며 쪽당 약 1~3원이 듭니다(모델 단가 기준 추정). 모델: ${escHtml(ready.ai_model_label)}">⚠ ${unmasked && SC.mode === 'ai' ? '스캔 이미지 전체가' : '머리글을 가린 스캔 이미지가'} OpenRouter를 거쳐 Qwen AI로 전송됩니다(학습 차단·보존 안 함 업체만, 쪽당 약 1~3원).</div>`);
           const pct = el('b', { text: `${Math.round(SC.mask * 100)}%` });
           const range = el('input', { type: 'range', min: 0, max: 40, step: 1, value: Math.round(SC.mask * 100), style: 'width:220px' });
-          const img = el('img', { alt: '첫 쪽 미리보기', style: 'width:260px;border:1px solid var(--border);border-radius:8px;background:#fff;display:block;margin-top:8px' });
+          const img = el('img', { alt: '첫 쪽 미리보기' }); // 첫 쪽 위쪽만 잘라 보여 줌(가림 확인용, 화면 높이 아끼기)
           let t = null;
           const preview = () => { clearTimeout(t); t = setTimeout(async () => { const r = await call('inbox_scan_mask_preview', b.id, unmasked && SC.mode === 'ai' ? 0 : SC.mask); if (r) img.src = r.src; }, 250); };
           range.addEventListener('input', () => { SC.mask = (+range.value) / 100; pct.textContent = `${range.value}%`; preview(); });
-          const sec = el('div', { class: 'wsection' }, [el('h3', { text: 'Qwen에 보낼 때 머리글(학번·이름) 가리기' }),
-            el('div', { class: 'map-row' }, [el('label', {}, ['위쪽 가리기 ', range]), pct, el('span', { class: 'muted', text: '첫 쪽에서 학번·이름 칸이 흰색으로 덮이게 맞추세요(이 PC 안에서 처리).' })])]);
+          const secL = el('div', { class: 'ocr-mask-left' }, [
+            el('div', { class: 'map-row' }, [el('b', { text: 'Qwen에 보낼 때 머리글(학번·이름) 가리기' }), range, pct]),
+            el('p', { class: 'hint', text: '오른쪽 첫 쪽 미리보기에서 학번·이름 칸이 흰색으로 덮이게 맞추세요(이 PC 안에서 처리).' })]);
+          const sec = el('div', { class: 'wsection ocr-mask' }, [secL, el('div', { class: 'ocr-mask-prev' }, [img])]);
           if (SC.mode === 'ai') {
-            sec.appendChild(el('label', { class: 'inline', style: 'display:block;margin-top:6px' }, [
+            secL.appendChild(el('label', { class: 'inline', style: 'display:block;margin-top:6px' }, [
               el('input', { type: 'checkbox', checked: unmasked, onchange: async (e) => {
                 if (e.target.checked && !ready.consent) {
-                  const yes = await modal('머리글을 가리지 않으면 <b>손으로 쓴 이름·학번이 담긴 그림이 OpenRouter와 Qwen 제공업체로 전송</b>됩니다(학습 차단·보존 안 함 조건).<br>가리면 학번·이름을 자동으로 찾지 못해, 다음 단계에서 학생을 직접 골라야 합니다.<br><br>가리지 않고 보낼까요? 이 동의는 설정에 저장됩니다.', true, true, '동의하고 가리지 않기');
+                  const yes = await modal(stepsHtml('머리글을 가리지 않고 Qwen에 보낼까요?', [['전송되는 것', '<b>손으로 쓴 이름·학번이 담긴 그림이 OpenRouter와 Qwen 제공업체로 전송</b>됩니다(학습 차단·보존 안 함 조건).'], ['가리면', '학번·이름을 자동으로 찾지 못해, 다음 단계에서 학생을 직접 골라야 합니다.'], ['동의 저장', '이 동의는 설정에 저장됩니다(설정 › 연결·모델에서 끌 수 있음).']]), true, true, '동의하고 가리지 않기');
                   if (!yes) { e.target.checked = false; return; }
                   if (!(await mutate('save_config', { ocr_ai_consent: true }))) { e.target.checked = false; return; }
                   ready.consent = true;
                 }
                 unmasked = e.target.checked; drawOpts();
-              } }), ' 가리지 않고 보내기 (학번·이름을 자동으로 찾음, 전송 동의 필요)']));
-            if (!unmasked) sec.appendChild(el('p', { class: 'hint', text: '가리고 보내면 학번·이름을 읽지 못하므로, 학생 매칭에서 원본을 보고 직접 골라 주세요.' }));
+              } }), ' 가리지 않고 보내기 (학번·이름을 자동으로 찾음, 전송 동의 필요)', el('span', { class: 'muted', text: unmasked ? '' : ' — 가리면 학생 매칭에서 원본을 보고 직접 고릅니다' })]));
           }
           if (unmasked && SC.mode === 'ai') { range.disabled = true; pct.textContent = '가리지 않음'; }
-          sec.appendChild(img);
           opts.appendChild(sec);
           preview();
         }
-        lines.push('<span class="muted">글 AI(OpenRouter)에는 인식한 글에서 학번·이름 줄을 뺀 내용만 보냅니다.</span>');
-        warn.innerHTML = lines.join('<br>');
+        lines.push('<div>⚠ 글 AI(OpenRouter)에는 인식한 글에서 학번·이름 줄을 뺀 내용만 보냅니다.</div>');
+        warn.innerHTML = lines.join('');
       }
       drawOpts();
       startBtn.addEventListener('click', async () => {
         const mask = SC.mode === 'ai' && unmasked ? 0 : SC.mask;
         if (SC.mode !== 'clova' && mask <= 0 && !ready.consent) { // 가림 0%: 하이브리드도 동의가 있어야 보냄
-          const yes = await modal('머리글 가림이 0%입니다. <b>손으로 쓴 이름·학번이 담긴 그림이 OpenRouter와 Qwen 제공업체로 전송</b>됩니다(학습 차단·보존 안 함 조건).<br>가리려면 [취소]를 누르고 가림 비율을 올려 주세요.<br><br>가리지 않고 보낼까요? 이 동의는 설정에 저장됩니다.', true, true, '동의하고 가리지 않기');
+          const yes = await modal(stepsHtml('머리글 가림이 0%입니다', [['전송되는 것', '<b>손으로 쓴 이름·학번이 담긴 그림이 OpenRouter와 Qwen 제공업체로 전송</b>됩니다(학습 차단·보존 안 함 조건).'], ['가리려면', '[취소]를 누르고 가림 비율을 올려 주세요.'], ['동의 저장', '가리지 않고 보내면 이 동의는 설정에 저장됩니다.']]), true, true, '동의하고 가리지 않기');
           if (!yes) return;
           if (!(await mutate('save_config', { ocr_ai_consent: true }))) return;
           ready.consent = true;
@@ -7904,7 +7914,8 @@
     const cFailed = mode === 'ai' ? 0 : (sc.clova || []).filter((x) => x && x.fail).length;
     const rev = r.review || [];
     const left = rev.reduce((s, x) => s + (x.left || 0), 0);
-    const bar = el('div', { class: 'map-row', style: 'flex-wrap:wrap;gap:8px' }, [el('span', { class: 'tag', text: `읽은 방식: ${label}` })]);
+    // '읽은 방식' 표시: 옆 버튼과 같은 크기(버튼 모양을 빌려 씀, 누를 수 없음), 노란 바탕·진한 글씨
+    const bar = el('div', { class: 'map-row', style: 'flex-wrap:wrap;gap:8px' }, [el('button', { type: 'button', class: 'small ocr-read-chip', tabindex: '-1', 'aria-disabled': 'true', text: `읽은 방식: ${label}` })]);
     if (mode !== 'clova') bar.appendChild(el('span', { class: 'muted', text: `Qwen OCR 비용 $${(+r.ai_cost || 0).toFixed(4)}` }));
     if (mode === 'hybrid') {
       bar.appendChild(left ? el('span', { class: 'tag warn-tag', text: `미검토 차이 ${left}곳 — 고르지 않은 곳은 CLOVA 글을 씁니다` }) : el('span', { class: 'tag', text: '✓ 차이 검토 끝' }));
@@ -7926,7 +7937,7 @@
         const ready = await call('clova_ready');
         if (!ready) return;
         if (!ready.openrouter) { alertBox('OpenRouter API 키가 없습니다. 설정 › 연결·모델에서 넣어 주세요.'); return; }
-        if (!(await modal(`머리글 위 ${Math.round(ready.mask * 100)}%를 흰색으로 가린 스캔 이미지를 OpenRouter의 Qwen(${escHtml(ready.ai_model_label)})로 보냅니다(쪽당 약 1~3원, 학습 차단·보존 안 함). 가림 비율은 설정 › 연결·모델에서 바꿀 수 있습니다.<br>CLOVA는 다시 부르지 않습니다.`, true, true, 'Qwen으로 읽기'))) return;
+        if (!(await modal(stepsHtml('Qwen으로도 읽어 CLOVA와 비교합니다', [['보내는 것', `머리글 위 ${Math.round(ready.mask * 100)}%를 흰색으로 가린 스캔 이미지를 OpenRouter를 거쳐 Qwen AI(${escHtml(ready.ai_model_label)})로 보냅니다. 가림 비율은 설정 › 연결·모델에서 바꿀 수 있습니다.`], ['비용과 조건', '쪽당 약 1~3원이 듭니다. 학습 차단·보존 안 함 조건을 받는 업체에만 보냅니다.'], ['CLOVA는 다시 부르지 않음', '이미 받은 CLOVA 결과와 비교해 하이브리드가 됩니다. 서로 다르게 읽은 곳만 원본을 보며 고르면 됩니다.']]), true, true, 'Qwen으로 읽기'))) return;
         runOcr(b, sc.per || 1, 'hybrid', { mask: ready.mask });
       } }));
     if (mode === 'ai' && aiPages.some((x) => x && !x.error)) bar.appendChild(el('button', { type: 'button', class: 'small', text: 'CLOVA로도 읽어 비교하기', title: 'Qwen은 다시 보내지 않고 CLOVA만 읽습니다',
@@ -7934,12 +7945,12 @@
         const ready = await call('clova_ready');
         if (!ready) return;
         if (!ready.clova) { alertBox('CLOVA 키가 없습니다. 설정 › 연결·모델에서 Secret Key와 Invoke URL을 넣어 주세요.'); return; }
-        if (!(await modal('스캔 이미지를 그대로 네이버 CLOVA OCR로 보내 읽고, 이미 받은 Qwen 결과와 비교합니다(하이브리드).<br>Qwen은 다시 보내지 않습니다.', true, true, 'CLOVA로 읽기'))) return;
+        if (!(await modal(stepsHtml('CLOVA로도 읽어 Qwen과 비교합니다', [['보내는 것', '스캔 이미지를 가리지 않고 그대로 네이버 CLOVA OCR로 보냅니다(손으로 쓴 이름·학번 포함).'], ['비용', 'CLOVA 무료 사용량을 넘으면 과금될 수 있습니다.'], ['Qwen은 다시 보내지 않음', '이미 받은 Qwen 결과와 비교해 하이브리드가 됩니다. 서로 다르게 읽은 곳만 원본을 보며 고르면 됩니다.']]), true, true, 'CLOVA로 읽기'))) return;
         runOcr(b, sc.per || 1, 'hybrid', { mask: (sc.ai && sc.ai.mask) || 0 });
       } }));
     bar.appendChild(el('span', { class: 'spacer' }));
     bar.appendChild(el('button', { type: 'button', class: 'small', text: 'OCR 다시 하기', onclick: async () => {
-      if (!(await modal('저장한 OCR 결과와 차이 검토를 모두 지우고 방식 고르기로 돌아갑니다.<br><b>CLOVA를 다시 부르면 무료 사용량을 넘어 과금될 수 있고</b>, Qwen도 쪽마다 다시 비용이 듭니다.<br>보통은 필요 없습니다. 계속할까요?', true, true, '지우고 다시 하기'))) return;
+      if (!(await modal(stepsHtml('OCR 결과를 지우고 처음부터 다시 읽습니다', [['지워지는 것', '저장한 OCR 결과와 차이 검토에서 고른 것·직접 고친 글이 모두 지워지고, 읽는 방식 고르기로 돌아갑니다.'], ['비용', '<b>CLOVA를 다시 부르면 무료 사용량을 넘어 과금될 수 있고</b>, Qwen도 쪽마다 다시 비용이 듭니다.'], ['보통은 필요 없음', '몇 쪽만 틀렸으면 그 쪽의 [원본 보기] › [✏️ 이 쪽 글 고치기]로, 못 읽은 쪽은 [실패한 쪽만 다시 읽기]로 해결하세요.']], '계속할까요?'), true, true, '지우고 다시 하기'))) return;
       if (await mutate('inbox_scan_reset', b.id, 'all')) { SC.starts = null; loadBatch(); }
     } }));
     return bar;

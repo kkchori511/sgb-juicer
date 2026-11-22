@@ -1,12 +1,12 @@
 # 작업 넘겨주기 (다음 작업 준비)
 
 다른 컴퓨터(Windows 포함)에서 이어 할 수 있게, 작업을 마칠 때마다 이 문서를 고쳐 커밋하고 push한다.
-마지막 갱신: 2026-11-22 (Windows, v0.35.1)
+마지막 갱신: 2026-11-22 (Windows, v0.35.2)
 
 ## 지금 상태
 
 - 작업 브랜치: `feature/v0.19` (원격과 같음). 원격에 `main` 브랜치는 없다.
-- 최신 릴리스: **v0.35.1** (2026-11-22, Windows 시험 반영 W1~W10 + 스캔 읽는 방식 기본 'CLOVA만 이용'). 결과·고친 것: `docs/review/windows_test_v035.md`. 그 전 v0.35.0(하이브리드 OCR) 계획은 `docs/plan/ocr-hybrid.md`.
+- 최신 릴리스: **v0.35.2** (2026-11-22, 화면 다듬기: 스캔 읽는 방식 선택 상자·한 화면, 안내 창 ①②③ 형식·노란 상자, '확인' 입력 창 빨간 ⚠, 제안 설문지 연결). 그 전 **v0.35.1** (2026-11-22, Windows 시험 반영 W1~W10 + 스캔 읽는 방식 기본 'CLOVA만 이용'). 결과·고친 것: `docs/review/windows_test_v035.md`. 그 전 v0.35.0(하이브리드 OCR) 계획은 `docs/plan/ocr-hybrid.md`.
 - **Windows 화면 시험 자동화**: `scripts/e2e_windows.py` + `scripts/e2e_steps/s01~s12`. 데모를 원격 조종 포트로 켜고(`$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222"`) `.\.venv\Scripts\python scripts\e2e_windows.py` — 새로 켠 데모에서 한 번에 81개 확인(약 4분), 캡처는 `e2e/`. 화면에 'null' 글자도 찾음. 창 크기는 CDP 화면 흉내로. 시험 프로세스에서 자료 sqlite를 열지 말 것(Windows 파일 잠김으로 복원 실패).
 - 스캔 읽는 방식(사용자 지정 2026-11-22): **CLOVA만 이용(기본)** → Qwen만(시험 기능) → 하이브리드(원본 인식이 어렵고 세밀한 확인이 필요할 때).
 - 개발 브랜치 `feature/ocr-hybrid`를 `feature/v0.19`로 합침(빨리 감기, 작업 브랜치는 지움). 다음 작업도 `feature/v0.19`에서.
@@ -94,6 +94,10 @@ v0.31.2:
 - 모두 설정(config.json)에 저장되고, 값이 없으면 기본 목록을 쓴다.
 
 ## 다른 컴퓨터로 넘어가지 않는 것 (Claude 메모 요약)
+
+- 안내 창 형식(사용자 지정 2026-11-22): 버튼을 누르기 전 확인 창은 `stepsHtml(제목, [[소제목, 설명], …], 끝말)` — 큰 제목 + ①②③(노란 상자) + 굵은 소제목/다음 줄 설명. '확인'을 입력하는 창(`typedConfirm`)은 빨간 ⚠ 2배 + '되돌릴 수 없는 작업입니다.' 다음 줄바꿈. `typedConfirm`은 `{ html: stepsHtml(…) }`도 받는다.
+- DOM `append`/`prepend`에 null을 넘기지 말 것(글자 'null'로 붙음) — 빈 값은 ''. 화면 시험이 'null'·'undefined' 글자를 찾는다.
+- 제안 설문지 주소는 `app/web/app.js`의 `SUGGEST_URL`(구글 폼).
 
 Claude 메모는 컴퓨터마다 따로라서, 이어 갈 때 필요한 내용을 여기 적어 둔다. 규칙은 `AGENTS.md`에 있다.
 
