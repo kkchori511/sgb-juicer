@@ -604,7 +604,7 @@
     });
   }
   function showAbout() {
-    modal(`<div class="about-box"><img src="face.png" alt="" class="about-face"><div class="about-title">생기부 착즙기</div><div class="muted">v${info.version} 베타</div>` +
+    modal(`<div class="about-box"><img src="face.png" alt="" class="about-face"><div class="about-title">생기부 착즙기</div><div class="muted">v${info.version}</div>` +
       `<div class="about-tag">"${info.tagline}"</div><div class="about-maker">${info.maker}</div></div>`, false, true);
   }
   function renderYearSelect() {

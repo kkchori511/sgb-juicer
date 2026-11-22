@@ -105,7 +105,7 @@ jobs:
           Copy-Item "dist/생기부착즙기.exe" "dist/SGB-Juicer.exe"
           gh release view "$env:RELEASE_TAG" --repo "$env:GH_REPO"
           if ($LASTEXITCODE -ne 0) {
-            gh release create "$env:RELEASE_TAG" --repo "$env:GH_REPO" --title "생기부 착즙기 $env:RELEASE_TAG (베타)" --generate-notes --verify-tag
+            gh release create "$env:RELEASE_TAG" --repo "$env:GH_REPO" --title "생기부 착즙기 $env:RELEASE_TAG" --generate-notes --verify-tag
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           gh release upload "$env:RELEASE_TAG" "dist/SGB-Juicer.exe#생기부착즙기.exe" --repo "$env:GH_REPO" --clobber

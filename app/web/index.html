@@ -12,7 +12,7 @@
   <header class="topbar">
     <div class="top-left">
       <button type="button" class="icon-btn" id="menuToggle" title="메뉴 접기/펼치기" aria-label="메뉴 접기/펼치기">☰</button>
-      <button type="button" class="brand" id="verBtn" title="앱 정보"><img src="face.png" alt="" class="brand-face"><span class="app-title">생기부 착즙기</span> <span class="app-ver" id="verText">v0.1</span> <span class="beta">베타</span></button>
+      <button type="button" class="brand" id="verBtn" title="앱 정보"><img src="face.png" alt="" class="brand-face"><span class="app-title">생기부 착즙기</span> <span class="app-ver" id="verText">v0.1</span></button>
       <select id="yearSelect" class="year-select" title="학년도"></select>
       <span class="archived-badge" id="archivedBadge" hidden>보관·조회 전용</span>
     </div>
@@ -523,8 +523,8 @@
         <div class="stab" data-stab-content="about" hidden>
           <div class="card">
             <h2>앱 정보</h2>
-            <p><b id="aboutName"></b> <span id="aboutVer"></span> (베타) / <span id="aboutMaker"></span></p>
-            <p class="muted">모든 기능은 베타입니다. 기능이 모두 들어가기 전까지 버전은 1.0 미만으로 유지합니다.</p>
+            <p><b id="aboutName"></b> <span id="aboutVer"></span> / <span id="aboutMaker"></span></p>
+            <p class="muted">Windows는 exe로 배포하며 자동 업데이트를 지원합니다. Mac은 소스에서 실행합니다.</p>
             <button type="button" id="checkUpdateBtn">업데이트 확인</button>
             <span class="check-result" id="updateCheckResult"></span>
           </div>
@@ -572,6 +572,7 @@
             <p class="hint">🔍 원하는 기능은 왼쪽 위 <b>기능 찾기</b> 칸에 낱말(예: 분량, 태그, 누가기록)을 넣으면 그 낱말이 있는 장만 남고 노랗게 표시됩니다. 띄어쓰기는 상관없고, Esc로 지웁니다.</p>
 
             <h2 id="g-start">1. 처음 설정</h2>
+            <p>Windows는 exe로 배포하며 자동 업데이트를 지원합니다. Mac은 소스에서 실행합니다. Qwen만으로 스캔 PDF를 읽는 방식은 시험 기능입니다.</p>
             <ol>
               <li><b>연결</b>: OpenRouter API 키를 붙여넣고 [연결 확인]을 누릅니다. 키 발급은 안내를 펼쳐 차례대로 따라 하세요. 1번 모델 칸에는 무료 모델이 들어 있습니다.</li>
               <li><b>담당</b>: 학년도와 담임/비담임을 고르고, 담임이면 학년·반을 넣습니다. 맡은 과목(학기 지정)과 동아리를 추가합니다. 과목은 학기마다 따로 등록합니다(예: 공통수학1은 1학기, 공통수학2는 2학기).</li>
@@ -789,6 +790,7 @@
               <li>복원·담당 삭제·학생 삭제·학년도 삭제·Inbox 묶음 삭제·사용 중인 태그 삭제·키 초기화·프롬프트 삭제·기본값 되돌리기처럼 되돌릴 수 없는 작업은 <b>'확인'</b>을 직접 입력해야 진행됩니다.</li>
               <li>업데이트 직전 백업(<code>업데이트전</code>)과 자료 형식이 바뀌어 처음 켤 때 만드는 백업(<code>형식변경전</code>)은 하루 백업에 밀려 지워지지 않게 따로 최근 3개를 보관합니다. exe를 직접 바꿔 넣어도 형식변경전 백업은 만들어집니다.</li>
               <li>새 버전이 나오면 상단에 알림이 뜹니다. [지금 업데이트]를 누르면 백업한 뒤 새 버전 파일을 받아 바꿔 둡니다(받은 파일이 올린 파일과 같은지 확인한 뒤에만). 학교 보안 프로그램이 막을 수 있어 새 버전을 저절로 켜지는 않으니, 안내가 뜨면 <b>앱을 종료한 뒤 다시 실행</b>하세요. 그 전까지는 지금 화면이 예전 버전 그대로입니다. 메뉴가 없어지거나 합쳐지는 업데이트는 먼저 안내를 보여 주고, <b>'확인'</b>을 직접 입력해야 진행합니다.</li>
+              <li><b>자동 업데이트가 실패하면</b> 앱을 종료하고, <code>생기부착즙기_데이터</code> 폴더는 그대로 둔 채 <a href="#" data-url="https://github.com/kkchori511/sgb-juicer/releases/latest">릴리스 페이지</a>에서 exe를 다시 내려받아 기존 exe 자리에 넣으세요. 업데이트 후 자료에 문제가 있으면 <b>설정 › 백업·자료</b>에서 <code>업데이트전</code> 백업을 골라 복원하세요.</li>
               <li>새 학년도는 설정 &gt; 역할·학년도에서 시작합니다. 이전 학년도는 상단에서 골라 조회만 할 수 있습니다.</li>
               <li>다른 PC로 옮길 때는 exe와 자료 폴더를 함께 복사하세요. 다른 사람에게 줄 때는 <b>exe만</b> 주세요.</li>
             </ul>

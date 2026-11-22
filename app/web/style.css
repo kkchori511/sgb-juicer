@@ -118,7 +118,6 @@ code { background: var(--surface-2); border: 1px solid var(--border); padding: 1
 .app-ver { font-size: 13px; font-weight: 800; color: var(--text-2); }
 .about-face { width: 96px; height: 96px; border-radius: 50%; display: block; margin: 0 auto 8px; }
 .about-maker { font-weight: 800; margin-top: 4px; }
-.beta { background: var(--orange); color: var(--input); border-radius: 999px; padding: 0 7px; font-size: 11px; margin-left: 2px; }
 .year-select { width: auto; height: 34px; padding: 4px 10px; font-weight: 700; }
 .archived-badge { background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 999px; padding: 2px 10px; font-size: 13px; font-weight: 700; }
 /* 저장 상태: 상단 가운데 */
@@ -1328,7 +1327,7 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; d
 .crumb-row { flex: none; margin-bottom: 16px; }
 .topbar { box-shadow: none; gap: 16px; padding-inline: 16px 24px; }
 .brand { border-color: var(--border); background: var(--input); min-height: 44px; }
-.beta, .nav-badge { color: var(--warn-text); background: var(--warn-bg); }
+.nav-badge { color: var(--warn-text); background: var(--warn-bg); }
 .save-state.ok { color: var(--st-final); border-color: var(--border); background: var(--input); }
 .credit { background: var(--input); border-color: var(--border); font-variant-numeric: tabular-nums; }
 .credit b { color: var(--text); }

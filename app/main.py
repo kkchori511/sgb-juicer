@@ -12,7 +12,7 @@ def _intro_html():
         html = (web_dir() / "intro.html").read_text(encoding="utf-8")
     except Exception:
         return None
-    return html.replace("v0.0.0", f"v{VERSION} 베타").replace("/*INTRO_FONTS*/", _intro_fonts())
+    return html.replace("v0.0.0", f"v{VERSION}").replace("/*INTRO_FONTS*/", _intro_fonts())
 
 
 def _intro_fonts():
@@ -120,7 +120,7 @@ def main():
         kwargs = {"width": 1366, "height": 860, "maximized": True}  # 첫 실행은 최대화
     intro = _intro_html()
     window = webview.create_window(
-        f"{APP_NAME} v{VERSION} (베타)",
+        f"{APP_NAME} v{VERSION}",
         url="app/web/index.html",  # pywebview가 앱 루트(_MEIPASS) 기준 내장 서버로 제공
         js_api=api,
         min_size=(1024, 640),
