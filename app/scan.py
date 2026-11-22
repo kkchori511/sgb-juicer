@@ -191,6 +191,8 @@ def render_page(year, batch_id, page: int, width: int = 900) -> str:
             p = pdf[int(page)]
             bm = p.render(scale=width / p.get_width(), rev_byteorder=True)
             w, h, ch, stride, raw = bm.width, bm.height, bm.n_channels, bm.stride, bytes(bm.buffer)
+            bm.close()
+            p.close()
         finally:
             pdf.close()
     png = _png(w, h, ch, stride, raw)
@@ -217,6 +219,8 @@ def render_crop(year, batch_id, page: int, box, w, h, clip=None, width: int = 14
             p = pdf[int(page)]
             bm = p.render(scale=width / p.get_width(), rev_byteorder=True)
             bw, bh, ch, stride, raw = bm.width, bm.height, bm.n_channels, bm.stride, bytes(bm.buffer)
+            bm.close()
+            p.close()
         finally:
             pdf.close()
     sy = bh / float(h or bh)

@@ -675,11 +675,20 @@ class Inbox:
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
         return sc
 
+    def _scan_review_editable(self, bid):
+        """검토·고르기는 페이지 묶기 단계에서만(확정한 뒤 늦게 도착한 저장이 매칭 내용과 어긋나지 않게, Codex 재검토 R4)."""
+        b = self._editable_batch(bid)
+        if b.get("stage") not in (None, "", "import"):
+            raise DbError("이미 학생 매칭으로 넘어간 묶음입니다. 쪽 글을 고치려면 [페이지 다시 묶기]로 돌아가 주세요.")
+        return b
+
     def scan_compare(self, bid, page):
         """검토 창: 한 쪽의 두 결과와 차이·고른 것."""
         b = self.batch(bid)
         sc = b["meta"].get("scan") or {}
         p = int(page)
+        if not 0 <= p < int(sc.get("pages") or 0):
+            raise DbError("없는 쪽입니다.")
         cp = (sc.get("clova") or [None] * (p + 1))[p] if sc.get("clova") else None
         ap = ((sc.get("ai") or {}).get("pages") or [None] * (p + 1))[p] if (sc.get("ai") or {}).get("pages") else None
         rv = (sc.get("review") or {}).get(str(p)) or {}
@@ -699,7 +708,7 @@ class Inbox:
     def scan_decide(self, bid, page, data):
         """data: {"d": {id: {"pick", "text"}|None}} 차이별, {"page": "clova"|"ai"|"edit"|None, "text"} 통째,
         {"figs": bool} 그림 설명, {"all_ai": True} 이 쪽 차이 모두 AI 쪽, {"reset": True} 고른 것 모두 지우기."""
-        b = self._editable_batch(bid)
+        b = self._scan_review_editable(bid)
         meta = b["meta"]
         sc = meta.get("scan") or {}
         rv_all = sc.get("review") or {}
@@ -744,7 +753,7 @@ class Inbox:
     @_scan_locked
     def scan_store_suggest(self, bid, page, sugg, cost):
         """3단계 보정 제안을 저장(미리 골라 두기만 — 고른 것으로 치지 않음)."""
-        b = self._editable_batch(bid)
+        b = self._scan_review_editable(bid)
         meta = b["meta"]
         sc = meta.get("scan") or {}
         rv_all = sc.get("review") or {}

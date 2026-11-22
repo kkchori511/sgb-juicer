@@ -3122,6 +3122,7 @@ class Api:
         else:
             cfg, model = self._model(None)
         ib = self._ib()
+        ib._scan_review_editable(bid)  # 매칭으로 넘어간 묶음이면 AI에 보내기 전에 멈춤
         r = ib.scan_compare(bid, page)
         cmp = r.get("cmp")
         if not cmp or cmp["big"]:

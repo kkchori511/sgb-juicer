@@ -67,6 +67,8 @@ def render_png(pdf_path, page: int, mask: float = 0.0, width: int = RENDER_WIDTH
             p = pdf[int(page)]
             bm = p.render(scale=width / p.get_width(), rev_byteorder=True)
             w, h, ch, stride, buf = bm.width, bm.height, bm.n_channels, bm.stride, bytearray(bytes(bm.buffer))
+            bm.close()  # 비트맵·페이지의 네이티브 해제도 잠금 안에서(Codex 재검토 R1)
+            p.close()
         finally:
             pdf.close()
     row = w * ch

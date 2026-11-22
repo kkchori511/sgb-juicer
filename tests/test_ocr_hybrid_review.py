@@ -157,11 +157,58 @@ def test_api():
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert set(ib.scan_compare(bid3, 0)["review"]["d"]) == set(ids)
+    # R5: 없는 쪽은 오류
+    assert not api.inbox_scan_compare(bid3, 2)["ok"] and not api.inbox_scan_compare(bid3, -1)["ok"]
+    # R4: 매칭으로 넘어간 뒤에는 검토 저장·AI 제안을 받지 않음
+    ok(api.inbox_scan_confirm(bid3, [0, 1], []))
+    r = api.inbox_scan_decide(bid3, 0, {"d": {ids[0]: {"pick": "clova"}}})
+    assert not r["ok"] and "매칭" in r["error"]
+    assert not api.inbox_scan_suggest(bid3, 0)["ok"]
+    # R8: Qwen만 → 하이브리드로 CLOVA만 더함(Qwen 다시 안 보냄)
+    n_sent = len(sent)
+    ocr.ocr_pdf_pages = lambda *a, pages=None, on_chunk=None, **k: on_chunk({p: L(f"CLOVA {p}") for p in pages}) or []
+    r = ok(api.inbox_scan_ocr(bid2, 1, "hybrid", {"mask": 0.3})); wait_idle(api)
+    assert r["clova"] and r["ai_pages"] == 0 and len(sent) == n_sent
+    g = ok(api.inbox_scan_groups(bid2))
+    assert g["mode"] == "hybrid" and len(g["review"]) == 2
+
+
+def test_round2():
+    """Codex 재검토(docs/review/codex_ocr_hybrid_2.md) R1~R6."""
+    from app import scan
+    import pypdfium2.raw as raw
+    # R1: 비트맵 해제도 PDFium 잠금 안에서
+    seen = []
+    real = raw.FPDFBitmap_Destroy
+    def watch(bm):
+        seen.append(scan.PDFIUM_LOCK._is_owned())
+        return real(bm)
+    raw.FPDFBitmap_Destroy = watch
+    try:
+        REAL_RENDER(PDF, 0, 0.1, width=200)
+    finally:
+        raw.FPDFBitmap_Destroy = real
+    assert seen and all(seen), seen
+    # R2: n학년 n반 n번 세 숫자 모두 지움
+    assert oc.redact("1학년 3반 99번 이름: 마바사", [], [scan.RE_GCN, scan.RE_NAME_LABEL]) == "○학년 ○반 ○○번 이름: ○○○"
+    # R3: 줄 끝을 바꾼 자리 뒤 그림 설명은 제 줄에
+    c = oc.compare(L("가나다\n라 마바"), Q("가나타\n라 마바", [{"after_line": 0, "desc": "장치 그림"}]))
+    assert oc.resolve(c, {"d": {"d0": {"pick": "ai"}}}, True) == "가나타\n[그림: 장치 그림]\n라 마바"
+    assert oc.resolve(c, {}, True) == "가나다\n[그림: 장치 그림]\n라 마바"
+    # R6: 후보 그대로면 긴 글이어도 ⚠ 아님, 긴 합친 글은 '확인 못 함'
+    d = {"id": "d0", "kind": "text", "clova": "가" * 61, "ai": "나"}
+    assert oc.parse_fix({"items": [{"id": "d0", "pick": "clova"}]}, [d])["d0"]["new"] is False
+    m = oc.parse_fix({"items": [{"id": "d0", "pick": "merge", "text": "가" * 61 + "나"}]}, [d])["d0"]
+    assert m["new"] is False and m["unchecked"] is True
+
+
+REAL_RENDER = ov.render_png
 
 
 if __name__ == "__main__":
     test_pure()
     test_vision_retry()
     test_render_threads()
+    test_round2()
     test_api()
     print("OCR REVIEW FIXES OK")

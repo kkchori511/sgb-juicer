@@ -7911,6 +7911,14 @@
         if (!(await modal(`머리글 위 ${Math.round(ready.mask * 100)}%를 흰색으로 가린 스캔 이미지를 OpenRouter의 Qwen(${escHtml(ready.ai_model_label)})로 보냅니다(쪽당 약 1~3원, 학습 차단·보존 안 함). 가림 비율은 설정 › 연결·모델에서 바꿀 수 있습니다.<br>CLOVA는 다시 부르지 않습니다.`, true, true, 'Qwen으로 읽기'))) return;
         runOcr(b, sc.per || 1, 'hybrid', { mask: ready.mask });
       } }));
+    if (mode === 'ai' && aiPages.some((x) => x && !x.error)) bar.appendChild(el('button', { type: 'button', class: 'small', text: 'CLOVA로도 읽어 비교하기', title: 'Qwen은 다시 보내지 않고 CLOVA만 읽습니다',
+      onclick: async () => {
+        const ready = await call('clova_ready');
+        if (!ready) return;
+        if (!ready.clova) { alertBox('CLOVA 키가 없습니다. 설정 › 연결·모델에서 Secret Key와 Invoke URL을 넣어 주세요.'); return; }
+        if (!(await modal('스캔 이미지를 그대로 네이버 CLOVA OCR로 보내 읽고, 이미 받은 Qwen 결과와 비교합니다(하이브리드).<br>Qwen은 다시 보내지 않습니다.', true, true, 'CLOVA로 읽기'))) return;
+        runOcr(b, sc.per || 1, 'hybrid', { mask: (sc.ai && sc.ai.mask) || 0 });
+      } }));
     bar.appendChild(el('span', { class: 'spacer' }));
     bar.appendChild(el('button', { type: 'button', class: 'small', text: 'OCR 다시 하기', onclick: async () => {
       if (!(await modal('저장한 OCR 결과와 차이 검토를 모두 지우고 방식 고르기로 돌아갑니다.<br><b>CLOVA를 다시 부르면 무료 사용량을 넘어 과금될 수 있고</b>, Qwen도 쪽마다 다시 비용이 듭니다.<br>보통은 필요 없습니다. 계속할까요?', true, true, '지우고 다시 하기'))) return;
@@ -7924,13 +7932,19 @@
     let cur = +page;
     let editSlot = null;
     // 닫을 때 확정 전 학생 경계·뺀 쪽(SC.starts·SC.skipped)은 그대로 둔다(M7)
-    const close = () => { closeSheet(); loadBatch(); };
+    // 아직 보내지 않은 고르기 저장을 다 끝낸 뒤 닫는다(닫자마자 확정해도 빠지지 않게, Codex 재검토 R4)
+    const close = async () => {
+      head.querySelectorAll('button').forEach((x) => { x.disabled = true; });
+      try { await queue; } catch (e) { /* 저장 실패는 mutate가 이미 알림 */ }
+      closeSheet(); loadBatch();
+    };
+    let head = null;
     let shown = cur; // 지금 화면에 그려진 쪽 — 고르기는 이 쪽에 저장(M8)
     let gen = 0;
     let queue = Promise.resolve(); // 고르기 저장은 순서대로 하나씩(M6)
     openSheet((box) => {
       box.style.width = 'min(1240px, 97vw)';
-      const head = el('div', { class: 'sheet-head ocr-review-head' });
+      head = el('div', { class: 'sheet-head ocr-review-head' });
       const bodyEl = el('div', { class: 'sheet-body' });
       box.append(head, bodyEl);
       function decide(data) {
@@ -7947,7 +7961,12 @@
         const r = await call('inbox_scan_compare', bid, want);
         if (r && my === gen && want === cur && r.page === want) draw(r); // 늦게 온 옛 쪽 응답은 버림(M8)
       }
-      function nav(to) { cur = to; load(); }
+      function nav(to) {
+        if (to < 0 || to >= total || to === cur) return; // 응답을 기다리는 동안 연타해도 범위 밖으로 가지 않게(R5)
+        cur = to;
+        head.querySelectorAll('button[data-nav]').forEach((x) => { x.disabled = true; });
+        load();
+      }
       function draw(r) {
         const keep = shown === r.page ? bodyEl.scrollTop : 0;
         shown = r.page;
@@ -7955,8 +7974,8 @@
         head.append(el('h2', { text: `${r.page + 1}쪽 차이 검토` }),
           r.cmp ? el('span', { class: 'muted', text: r.unreviewed ? `남은 차이 ${r.unreviewed}곳 · 고르지 않은 곳은 CLOVA 글` : '✓ 이 쪽 검토 끝' }) : null,
           el('span', { class: 'spacer' }),
-          el('button', { type: 'button', class: 'small', text: '◀ 이전 쪽', disabled: cur <= 0, onclick: () => nav(cur - 1) }),
-          el('button', { type: 'button', class: 'small', text: '다음 쪽 ▶', disabled: cur >= total - 1, onclick: () => nav(cur + 1) }),
+          el('button', { type: 'button', class: 'small', 'data-nav': '1', text: '◀ 이전 쪽', disabled: r.page <= 0, onclick: () => nav(r.page - 1) }),
+          el('button', { type: 'button', class: 'small', 'data-nav': '1', text: '다음 쪽 ▶', disabled: r.page >= total - 1, onclick: () => nav(r.page + 1) }),
           el('button', { type: 'button', text: '닫기', onclick: close }));
         markDismiss(head);
         bodyEl.innerHTML = '';
@@ -8026,6 +8045,7 @@
           const sgLine = sg ? el('div', { class: sg.new ? 'warn' : 'hint', style: 'margin-top:6px' }, [
             `💡 AI 제안: ${{ clova: 'CLOVA 쪽', ai: 'Qwen 쪽', merge: '합친 글' }[sg.pick]} "${show(sg.text)}"${sg.reason ? ' — ' + sg.reason : ''}`,
             sg.new ? el('b', { text: ' ⚠ 두 후보에 없는 글자를 만들었습니다(그림을 보지 못한 짐작). 원본을 꼭 확인하세요.' }) : null,
+            sg.unchecked ? el('b', { text: ' (글이 길어 두 후보에서 나온 글자인지 자동으로 확인하지 못했습니다. 원본을 확인하세요.)' }) : null,
             !pick ? el('button', { type: 'button', class: 'small', style: 'margin-left:6px', text: '이 제안 고르기', onclick: () => decide({ d: { [d.id]: sg.pick === 'merge' ? { pick: 'edit', text: sg.text } : { pick: sg.pick } } }) }) : null]) : null;
           const row = el('div', { class: 'ref-card ocr-diff' + (pick ? ' done' : ''), tabindex: 0 }, [
             el('div', { class: 'rcard-head' }, [el('b', { text: `차이 ${i + 1}` }), pick ? el('span', { class: 'tag', text: { clova: 'CLOVA 고름', ai: 'Qwen 고름', edit: '직접 고침' }[pick] }) : null]),

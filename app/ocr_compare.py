@@ -179,13 +179,17 @@ def compare(clova_page: dict, ai_page: dict, mask: float = 0.0) -> dict:
 
 
 def _fig_reps(cmp, spans=()):
+    """그림 설명 넣기. 줄 끝이면 '\n[그림]', 줄 시작(맨 앞·바꾼 구간이 줄바꿈까지 먹은 뒤)이면 '[그림]\n'(R3)."""
+    a = cmp["a"]
     reps = []
     for f in cmp["fig_pos"]:
         p = f["pos"]
         for s, e in spans:
             if s < p < e:
                 p = e
-        reps.append((p, p, ("\n[그림: " + f["desc"] + "]") if p else ("[그림: " + f["desc"] + "]\n")))
+        tag = "[그림: " + f["desc"] + "]"
+        at_line_start = p == 0 or a[p - 1:p] == "\n"
+        reps.append((p, p, (tag + "\n") if at_line_start else ("\n" + tag)))
     return reps
 
 
@@ -301,11 +305,15 @@ def redact(text: str, values=(), regexes=()) -> str:
         v = re.sub(r"\s", "", str(v or ""))
         if len(v) >= 2:
             pats.append((re.compile(r"[ \t]*".join(re.escape(ch) for ch in v)), 0))
-    pats += [(r, 1 if r.groups else 0) for r in regexes]
-    for r, g in pats:
+    for r in regexes:  # 캡처 그룹이 있으면 그룹 모두(예: n학년 n반 n번의 세 숫자, Codex 재검토 R2), 없으면 전체
+        pats.append((r, list(range(1, r.groups + 1)) or [0]))
+    for r, gs in pats:
         for m in r.finditer(text):
-            for i in range(m.start(g), m.end(g)):
-                marks[i] = True
+            for g in (gs if isinstance(gs, list) else [gs]):
+                if m.start(g) < 0:
+                    continue
+                for i in range(m.start(g), m.end(g)):
+                    marks[i] = True
     return "".join("○" if mk and not ch.isspace() else ch for ch, mk in zip(text, marks))
 
 
@@ -358,8 +366,14 @@ def parse_fix(obj, diffs):
         d = by[it["id"]]
         text = d["clova"] if it["pick"] == "clova" else d["ai"] if it["pick"] == "ai" else nfc(str(it.get("text") or ""))[:200]
         sq = lambda t: re.sub(r"\s", "", t)
-        new = len(sq(text)) > 60 or not _interleaves(sq(text), sq(d["clova"]), sq(d["ai"]))
+        unchecked = False
+        if it["pick"] in ("clova", "ai") or text in (d["clova"], d["ai"]):
+            new = False  # 후보 그대로(R6)
+        elif len(sq(text)) > 60:
+            new, unchecked = False, True  # 너무 길어 자동으로 확인 못 함 — '새 글자'로 단정하지 않음
+        else:
+            new = not _interleaves(sq(text), sq(d["clova"]), sq(d["ai"]))
         if it["pick"] == "merge" and text in (d["clova"], d["ai"]):
             it["pick"] = "clova" if text == d["clova"] else "ai"
-        out[it["id"]] = {"pick": it["pick"], "text": text, "reason": str(it.get("reason") or "")[:80], "new": new}
+        out[it["id"]] = {"pick": it["pick"], "text": text, "reason": str(it.get("reason") or "")[:80], "new": new, "unchecked": unchecked}
     return out
