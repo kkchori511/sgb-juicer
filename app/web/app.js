@@ -218,6 +218,31 @@
     while (w.nextNode()) nodes.push(w.currentNode);
     nodes.forEach((n) => n.replaceWith(...n.textContent.split(/([①②③④⑤⑥⑦])/).filter((t) => t).map((t) => (/^[①②③④⑤⑥⑦]$/.test(t) ? el('span', { class: 'circled-num', text: t }) : document.createTextNode(t)))));
   }
+  // 펼침·접힘 표시: V자 꺾쇠(펼침 = 아래 V, 접힘 = 오른쪽 >). 글자(▸▾) 대신 CSS로 그린다(사용자 지정 2026-11-22)
+  const chev = (open, cls) => el('span', { class: `chev${open ? ' open' : ''}${cls ? ' ' + cls : ''}`, 'aria-hidden': 'true' });
+  // 세모 화살표(▲▼◀▶▾)는 버튼·메뉴 안에서 크게 보이게 감싼다(줄 높이는 그대로). 새로 그린 화면도 따라가게 지켜본다
+  const TRI_RE = /[▲▼◀▶▾]/;
+  function wrapTriText(n) {
+    const p = n.parentElement;
+    if (!p || !TRI_RE.test(n.nodeValue) || p.closest('.tri, textarea, option, select') || !p.closest('button, summary')) return;
+    n.replaceWith(...n.nodeValue.split(/([▲▼◀▶▾])/).filter((t) => t).map((t) => (TRI_RE.test(t) && t.length === 1 ? el('span', { class: 'tri', text: t }) : document.createTextNode(t))));
+  }
+  function bigTriangles(root) {
+    if (root.nodeType === 3) { wrapTriText(root); return; }
+    if (root.nodeType !== 1) return;
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (TRI_RE.test(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT) });
+    const nodes = [];
+    while (w.nextNode()) nodes.push(w.currentNode);
+    nodes.forEach(wrapTriText);
+  }
+  function watchTriangles() {
+    bigTriangles(document.body);
+    if (!window.MutationObserver) return;
+    new MutationObserver((muts) => muts.forEach((m) => {
+      if (m.type === 'characterData') wrapTriText(m.target);
+      else m.addedNodes.forEach(bigTriangles);
+    })).observe(document.body, { childList: true, subtree: true, characterData: true });
+  }
   // 표시용 단계 번호만 원형 숫자 배지로 그린다. 원본 상수·입력값·기록 본문은 바꾸지 않는다.
   function numberedLabel(node, value) {
     const label = String(value || '');
@@ -748,7 +773,7 @@
       if (e.target.closest('select, button:not(.dash-fold), a')) return;
       if (dashFold.has(g.id)) dashFold.delete(g.id); else dashFold.add(g.id);
       renderDashTable(g, count);
-    } }, [el('h2', {}, [el('span', { class: 'dash-fold', text: shut ? '▸ ' : '▾ ' }), g.label])]);
+    } }, [el('h2', {}, [chev(!shut, 'dash-fold'), g.label])]);
     card.appendChild(head);
     const act = g.rows.filter((r) => r.active);
     const its = g.kind === 'homeroom' ? g.items : [g.kind];
@@ -2629,7 +2654,7 @@
       const holder = el('div', { class: 'stu-group' + (folded ? ' folded' : ''), style: `--gc:${groupColor(gr.key)}` });
       const head = el('button', { type: 'button', class: 'stu-group-head', 'aria-expanded': folded ? 'false' : 'true', disabled: narrowing,
         title: narrowing ? '검색·필터 중에는 모두 펼쳐 보입니다' : folded ? '펼치기' : '접기',
-        onclick: () => { setFold(fk, !folded); renderStudentList(); } }, [el('span', { class: 'g-name', text: `${narrowing ? '•' : folded ? '▸' : '▾'} ${gr.label}` }), el('span', { class: 'cnt', text: `전체 ${all.length}명 / 마감 ${done}명` })]);
+        onclick: () => { setFold(fk, !folded); renderStudentList(); } }, [el('span', { class: 'g-name' }, [narrowing ? '• ' : chev(!folded), gr.label]), el('span', { class: 'cnt', text: `전체 ${all.length}명 / 마감 ${done}명` })]);
       holder.appendChild(head);
       box.appendChild(holder);
       if (folded) return;
@@ -2761,11 +2786,11 @@
     try { localStorage.setItem(FOLD_KEY, JSON.stringify(fold)); } catch (e) { /* 무시 */ }
   }
   function foldBtn(key, target, label) {
-    const txt = () => `${fold[key] ? '▸' : '▾'} ${label}`;
-    const b = el('button', { type: 'button', class: 'fold-btn', title: fold[key] ? '펼치기' : '접기', text: txt(), 'aria-expanded': fold[key] ? 'false' : 'true' });
+    const txt = () => [chev(!fold[key]), label];
+    const b = el('button', { type: 'button', class: 'fold-btn', title: fold[key] ? '펼치기' : '접기', 'aria-expanded': fold[key] ? 'false' : 'true' }, txt());
     const apply = () => {
       target.classList.toggle('folded', !!fold[key]);
-      b.textContent = txt();
+      b.replaceChildren(...txt());
       b.title = fold[key] ? '펼치기' : '접기';
       b.setAttribute('aria-expanded', fold[key] ? 'false' : 'true');
       syncFinalCol();
@@ -2986,7 +3011,7 @@
     const tgl = el('button', { type: 'button', class: 'bundle-tgl' });
     const draw = () => {
       const open = BO.open.has(r.id);
-      tgl.textContent = `${open ? '▾' : '▸'} ${title} ${list.length}개${open || !latest ? '' : ` / 최신: ${bundleLabel(latest)} ${(latest.created_at || '').slice(5, 16)}`}`;
+      tgl.replaceChildren(chev(open), `${title} ${list.length}개${open || !latest ? '' : ` / 최신: ${bundleLabel(latest)} ${(latest.created_at || '').slice(5, 16)}`}`);
       items.hidden = !open;
       items.innerHTML = '';
       if (!open) return;
@@ -5222,13 +5247,13 @@
         const fk = `tv:${c.key}`;
         const box = el('div', { class: 'tv-class' + (fold[fk] ? ' folded' : ''), style: `--gc:${groupColor(c.key)}` });
         const cc = clsCount[c.key];
-        const arrow = el('span', { text: `${fold[fk] ? '▸' : '▾'} ${c.label}` });
+        const arrow = el('span', {}, [chev(!fold[fk]), c.label]);
         const head = el('button', { type: 'button', class: 'tv-class-head', 'aria-expanded': fold[fk] ? 'false' : 'true', title: fold[fk] ? '펼치기' : '접기' },
           [arrow, el('span', { class: 'cnt', text: `학생 ${cc.s.size}명 / 기록 ${cc.n}건` })]);
         head.addEventListener('click', () => {
           setFold(fk, !fold[fk]);
           box.classList.toggle('folded', !!fold[fk]);
-          arrow.textContent = `${fold[fk] ? '▸' : '▾'} ${c.label}`;
+          arrow.replaceChildren(chev(!fold[fk]), c.label);
           head.setAttribute('aria-expanded', fold[fk] ? 'false' : 'true');
           head.title = fold[fk] ? '펼치기' : '접기';
         });
@@ -5401,7 +5426,7 @@
     const draw = () => {
       const open = TVB.has(r.id);
       const latest = list.find((x) => x.op !== 'orig'); // 원문은 '최신'으로 치지 않음(W5)
-      tgl.textContent = list.length ? `${open ? '▾' : '▸'} ${r.confirmed ? '원문·변환 결과' : '변환 결과'} ${list.length}개${open || !latest ? '' : ` / 최신: ${bundleLabel(latest)} ${(latest.created_at || '').slice(5, 16)}`}` : '';
+      if (list.length) tgl.replaceChildren(chev(open), `${r.confirmed ? '원문·변환 결과' : '변환 결과'} ${list.length}개${open || !latest ? '' : ` / 최신: ${bundleLabel(latest)} ${(latest.created_at || '').slice(5, 16)}`}`); else tgl.textContent = '';
       tgl.hidden = !list.length;
       items.hidden = !open;
       items.innerHTML = '';
@@ -9418,6 +9443,7 @@
   // 실행 인트로를 닫고 본 창을 보인다(알림 창을 띄우기 전과 시작이 끝났을 때. 여러 번 불러도 한 번만)
   const appReady = () => { try { if (api && api.app_ready) api.app_ready(); } catch (e) { /* 인트로가 없으면 그만 */ } };
   async function init() {
+    watchTriangles(); // 세모 화살표 크게(화면을 그리기 전에 지켜보기 시작)
     try { await initInner(); } finally { appReady(); }
   }
   async function initInner() {

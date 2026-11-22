@@ -101,6 +101,10 @@ if __name__ == "__main__":
             exec(compile(code, sys.argv[2], "exec"), {**globals(), "page": page})
         else:
             steps = [s for s in sys.argv[1:]] or [str(i) for i in range(1, 13)]
+            # 실제 창 크기와 상관없이 같은 크기로(1920×1080·125% 노트북 = 1536×794) — 결과가 창 크기에 따라 달라지지 않게
+            _cdp = page.context.new_cdp_session(page)
+            _cdp.send("Emulation.setDeviceMetricsOverride", {"width": 1536, "height": 794, "deviceScaleFactor": 1.25, "mobile": False})
+            page.wait_for_timeout(500)
             sdir = os.path.join(ROOT, "scripts", "e2e_steps")
             for s in steps:
                 f = next((os.path.join(sdir, n) for n in sorted(os.listdir(sdir)) if n.startswith(f"s{int(s):02d}_")), None)
@@ -120,5 +124,9 @@ if __name__ == "__main__":
             with open(os.path.join(OUT, "bad_text.log"), "w", encoding="utf-8") as fp:
                 fp.write("\n".join(BAD_TEXT))
             print(f"\n요약: {c} / 콘솔 오류 {len(ERRORS)}건 / 화면 'null' 글자 {len(BAD_TEXT)}건")
+            try:
+                _cdp.send("Emulation.clearDeviceMetricsOverride")  # 창을 원래 크기로
+            except Exception:
+                pass
         if ERRORS:
             print("\n".join(ERRORS))

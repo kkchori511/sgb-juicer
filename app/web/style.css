@@ -2239,3 +2239,39 @@ button.small.ocr-read-chip, button.small.ocr-read-chip:hover, button.small.ocr-r
 .ocr-warn { margin-top: 8px !important; }
 .wsection:has(> .ocr-modes) h3 { margin-bottom: 6px; }
 .ocr-file ~ .sheet-foot { margin-top: 6px; padding-top: 8px; }
+
+/* 펼침·접힘 V자 꺾쇠(.chev): 접힘 = 오른쪽 >, 펼침 = 아래 V. 글자 크기에 맞춰 커지고 줄 높이는 늘리지 않음(사용자 지정 2026-11-22) */
+.chev { display: inline-block; flex: none; width: .45em; height: .45em; border-right: .15em solid currentColor; border-bottom: .15em solid currentColor; transform: rotate(-45deg); margin: 0 .55em .08em .1em; vertical-align: middle; transition: transform .15s; box-sizing: content-box; }
+.chev.open { transform: rotate(45deg); margin-bottom: .28em; }
+.nav-fold .fold-caret.chev { font-size: 13px; margin-left: 6px; }
+.nav-fold[aria-expanded="false"] .fold-caret.chev { transform: rotate(-45deg); margin-bottom: .08em; }
+.dash-fold.chev { margin-right: .4em; }
+/* <details> 접는 칸(메뉴 버튼 제외)도 같은 꺾쇠 */
+details:not(.opt-menu):not(.add-menu) > summary { list-style: none; }
+details:not(.opt-menu):not(.add-menu) > summary::-webkit-details-marker { display: none; }
+details:not(.opt-menu):not(.add-menu) > summary::before { content: ''; display: inline-block; width: .45em; height: .45em; border-right: .15em solid currentColor; border-bottom: .15em solid currentColor; transform: rotate(-45deg); margin: 0 .6em .08em .15em; vertical-align: middle; transition: transform .15s; box-sizing: content-box; }
+details[open]:not(.opt-menu):not(.add-menu) > summary::before { transform: rotate(45deg); margin-bottom: .28em; }
+/* 세모 화살표(▲▼◀▶▾)는 크게 — 줄 높이는 그대로(line-height 0) */
+.tri { font-size: 1.4em; line-height: 0; vertical-align: -0.06em; display: inline-block; }
+
+/* ===== 모양 일관성(사용자 지정 2026-11-22): 누르는 것 = 좌우 둥근 알약, 누를 수 없는 표시 = 둥근 모서리 네모 =====
+   예외: 목록·카드형 버튼(학생·묶음·프롬프트·태그 목록, 담당 카드, 선택 상자, 펼친 메뉴 항목), 원형 숫자 배지, 토글, 콤보박스 */
+/* 누를 수 없는 표시 → 둥근 네모 */
+.stage-chip, .credit, .badge, .tag-static, span.tag, span.status-badge, .tv-src, .tag.warn-tag { border-radius: var(--radius-sm); }
+button.small.ocr-read-chip { border-radius: var(--radius-sm); }
+/* 현황판의 상태 배지·과목 칩·항목 요약은 눌리는 것이라 알약 그대로 */
+[data-panel-content="dashboard"] span.status-badge, [data-panel-content="dashboard"] span.tag, [data-panel-content="dashboard"] .dg-sum { border-radius: var(--radius-pill); }
+/* 글자만 있던 링크 버튼 → 작은 알약 버튼(테두리·바탕). 문장 속 링크·표 머리 작은 버튼은 그대로 */
+button.link:not(.basis-sum .link):not(.o-colhead .link) { border: 1px solid var(--border); background: var(--input); border-radius: var(--radius-pill); padding: 3px 12px; text-decoration: none; }
+button.link:not(.basis-sum .link):not(.o-colhead .link):hover:not(:disabled) { background: var(--surface-2); border-color: var(--text-2); text-decoration: none; }
+button.link.danger-text:not(.basis-sum .link) { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+button.pw-toggle { border: 1px solid var(--border); background: var(--input); border-radius: var(--radius-pill); padding: 3px 12px; }
+/* 작은 아이콘 버튼 → 원형 */
+button.col-fold, .outline-tbl button.o-delbtn, .bn-tbl button.o-delbtn { border-radius: 50%; }
+/* 태그 고르기 칩(눌림) → 알약 */
+button.tag-pick, .tag-pick { border-radius: var(--radius-pill); }
+/* 단계 표시(Inbox ①가져오기 … ⑤보냄, 단계 줄)는 누를 수 없음 → 둥근 네모 */
+.steps-bar > span, .steps > span { border-radius: var(--radius-sm) !important; }
+.st-chip, .tv-slot-head .tv-src, .tv-src { border-radius: var(--radius-sm); }
+/* 눌리는 태그 칩(기록 카드의 '● 태그 ▾', 메뉴·버튼 안의 칩)은 알약 그대로 */
+.tag.tag-face, summary span.tag, button span.tag, span.tag[role=button] { border-radius: var(--radius-pill); }

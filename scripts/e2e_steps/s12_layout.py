@@ -12,4 +12,4 @@ for name, w, h, s, want_tabs in (("1366x768", 1366, 768, 1, 0), ("narrow1100", 1
 if True:
     fin_top = page.evaluate("() => { const f=document.querySelector('#recFinal'), r=document.querySelector('#recRecords'); return f && r ? f.getBoundingClientRect().top < r.getBoundingClientRect().top : null }")
     note(S, "세로 화면: 최종안이 기록 위", "통과" if fin_top else "문제", str(fin_top))
-cdp.send("Emulation.clearDeviceMetricsOverride")
+cdp.send("Emulation.setDeviceMetricsOverride", {"width": 1536, "height": 794, "deviceScaleFactor": 1.25, "mobile": False})  # 시험 기본 크기로 되돌림

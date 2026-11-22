@@ -54,7 +54,7 @@ page.locator(f"{P} button:has-text('검토 및 수정')").first.click(); page.wa
 shot(page, "s10_narrow")
 cols = page.evaluate("() => { const b=document.querySelector('#sheetBox'); const g=[...b.querySelectorAll('*')].find(e=>getComputedStyle(e).display==='grid' && e.children.length>=2 && e.getBoundingClientRect().width>500); return g ? getComputedStyle(g).gridTemplateColumns : '' }")
 note(S, "좁은 창(880)에서 검토 창 한 열", "통과" if cols and " " not in cols.strip() else "문제", cols)
-close_all(page); cdp.send("Emulation.clearDeviceMetricsOverride")
+close_all(page); cdp.send("Emulation.setDeviceMetricsOverride", {"width": 1536, "height": 794, "deviceScaleFactor": 1.25, "mobile": False})  # 시험 기본 크기로 되돌림
 note(S, "새 묶음 → [스캔 PDF] 파일 창", "건너뜀", "운영체제 파일 창 — 2026-11-22 사용자가 골라 한 번 확인함. 아래는 데모의 '읽기 전 예시' 묶음으로 대신")
 # 읽는 방식 화면(데모 '스캔 PDF(읽기 전 예시)' 묶음: PDF만 넣고 아직 OCR 안 함)
 nav(page, "inbox"); page.wait_for_timeout(600)
