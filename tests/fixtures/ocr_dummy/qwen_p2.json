@@ -1,0 +1,88 @@
+{
+ "model": "qwen/qwen3-vl-235b-a22b-instruct",
+ "provider_req": {
+  "data_collection": "deny",
+  "zdr": true,
+  "require_parameters": true
+ },
+ "http": 200,
+ "sec": 9.7,
+ "provider": "Parasail",
+ "usage": {
+  "prompt_tokens": 3000,
+  "completion_tokens": 427,
+  "total_tokens": 3427,
+  "cost": 0.00141314,
+  "is_byok": false,
+  "prompt_tokens_details": {
+   "cached_tokens": 256,
+   "cache_write_tokens": 0,
+   "audio_tokens": 0,
+   "video_tokens": 0
+  },
+  "cost_details": {
+   "upstream_inference_cost": 0.00141314,
+   "upstream_inference_prompt_cost": 0.00060184,
+   "upstream_inference_completions_cost": 0.0008113
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "image_tokens": 0,
+   "audio_tokens": 0
+  }
+ },
+ "finish": "stop",
+ "result": {
+  "lines": [
+   {
+    "text": "탐구 주제: 식물의 광합성",
+    "unreadable": false
+   },
+   {
+    "text": "2026.11.10 일이 빛을 받으면 무엇이 달라질까?",
+    "unreadable": false
+   },
+   {
+    "text": "같은 크기의 잎 2장을 물에 넣었다.",
+    "unreadable": false
+   },
+   {
+    "text": "한쪽은 창가에, 다른 쪽은 검은 종이로 가렸다.",
+    "unreadable": false
+   },
+   {
+    "text": "관찰 시간은 20분으로 정하고 거리를 맞췄다.",
+    "unreadable": false
+   },
+   {
+    "text": "빛을 받은 잎 주변에서 작은 기포가 보였다.",
+    "unreadable": false
+   },
+   {
+    "text": "5분에는 3개, 10분에는 8개의 기포를 세었다.",
+    "unreadable": false
+   },
+   {
+    "text": "가린 잎에서는 기포를 거의 찾을 수 없었다.",
+    "unreadable": false
+   },
+   {
+    "text": "기포만 보고 산소라고 단정할 수는 없다.",
+    "unreadable": false
+   },
+   {
+    "text": "빛의 세기와 물의 온도도 함께 재야 한다.",
+    "unreadable": false
+   },
+   {
+    "text": "오늘 물의 온도는 처음 22℃, 나중 23℃였다.",
+    "unreadable": false
+   },
+   {
+    "text": "다음에는 30cm와 60cm 거리에서 비교하겠다.",
+    "unreadable": false
+   }
+  ],
+  "figures": []
+ }
+}

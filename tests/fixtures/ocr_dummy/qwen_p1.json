@@ -1,0 +1,97 @@
+{
+ "model": "qwen/qwen3-vl-235b-a22b-instruct",
+ "provider_req": {
+  "data_collection": "deny",
+  "zdr": true,
+  "require_parameters": true
+ },
+ "http": 200,
+ "sec": 13.9,
+ "provider": "Parasail",
+ "usage": {
+  "prompt_tokens": 3000,
+  "completion_tokens": 547,
+  "total_tokens": 3547,
+  "cost": 0.00134018,
+  "is_byok": false,
+  "prompt_tokens_details": {
+   "cached_tokens": 2992,
+   "cache_write_tokens": 0,
+   "audio_tokens": 0,
+   "video_tokens": 0
+  },
+  "cost_details": {
+   "upstream_inference_cost": 0.00134018,
+   "upstream_inference_prompt_cost": 0.00030088,
+   "upstream_inference_completions_cost": 0.0010393
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "image_tokens": 0,
+   "audio_tokens": 0
+  }
+ },
+ "finish": "stop",
+ "result": {
+  "lines": [
+   {
+    "text": "탐구 주제: 물의 끓는점 실험",
+    "unreadable": false
+   },
+   {
+    "text": "2026.11.10 맑은 날, 물 200mL를 준비했다.",
+    "unreadable": false
+   },
+   {
+    "text": "비커에 물을 붓고 온도계를 넣었다.",
+    "unreadable": false
+   },
+   {
+    "text": "처음 물의 온도는 21℃였고 기포는 없었다.",
+    "unreadable": false
+   },
+   {
+    "text": "알코올램프에 불을 붙이고 시간을 재었다.",
+    "unreadable": false
+   },
+   {
+    "text": "3분 20초 뒤 작은 기포가 바닥에서 올라왔다.",
+    "unreadable": false
+   },
+   {
+    "text": "물이 끓을 때 온도는 약 100℃로 측정됐다.",
+    "unreadable": false
+   },
+   {
+    "text": "불을 계속 켜도 온도가 크게 오르지 않았다.",
+    "unreadable": false
+   },
+   {
+    "text": "소금 0.5g을 넣은 물도 같은 방법으로 실험했다.",
+    "unreadable": false
+   },
+   {
+    "text": "온도계 끝이 비커 바닥에 닿지 않게 했다.",
+    "unreadable": false
+   },
+   {
+    "text": "그림처럼 온도계를 세우고 눈높이를 맞췄다.",
+    "unreadable": false
+   },
+   {
+    "text": "끓는 동안 넣어 준 얼은 물을 수증기로 바꾼다.",
+    "unreadable": false
+   },
+   {
+    "text": "다음에는 소금의 양을 늘려 차이를 비교하고 싶다.",
+    "unreadable": false
+   }
+  ],
+  "figures": [
+   {
+    "after_line": 9,
+    "desc": "비커, 온도계, 알코올램프가 그려져 있고 각각 '비커', '온도계', '알코올램프'라고 표시됨"
+   }
+  ]
+ }
+}
