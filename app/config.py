@@ -46,6 +46,12 @@ DEFAULTS = {
     "weight_sum_check": False,
     # 본문 글자 크기(%) — 기록·결과·입력 칸 글. 제목·버튼은 그대로(v0.31.2)
     "body_scale": 100,
+    # v0.35 하이브리드 OCR: 그림 OCR 모델(ocr_vision.MODELS 중), 글자 보정 모델(빈칸이면 기본 글쓰기 모델),
+    # 머리글 가림 비율, AI 단독 전체 전송 동의
+    "ocr_ai_model": "qwen/qwen3-vl-235b-a22b-instruct",
+    "ocr_fix_model": "",
+    "ocr_mask": 0.12,
+    "ocr_ai_consent": False,
 }
 
 _lock = threading.Lock()
@@ -83,7 +89,15 @@ def _normalize(cfg: dict) -> dict:
     for k in ("trait_dict", "trait_dict_prev", "subject_vocab"):
         if not isinstance(cfg.get(k), dict):
             cfg[k] = None
-    for k in ("privacy_block", "setup_done", "menu_collapsed", "weight_sum_check"):
+    from .ocr_vision import MODELS as _VM
+    if cfg.get("ocr_ai_model") not in [m for m, _ in _VM]:
+        cfg["ocr_ai_model"] = _VM[0][0]
+    cfg["ocr_fix_model"] = str(cfg.get("ocr_fix_model") or "").strip()
+    try:
+        cfg["ocr_mask"] = min(0.4, max(0.0, round(float(cfg.get("ocr_mask")), 3)))
+    except (TypeError, ValueError):
+        cfg["ocr_mask"] = 0.12
+    for k in ("privacy_block", "setup_done", "menu_collapsed", "weight_sum_check", "ocr_ai_consent"):
         cfg[k] = bool(cfg.get(k))
     try:
         cfg["body_scale"] = min(BODY_SCALE_MAX, max(BODY_SCALE_MIN, int(round(float(cfg.get("body_scale") or 100) / 5) * 5)))

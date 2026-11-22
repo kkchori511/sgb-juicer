@@ -52,7 +52,7 @@ def wait_idle(api):
 def test_h01_h02_h03_h04(api, hr):
     # H01: 두 번째 페이지 머리글도 지움
     texts = ["학번 20301 이름 김철수\n" + "\n".join(f"본문 {i}" for i in range(10)), "학번 20301 이름 김철수\n뒷면 본문"]
-    ocr.ocr_pdf = lambda *a, **k: list(texts)
+    ocr.ocr_pdf_pages = lambda *a, **k: [{"lines": [{"text": l, "box": None} for l in t.split("\n")], "w": 0, "h": 0, "fail": ""} for t in texts]
     bid = ok(api.inbox_create("양면", hr, "career"))["id"]
     ok(api.inbox_scan_pick(bid)); ok(api.inbox_scan_ocr(bid, 2)); wait_idle(api)
     g = ok(api.inbox_scan_groups(bid, [0], []))["groups"][0]

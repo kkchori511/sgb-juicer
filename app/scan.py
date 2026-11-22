@@ -195,3 +195,29 @@ def page_count(path) -> int:
     from pypdf import PdfReader
 
     return len(PdfReader(str(path)).pages)
+
+
+def render_crop(year, batch_id, page: int, box, w, h, width: int = 1400, pad: float = 0.35) -> str:
+    """차이 난 줄 확대: box([x0, y0, x1, y1], CLOVA 좌표 w×h 기준)에 위아래 여백을 두고 페이지 가로 전체를 잘라 PNG로."""
+    import pypdfium2 as pdfium
+
+    path = pdf_path(year, batch_id)
+    if not path.exists():
+        raise FileNotFoundError("원본 PDF가 없습니다.")
+    pdf = pdfium.PdfDocument(str(path))
+    try:
+        p = pdf[int(page)]
+        bm = p.render(scale=width / p.get_width(), rev_byteorder=True)
+        sy = bm.height / float(h or bm.height)
+        x0, y0, x1, y1 = (float(v) for v in box)
+        line_h = max(10.0, (y1 - y0) * sy)
+        top = max(0, int(y0 * sy - line_h * pad))
+        bot = min(bm.height, int(y1 * sy + line_h * pad))
+        if bot <= top:
+            top, bot = 0, min(bm.height, 60)
+        raw = bytes(bm.buffer)
+        stride = bm.stride
+        png = _png(bm.width, bot - top, bm.n_channels, stride, raw[top * stride: bot * stride])
+        return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+    finally:
+        pdf.close()

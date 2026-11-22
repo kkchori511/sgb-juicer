@@ -73,22 +73,44 @@ def call_once(url: str, secret: str, data: bytes, name: str, lang: str) -> dict:
     return body
 
 
-def image_to_text(img: dict) -> str:
+def image_lines(img: dict) -> dict:
+    """한 페이지 → {"lines": [{"text", "box": [x0, y0, x1, y1]}], "w", "h", "fail"}.
+    box는 CLOVA가 변환한 페이지 그림(convertedImageInfo) 기준 좌표. 하이브리드 비교에서 원본 줄을 잘라 보여 줄 때 쓴다."""
+    info = img.get("convertedImageInfo") or {}
+    out = {"lines": [], "w": info.get("width") or 0, "h": info.get("height") or 0, "fail": ""}
     if img.get("inferResult") and img["inferResult"] != "SUCCESS":
-        return f"[인식 실패: {img.get('message') or img['inferResult']}]"
-    lines, line = [], []
+        out["fail"] = str(img.get("message") or img["inferResult"])
+        return out
+    words, xs, ys = [], [], []
+
+    def flush():
+        if words:
+            out["lines"].append({"text": " ".join(words), "box": [min(xs), min(ys), max(xs), max(ys)] if xs else None})
+        words.clear(), xs.clear(), ys.clear()
+
     for f in img.get("fields") or []:
-        line.append(f.get("inferText", ""))
+        words.append(f.get("inferText", ""))
+        for v in ((f.get("boundingPoly") or {}).get("vertices") or []):
+            if isinstance(v.get("x"), (int, float)) and isinstance(v.get("y"), (int, float)):
+                xs.append(round(v["x"])), ys.append(round(v["y"]))
         if f.get("lineBreak"):
-            lines.append(" ".join(line))
-            line = []
-    if line:
-        lines.append(" ".join(line))
-    return "\n".join(lines).strip()
+            flush()
+    flush()
+    return out
 
 
-def ocr_pdf(path: str, url: str, secret: str, lang: str, progress=None, should_stop=None) -> list[str]:
-    """페이지 순서대로 텍스트 목록을 돌려준다."""
+def page_text(page: dict) -> str:
+    if page.get("fail"):
+        return f"[인식 실패: {page['fail']}]"
+    return "\n".join(l["text"] for l in page.get("lines") or []).strip()
+
+
+def image_to_text(img: dict) -> str:
+    return page_text(image_lines(img))
+
+
+def ocr_pdf_pages(path: str, url: str, secret: str, lang: str, progress=None, should_stop=None) -> list[dict]:
+    """페이지 순서대로 image_lines 결과 목록."""
     import os
 
     if os.path.getsize(path) > MAX_FILE_BYTES:
@@ -97,7 +119,7 @@ def ocr_pdf(path: str, url: str, secret: str, lang: str, progress=None, should_s
     if total == 0:
         raise OcrError("PDF에 페이지가 없습니다.")
     name = os.path.basename(path)
-    pages: dict[int, str] = {}
+    pages: dict[int, dict] = {}
     for n, (start, data) in enumerate(chunks):
         if should_stop and should_stop():
             raise Stopped()
@@ -108,7 +130,12 @@ def ocr_pdf(path: str, url: str, secret: str, lang: str, progress=None, should_s
         for i, img in enumerate(images):
             info = img.get("convertedImageInfo") or {}
             idx = info.get("pageIndex", i) if isinstance(info.get("pageIndex"), int) else i
-            pages[start + idx] = image_to_text(img)
+            pages[start + idx] = image_lines(img)
         if n < len(chunks) - 1:
             time.sleep(CALL_INTERVAL)
-    return [pages.get(i, "") for i in range(total)]
+    return [pages.get(i, {"lines": [], "w": 0, "h": 0, "fail": ""}) for i in range(total)]
+
+
+def ocr_pdf(path: str, url: str, secret: str, lang: str, progress=None, should_stop=None) -> list[str]:
+    """페이지 순서대로 텍스트 목록을 돌려준다."""
+    return [page_text(p) for p in ocr_pdf_pages(path, url, secret, lang, progress, should_stop)]

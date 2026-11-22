@@ -10,7 +10,7 @@ import re
 
 from .db import DbError, YearDb
 from .records import Records, one_tag
-from . import scan
+from . import ocr, ocr_compare, ocr_vision, scan
 from .roster import split_student_no
 from .textutil import count_bytes
 
@@ -557,6 +557,158 @@ class Inbox:
         with self.d.tx() as c:
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
 
+    # v0.35 하이브리드 OCR: 엔진별 원 결과(sc["clova"], sc["ai"])와 검토(sc["review"])로 sc["ocr"](최종 글)를 만든다.
+    def scan_store(self, bid, engine, pages=None, ai_page=None, ai_meta=None):
+        """engine='clova': pages(페이지별 image_lines) 통째 저장. engine='ai': ai_page=(번호, 결과 또는 {"error"}) 한 쪽씩."""
+        b = self.batch(bid)
+        meta = b["meta"]
+        sc = meta.get("scan") or {}
+        if engine == "clova":
+            sc["clova"] = pages
+        else:
+            ai = sc.get("ai") or {}
+            if ai_meta:
+                ai.update(ai_meta)
+            ps = ai.get("pages") or [None] * int(sc.get("pages") or 0)
+            if ai_page is not None:
+                i, res = ai_page
+                if 0 <= int(i) < len(ps):
+                    ps[int(i)] = res
+                    ai["cost"] = round(float(ai.get("cost") or 0) + float((res or {}).get("cost") or 0), 6)
+            ai["pages"] = ps
+            sc["ai"] = ai
+        self._scan_refresh(sc)
+        meta["scan"] = sc
+        with self.d.tx() as c:
+            self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
+        return sc
+
+    @staticmethod
+    def scan_engines_done(sc):
+        mode = sc.get("mode") or "clova"
+        need_c = mode in ("clova", "hybrid")
+        need_a = mode in ("ai", "hybrid")
+        c_ok = not need_c or bool(sc.get("clova"))
+        ps = (sc.get("ai") or {}).get("pages") or []
+        a_ok = not need_a or (bool(ps) and all(p is not None for p in ps))
+        return c_ok and a_ok
+
+    def _scan_refresh(self, sc):
+        """엔진 결과가 다 모였으면 최종 글을 다시 만든다(처음 모였을 때 학생 나누기 기본값)."""
+        if not (sc.get("clova") or sc.get("ai")):
+            return  # v0.34 이전 묶음: sc["ocr"]만 있음
+        if not self.scan_engines_done(sc):
+            return
+        sc["ocr"] = ocr_compare.final_texts(sc)
+        if sc.get("starts") is None:
+            sc["starts"] = [g[0] for g in scan.default_groups(len(sc["ocr"]), sc.get("per") or 1)]
+            sc["skipped"] = []
+
+    def scan_reset_engine(self, bid, engine):
+        """[OCR 다시 하기]: 그 엔진 결과와 검토를 지운다(다음 실행 때 다시 부름)."""
+        b = self._editable_batch(bid)
+        meta = b["meta"]
+        sc = meta.get("scan") or {}
+        if engine in ("clova", "all"):
+            sc["clova"] = None
+        if engine in ("ai", "all"):
+            sc["ai"] = None
+        sc["review"] = {}
+        sc["ocr"] = None if engine == "all" or not (sc.get("clova") or sc.get("ai")) else sc.get("ocr")
+        if engine == "all":
+            sc["starts"], sc["skipped"] = None, []
+        meta["scan"] = sc
+        with self.d.tx() as c:
+            self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
+
+    def scan_set_mode(self, bid, mode, per, mask=None, model=None):
+        b = self._editable_batch(bid)
+        meta = b["meta"]
+        sc = meta.get("scan") or {}
+        sc["mode"] = mode
+        sc["per"] = max(1, int(per or 1))
+        if mode in ("ai", "hybrid"):
+            ai = sc.get("ai") or {}
+            if not ai.get("pages"):
+                ai["pages"] = [None] * int(sc.get("pages") or 0)
+            if mask is not None and not any(ai["pages"]):
+                ai["mask"] = float(mask)  # 이미 보낸 쪽이 있으면 가림 비율은 바꾸지 않는다(비교 기준이 달라짐)
+            if model and not any(ai["pages"]):
+                ai["model"] = model
+            sc["ai"] = ai
+        meta["scan"] = sc
+        with self.d.tx() as c:
+            self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
+        return sc
+
+    def scan_compare(self, bid, page):
+        """검토 창: 한 쪽의 두 결과와 차이·고른 것."""
+        b = self.batch(bid)
+        sc = b["meta"].get("scan") or {}
+        p = int(page)
+        cp = (sc.get("clova") or [None] * (p + 1))[p] if sc.get("clova") else None
+        ap = ((sc.get("ai") or {}).get("pages") or [None] * (p + 1))[p] if (sc.get("ai") or {}).get("pages") else None
+        rv = (sc.get("review") or {}).get(str(p)) or {}
+        out = {"page": p, "mode": sc.get("mode") or "clova", "review": rv, "figs": rv.get("figs", True),
+               "clova": ocr.page_text(cp) if cp else None, "ai_error": (ap or {}).get("error") if ap else None,
+               "ai": ocr_vision.page_text(ap, False) if ap and not ap.get("error") else None,
+               "figures": (ap or {}).get("figures") or [], "final": (sc.get("ocr") or [""] * (p + 1))[p] if sc.get("ocr") else "",
+               "cmp": None, "w": (cp or {}).get("w") or 0, "h": (cp or {}).get("h") or 0, "unreviewed": 0}
+        if cp and ap and not ap.get("error") and not cp.get("fail"):
+            cmp = ocr_compare.compare(cp, ap, (sc.get("ai") or {}).get("mask") or 0)
+            out["cmp"] = {k: cmp[k] for k in ("ratio", "big", "diffs")}
+            out["unreviewed"] = ocr_compare.unreviewed(cmp, rv)
+        return out
+
+    def scan_decide(self, bid, page, data):
+        """data: {"d": {id: {"pick", "text"}|None}} 차이별, {"page": "clova"|"ai"|"edit"|None, "text"} 통째,
+        {"figs": bool} 그림 설명, {"all_ai": True} 이 쪽 차이 모두 AI 쪽, {"reset": True} 고른 것 모두 지우기."""
+        b = self._editable_batch(bid)
+        meta = b["meta"]
+        sc = meta.get("scan") or {}
+        rv_all = sc.get("review") or {}
+        rv = rv_all.get(str(int(page))) or {}
+        data = data or {}
+        if data.get("reset"):
+            rv = {"figs": rv.get("figs", True)}
+        if "figs" in data:
+            rv["figs"] = bool(data["figs"])
+        if "page" in data:
+            rv["page"] = data["page"] if data["page"] in ("clova", "ai", "edit") else None
+            if data["page"] == "edit":
+                rv["text"] = str(data.get("text") or "")[:20000]
+        if data.get("all_ai"):
+            cmpd = self.scan_compare(bid, page).get("cmp") or {}
+            rv["d"] = {**(rv.get("d") or {}), **{d["id"]: {"pick": "ai"} for d in cmpd.get("diffs") or [] if d["kind"] == "text"}}
+        for k, v in (data.get("d") or {}).items():
+            dd = rv.get("d") or {}
+            if v is None or (isinstance(v, dict) and v.get("pick") not in ("clova", "ai", "edit")):
+                dd.pop(k, None)
+            else:
+                dd[k] = {"pick": v["pick"], **({"text": str(v.get("text") or "")[:2000]} if v["pick"] == "edit" else {})}
+            rv["d"] = dd
+        rv_all[str(int(page))] = rv
+        sc["review"] = rv_all
+        self._scan_refresh(sc)
+        meta["scan"] = sc
+        with self.d.tx() as c:
+            self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
+        return self.scan_compare(bid, page)
+
+    def scan_review_counts(self, sc):
+        """페이지별 남은 차이 수(하이브리드). 계산만 하고 저장하지 않는다."""
+        if not (sc.get("clova") and (sc.get("ai") or {}).get("pages")):
+            return []
+        out = []
+        for p, (cp, ap) in enumerate(zip(sc["clova"], sc["ai"]["pages"])):
+            rv = (sc.get("review") or {}).get(str(p)) or {}
+            if cp and ap and not ap.get("error") and not cp.get("fail"):
+                cmp = ocr_compare.compare(cp, ap, sc["ai"].get("mask") or 0)
+                out.append({"left": ocr_compare.unreviewed(cmp, rv), "total": sum(1 for d in cmp["diffs"] if d["kind"] == "text"), "big": cmp["big"]})
+            else:
+                out.append({"left": 0, "total": 0, "big": False, "ai_error": bool(ap and ap.get("error"))})
+        return out
+
     def _scan(self, bid):
         b = self.batch(bid)
         sc = b["meta"].get("scan") or {}
@@ -576,7 +728,9 @@ class Inbox:
             no, name = scan.extract_ids(texts[g[0]], members)
             out.append({"index": i, "pages": g, "ext_no": no, "ext_name": name,
                         "content": scan.strip_pages([texts[p] for p in g], no, name, members), "empty": not raw.strip()})
-        return {"groups": out, "page_texts": [t[:300] for t in texts], "starts": starts, "skipped": skipped}
+        return {"groups": out, "page_texts": [t[:300] for t in texts], "starts": starts, "skipped": skipped,
+                "mode": sc.get("mode") or "clova", "review": self.scan_review_counts(sc),
+                "ai_cost": (sc.get("ai") or {}).get("cost") or 0}
 
     def scan_confirm(self, bid, starts, skipped):
         self._editable_batch(bid)

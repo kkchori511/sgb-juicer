@@ -12,8 +12,8 @@ CALLS = []
 def fake_ocr(path, url, secret, lang, progress=None, should_stop=None):
     CALLS.append(path)
     if progress: progress(0, 1, 6)
-    return list(OCR_TEXT)
-ocr.ocr_pdf = fake_ocr
+    return [{"lines": [{"text": l, "box": None} for l in t.split("\n") if l], "w": 0, "h": 0, "fail": ""} for t in OCR_TEXT]
+ocr.ocr_pdf_pages = fake_ocr
 SENT = []
 openrouter.chat = lambda key, model, system, user, privacy_block=False: (SENT.append(user) or ("정제: " + user, 0.0))
 openrouter.balance = lambda key: 1.0
@@ -42,7 +42,7 @@ def test():
     p = api.roster_from_text("20301\t김철수\n20302\t이영희\n20303\t박민수")
     ok(api.roster_apply(hr, api.roster_build(hr, p["raw"], p["header"], p["columns"])["rows"]))
     bid = ok(api.inbox_create("진로 학습지", hr, "career"))["id"]
-    assert not ok(api.clova_ready())["ready"]
+    r0 = ok(api.clova_ready()); assert not r0["clova"] and r0["openrouter"] and r0["ready"]  # v0.35: OpenRouter 키만 있어도 AI 단독 가능
     sc = ok(api.inbox_scan_pick(bid))["scan"]; assert sc["pages"] == 6 and scan.pdf_path(2026, bid).exists()
     assert not api.inbox_scan_ocr(bid, 2)["ok"]  # CLOVA 키 없음
     config.save({"clova_url": "https://x", "clova_secret": "s"})

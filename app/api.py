@@ -3,6 +3,7 @@
 모든 함수는 {"ok": True, ...} 또는 {"ok": False, "error": "..."}를 돌려준다.
 오래 걸리는 작업은 스레드로 돌리고 진행은 window.onAppEvent(...)로 보낸다.
 """
+import base64
 import datetime as dt
 import json
 import os
@@ -19,7 +20,7 @@ from pathlib import Path
 
 import webview
 
-from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, paths, existing, export, ocr, openrouter, prompts, roster, scan, stdformat, updater, weights
+from . import APP_NAME, MAKER, TAGLINE, VERSION, backup, config, db, paths, existing, export, ocr, ocr_vision, openrouter, prompts, roster, scan, stdformat, updater, weights
 from .records import Records, items_of
 from .inbox import Inbox
 from .tagwork import TagWork, chat_messages, effective, norm_chain, signature, step_system
@@ -2931,9 +2932,13 @@ class Api:
     # ----- 스캔 PDF -----
     @safe
     def clova_ready(self):
+        """스캔 PDF를 읽을 수 있는지: CLOVA 키, OpenRouter 키(AI 단독·하이브리드)."""
         cfg = config.load()
         missing = [label for k, label in (("clova_secret", "CLOVA Secret Key"), ("clova_url", "CLOVA Invoke URL")) if not cfg[k].strip()]
-        return {"ready": not missing, "missing": missing}
+        has_or = bool(cfg["openrouter_key"].strip())
+        return {"ready": not missing or has_or, "clova": not missing, "openrouter": has_or, "missing": missing,
+                "ai_model": cfg["ocr_ai_model"], "ai_model_label": ocr_vision.model_label(cfg["ocr_ai_model"]),
+                "mask": cfg["ocr_mask"], "consent": cfg["ocr_ai_consent"]}
 
     @safe
     def inbox_scan_pick(self, bid):
@@ -2947,40 +2952,149 @@ class Api:
         return {"scan": self._ib().scan_set(bid, path, os.path.basename(path))}
 
     @safe
-    def inbox_scan_ocr(self, bid, per):
-        """백그라운드로 OCR. 진행은 ocr_progress / ocr_done / ocr_error / ocr_stopped 이벤트."""
+    def inbox_scan_mask_preview(self, bid, mask):
+        """AI에 보낼 첫 쪽 그림(머리글 가림) 미리보기. 이 PC 안에서만."""
+        png = ocr_vision.render_png(scan.pdf_path(self._db().year, bid), 0, float(mask or 0), width=700)
+        return {"src": "data:image/png;base64," + base64.b64encode(png).decode("ascii")}
+
+    @safe
+    def inbox_scan_ocr(self, bid, per, mode="clova", opts=None):
+        """백그라운드로 OCR. mode: clova | ai | hybrid. 이미 읽은 엔진·쪽은 다시 부르지 않는다(실패한 쪽만).
+        진행은 ocr_progress(engine) / ocr_done / ocr_error / ocr_stopped 이벤트."""
         self._editable()
+        opts = opts or {}
+        mode = mode if mode in ("clova", "ai", "hybrid") else "clova"
         cfg = config.load()
-        if not (cfg["clova_url"].strip() and cfg["clova_secret"].strip()):
+        need_c, need_a = mode in ("clova", "hybrid"), mode in ("ai", "hybrid")
+        if need_c and not (cfg["clova_url"].strip() and cfg["clova_secret"].strip()):
             raise db.DbError("CLOVA OCR 키가 없습니다. 설정 > 연결·모델에서 Secret Key와 Invoke URL을 넣어 주세요.")
+        if need_a and not cfg["openrouter_key"].strip():
+            raise db.DbError("OpenRouter API 키가 없습니다. 설정 > 연결·모델에서 넣어 주세요.")
         ib = self._ib()
         b = ib._editable_batch(bid)
         if not (b["meta"].get("scan") or {}).get("pages"):
             raise db.DbError("먼저 스캔 PDF를 고르세요.")
+        mask = float(opts.get("mask", cfg["ocr_mask"]) or 0)
+        if mode == "ai" and mask <= 0 and not cfg["ocr_ai_consent"]:
+            raise db.DbError("가리지 않은 그림을 보내려면 먼저 전송에 동의해 주세요.")
         with self._ai_lock:
             self._check_running()
             if not self._busy.acquire(blocking=False):
                 raise db.DbError("다른 작업이 진행 중입니다.")
+        try:
+            sc = ib.scan_set_mode(bid, mode, per, mask if need_a else None, cfg["ocr_ai_model"] if need_a else None)
+        except Exception:
+            self._busy.release()
+            raise
         self._ocr_stop.clear()
         year = config.load()["current_year"]
+        pdf = str(scan.pdf_path(year, bid))
+        store_lock = threading.Lock()
+        key = cfg["openrouter_key"].strip()
+        ai = sc.get("ai") or {}
+        model, amask = ai.get("model") or cfg["ocr_ai_model"], float(ai.get("mask") or 0)
+        todo = [i for i, x in enumerate(ai.get("pages") or []) if x is None or x.get("error")] if need_a else []
+        do_c = need_c and not sc.get("clova")
+
+        def store(*a, **k):
+            with store_lock:
+                return Inbox(db.open_year(year)).scan_store(bid, *a, **k)
+
+        errs = {}
+
+        def run_clova():
+            def prog(n, total_chunks, total_pages):
+                self._emit({"type": "ocr_progress", "engine": "clova", "bid": int(bid), "done": n, "total": total_chunks, "pages": total_pages})
+            try:
+                pages = ocr.ocr_pdf_pages(pdf, cfg["clova_url"].strip(), cfg["clova_secret"].strip(), cfg["ocr_lang"], prog, self._ocr_stop.is_set)
+                store("clova", pages=pages)
+            except ocr.Stopped:
+                errs["stopped"] = True
+            except Exception as e:
+                errs["clova"] = str(e)
+
+        def run_ai():
+            from concurrent.futures import ThreadPoolExecutor
+
+            fatal = {}
+            done = [0]
+
+            def one(i):
+                if self._ocr_stop.is_set():
+                    return
+                if fatal:
+                    store("ai", ai_page=(i, {"error": fatal["msg"], "sent": False}))
+                    return
+                try:
+                    res = ocr_vision.read_page(key, model, ocr_vision.render_png(pdf, i, amask))
+                    res = {k: res[k] for k in ("lines", "figures", "cost", "provider", "model")}
+                except ocr_vision.VisionError as e:
+                    if e.code in ("key", "balance", "provider"):
+                        fatal.setdefault("msg", str(e))
+                    res = {"error": str(e), "sent": True}
+                except Exception as e:  # 그림 만들기 실패 등
+                    res = {"error": f"이 쪽을 읽지 못했습니다({e.__class__.__name__}).", "sent": False}
+                store("ai", ai_page=(i, res))
+                done[0] += 1
+                self._emit({"type": "ocr_progress", "engine": "ai", "bid": int(bid), "done": done[0], "total": len(todo), "pages": len(todo)})
+
+            store("ai", ai_meta={"model": model, "mask": amask, "prompt_version": ocr_vision.PROMPT_VERSION})
+            # 중지해도 이미 보낸 쪽은 끝까지 받아 저장한다(이미 비용이 든 결과를 버리지 않음)
+            with ThreadPoolExecutor(max_workers=3) as ex:
+                list(ex.map(one, todo))
+            if fatal:
+                errs["ai_fatal"] = fatal["msg"]
 
         def run():
             try:
-                def prog(n, total_chunks, total_pages):
-                    self._emit({"type": "ocr_progress", "bid": int(bid), "done": n, "total": total_chunks, "pages": total_pages})
-
-                texts = ocr.ocr_pdf(str(scan.pdf_path(year, bid)), cfg["clova_url"].strip(), cfg["clova_secret"].strip(), cfg["ocr_lang"], prog, self._ocr_stop.is_set)
-                Inbox(db.open_year(year)).scan_save_ocr(bid, texts, per)
-                self._emit({"type": "ocr_done", "bid": int(bid), "pages": len(texts)})
-            except ocr.Stopped:
-                self._emit({"type": "ocr_stopped", "bid": int(bid)})
+                ts = []
+                if do_c:
+                    ts.append(threading.Thread(target=run_clova, daemon=True))
+                if todo:
+                    ts.append(threading.Thread(target=run_ai, daemon=True))
+                for t in ts:
+                    t.start()
+                for t in ts:
+                    t.join()
+                sc2 = Inbox(db.open_year(year)).batch(bid)["meta"].get("scan") or {}
+                failed = sum(1 for x in ((sc2.get("ai") or {}).get("pages") or []) if x and x.get("error"))
+                if errs.get("clova"):
+                    self._emit({"type": "ocr_error", "bid": int(bid), "message": errs["clova"]})
+                elif self._ocr_stop.is_set() or errs.get("stopped"):
+                    self._emit({"type": "ocr_stopped", "bid": int(bid)})
+                else:
+                    self._emit({"type": "ocr_done", "bid": int(bid), "pages": int(sc2.get("pages") or 0), "ai_failed": failed,
+                                "ai_message": errs.get("ai_fatal", ""), "ai_cost": (sc2.get("ai") or {}).get("cost") or 0})
             except Exception as e:
                 self._emit({"type": "ocr_error", "bid": int(bid), "message": str(e)})
             finally:
                 self._busy.release()
 
         threading.Thread(target=run, daemon=True).start()
+        return {"clova": do_c, "ai_pages": len(todo)}
+
+    @safe
+    def inbox_scan_reset(self, bid, engine):
+        """[OCR 다시 하기] — 저장한 결과를 지운다. 다음 실행 때 그 엔진을 다시 부른다(CLOVA는 과금될 수 있음)."""
+        self._editable()
+        if engine not in ("clova", "ai", "all"):
+            raise db.DbError("알 수 없는 OCR 엔진입니다.")
+        self._ib().scan_reset_engine(bid, engine)
         return {}
+
+    @safe
+    def inbox_scan_compare(self, bid, page):
+        return self._ib().scan_compare(bid, page)
+
+    @safe
+    def inbox_scan_decide(self, bid, page, data):
+        self._editable()
+        return self._ib().scan_decide(bid, page, data)
+
+    @safe
+    def inbox_scan_crop(self, bid, page, box, w, h):
+        """차이 난 줄의 원본 확대 그림(이 PC 안에서만). box는 CLOVA 좌표(w×h 기준)."""
+        return {"src": scan.render_crop(self._db().year, bid, page, box, w, h)}
 
     def inbox_ocr_stop(self):
         self._ocr_stop.set()
