@@ -1524,9 +1524,7 @@ input:disabled, select:disabled, textarea:disabled { color: var(--disabled-text)
   .rec-main > .rec-records, .rec-main > .rec-final, .rec-main > .rec-records.folded, .rec-main > .rec-final.folded-all { flex: 1 1 auto !important; min-height: 0 !important; width: auto; }
   .rec-main[data-tab="records"] > .rec-final, .rec-main[data-tab="final"] > .rec-records { display: none !important; }
 }
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0s !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
-}
+/* 움직임 줄이기(Windows '애니메이션 효과' 끔)에서도 진행 막대·효과를 그대로 움직인다(사용자 지정 2026-11-22: 멈춰 보여 작업이 멈춘 것으로 오해) */
 /* 조밀한 통계·순서 이동은 일반 행동보다 작은 보조 타깃으로 유지한다. */
 .stat-box { background: var(--st-closed-bg); border: 1px solid var(--border-strong); }
 .stat-chip { min-height: 26px; padding: 3px 7px; background: var(--input); border-color: var(--border); font-size: 12px; }

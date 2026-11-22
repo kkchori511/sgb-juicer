@@ -2242,10 +2242,10 @@
     if (r.run_cost !== undefined) { if (r.run_cost > runCost) creditGlow(); runCost = r.run_cost; $('runCost').textContent = fmtCredit(runCost); }
     if (r.balance !== undefined) $('balance').textContent = r.balance === null ? '확인 불가' : fmtCredit(r.balance);
   }
-  // 크레딧을 쓸 때마다 상단 크레딧 칸 가장자리를 무지개 빛이 세 바퀴 돈다(움직임 줄이기 설정이면 생략)
+  // 크레딧을 쓸 때마다 상단 크레딧 칸 가장자리를 무지개 빛이 세 바퀴 돈다
   function creditGlow() {
     const c = document.querySelector('.topbar .credit') || document.querySelector('.credit');
-    if (!c || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+    if (!c) return; // 움직임 줄이기 설정이어도 보인다(사용자 지정 2026-11-22)
     c.classList.remove('glow');
     void c.offsetWidth;
     c.classList.add('glow');
