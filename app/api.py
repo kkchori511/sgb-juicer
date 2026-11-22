@@ -2971,12 +2971,22 @@ class Api:
         if need_a and not cfg["openrouter_key"].strip():
             raise db.DbError("OpenRouter API 키가 없습니다. 설정 > 연결·모델에서 넣어 주세요.")
         ib = self._ib()
+        b0 = ib.batch(bid)
         b = ib._editable_batch(bid)
         if not (b["meta"].get("scan") or {}).get("pages"):
             raise db.DbError("먼저 스캔 PDF를 고르세요.")
-        mask = float(opts.get("mask", cfg["ocr_mask"]) or 0)
-        if mode == "ai" and mask <= 0 and not cfg["ocr_ai_consent"]:
-            raise db.DbError("가리지 않은 그림을 보내려면 먼저 전송에 동의해 주세요.")
+        try:
+            mask = float(opts.get("mask", cfg["ocr_mask"]) or 0)
+        except (TypeError, ValueError):
+            mask = -1.0
+        if not 0 <= mask <= 0.4:  # NaN도 여기서 걸림
+            raise db.DbError("머리글 가림 비율이 올바르지 않습니다(0~40%).")
+        if need_a:
+            # 실제로 쓸 가림 값: 이미 보낸 쪽이 있으면 처음 값을 그대로 쓴다(scan_set_mode와 같은 규칙)
+            cur_ai = (b0["meta"].get("scan") or {}).get("ai") or {}
+            eff = float(cur_ai.get("mask") or 0) if any(cur_ai.get("pages") or []) else mask
+            if eff <= 0 and not cfg["ocr_ai_consent"]:
+                raise db.DbError("머리글을 가리지 않은 그림(이름·학번 포함)을 Qwen에 보내려면 먼저 전송에 동의해 주세요.")
         with self._ai_lock:
             self._check_running()
             if not self._busy.acquire(blocking=False):
@@ -2994,7 +3004,9 @@ class Api:
         ai = sc.get("ai") or {}
         model, amask = ai.get("model") or cfg["ocr_ai_model"], float(ai.get("mask") or 0)
         todo = [i for i, x in enumerate(ai.get("pages") or []) if x is None or x.get("error")] if need_a else []
-        do_c = need_c and not sc.get("clova")
+        cl = sc.get("clova") or [None] * int(sc.get("pages") or 0)
+        todo_c = [i for i, x in enumerate(cl) if x is None or x.get("fail")] if need_c else []
+        do_c = bool(todo_c)
 
         def store(*a, **k):
             with store_lock:
@@ -3006,8 +3018,9 @@ class Api:
             def prog(n, total_chunks, total_pages):
                 self._emit({"type": "ocr_progress", "engine": "clova", "bid": int(bid), "done": n, "total": total_chunks, "pages": total_pages})
             try:
-                pages = ocr.ocr_pdf_pages(pdf, cfg["clova_url"].strip(), cfg["clova_secret"].strip(), cfg["ocr_lang"], prog, self._ocr_stop.is_set)
-                store("clova", pages=pages)
+                # 남은·실패한 쪽만, 10쪽 묶음마다 받은 즉시 저장(중지·실패해도 앞서 받은 것은 남음)
+                ocr.ocr_pdf_pages(pdf, cfg["clova_url"].strip(), cfg["clova_secret"].strip(), cfg["ocr_lang"], prog,
+                                  self._ocr_stop.is_set, pages=todo_c, on_chunk=lambda got: store("clova", pages=got))
             except ocr.Stopped:
                 errs["stopped"] = True
             except Exception as e:
@@ -3058,12 +3071,17 @@ class Api:
                     t.join()
                 sc2 = Inbox(db.open_year(year)).batch(bid)["meta"].get("scan") or {}
                 failed = sum(1 for x in ((sc2.get("ai") or {}).get("pages") or []) if x and x.get("error"))
+                c_failed = sum(1 for x in (sc2.get("clova") or []) if x and x.get("fail"))
                 if errs.get("clova"):
-                    self._emit({"type": "ocr_error", "bid": int(bid), "message": errs["clova"]})
+                    ok_ai = sum(1 for x in ((sc2.get("ai") or {}).get("pages") or []) if x and not x.get("error"))
+                    hint = (f"\n\nQwen은 {ok_ai}쪽을 읽어 두었습니다. 다시 [OCR 시작]을 누르면 CLOVA의 남은 쪽만 읽고, "
+                            "읽는 방식을 'Qwen만'으로 바꾸면 이미 받은 Qwen 결과로 바로 넘어갑니다(다시 보내지 않음).") if ok_ai else \
+                        "\n\n다시 [OCR 시작]을 누르면 CLOVA가 아직 읽지 못한 쪽만 읽습니다."
+                    self._emit({"type": "ocr_error", "bid": int(bid), "message": errs["clova"] + hint})
                 elif self._ocr_stop.is_set() or errs.get("stopped"):
                     self._emit({"type": "ocr_stopped", "bid": int(bid)})
                 else:
-                    self._emit({"type": "ocr_done", "bid": int(bid), "pages": int(sc2.get("pages") or 0), "ai_failed": failed,
+                    self._emit({"type": "ocr_done", "bid": int(bid), "pages": int(sc2.get("pages") or 0), "ai_failed": failed, "clova_failed": c_failed,
                                 "ai_message": errs.get("ai_fatal", ""), "ai_cost": (sc2.get("ai") or {}).get("cost") or 0})
             except Exception as e:
                 self._emit({"type": "ocr_error", "bid": int(bid), "message": str(e)})
@@ -3111,7 +3129,8 @@ class Api:
         if not any(d["kind"] == "text" for d in cmp["diffs"]):
             raise db.DbError("이 쪽에는 고를 차이가 없습니다.")
         from . import ocr_compare
-        user = ocr_compare.fix_user(cmp["diffs"], ib.scan_privacy_clean(bid))
+        full = ib.scan_page_compare(bid, page)
+        user = ocr_compare.fix_user(full, ib.scan_scrubber(bid, full))
         text, cost = self._call_ai(cfg["openrouter_key"].strip(), model, ocr_compare.FIX_SYSTEM, user, cfg["privacy_block"], extra=False)
         sugg = ocr_compare.parse_fix(openrouter.parse_json_object(text), cmp["diffs"])
         if not sugg:

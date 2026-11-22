@@ -2171,3 +2171,6 @@ button.btn-skip::before { content: ''; display: inline-block; flex: none; width:
 .ocr-sugg-model .muted { font-size: 13px; }
 #modalOk.btn-ai { background: var(--wiz); border-color: var(--wiz); color: #fff; }
 #modalOk.btn-ai:hover { background: var(--wiz-hover); border-color: var(--wiz-hover); color: #fff; }
+.ocr-review-split { grid-template-columns: minmax(260px, 38%) 1fr; }
+.ocr-review-head { flex-wrap: wrap; row-gap: 6px; }
+@media (max-width: 900px) { .ocr-review-split { grid-template-columns: 1fr; } }

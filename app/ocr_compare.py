@@ -101,6 +101,19 @@ def compare(clova_page: dict, ai_page: dict, mask: float = 0.0) -> dict:
     starts = _line_starts(a)
     alines = (clova_page or {}).get("lines") or []
     fig_words = re.sub(r"\s", "", " ".join(f.get("desc", "") for f in (ai_page or {}).get("figures") or []))
+    # 원문 한 글자가 비교 글자 여러 개로 펼쳐진 경우(℃→°C) 그 글자를 통째로 넣는다(M4: 100℃/100°F → ℃ ↔ °F)
+    def _widen(i1, i2, j1, j2):
+        changed = True
+        while changed:
+            changed = False
+            while 0 < i1 < len(pa) and pa[i1 - 1] == pa[i1] or (0 < j1 < len(pb) and pb[j1 - 1] == pb[j1]):
+                i1, j1 = max(0, i1 - 1), max(0, j1 - 1)
+                changed = True
+            while (0 < i2 < len(pa) and pa[i2] == pa[i2 - 1]) or (0 < j2 < len(pb) and pb[j2] == pb[j2 - 1]):
+                i2, j2 = min(len(pa), i2 + 1), min(len(pb), j2 + 1)
+                changed = True
+        return i1, i2, j1, j2
+    groups = [_widen(*g) for g in groups]
     diffs = []
     for n, (i1, i2, j1, j2) in enumerate(groups):
         s, e = _src_range(pa, i1, i2, len(a))
@@ -120,8 +133,24 @@ def compare(clova_page: dict, ai_page: dict, mask: float = 0.0) -> dict:
             parts = [re.sub(r"\s", "", x) for x in piece.split("\n") if x.strip()]
             if parts and all(p in fig_words for p in parts):
                 kind = "figure"
+        # Qwen 쪽을 고를 때는 앞뒤 띄어쓰기·줄바꿈까지 Qwen 원문대로(M5: '더끓였다', 줄 붙음 방지)
+        ws, we = s, e
+        while ws > 0 and a[ws - 1].isspace():
+            ws -= 1
+        while we < len(a) and a[we].isspace():
+            we += 1
+        bws, bwe = bs, be
+        while bws > 0 and b[bws - 1].isspace():
+            bws -= 1
+        while bwe < len(b) and b[bwe].isspace():
+            bwe += 1
+        if ws == 0:
+            bws = bs  # 맨 앞/맨 끝은 바깥 공백을 끌어오지 않는다
+        if we == len(a):
+            bwe = be
         diffs.append({
             "id": f"d{n}", "kind": kind, "a": [s, e], "b": [bs, be], "clova": piece, "ai": b[bs:be],
+            "a_ws": [ws, we], "ai_ws": b[bws:bwe],
             "before": a[max(0, s - CTX):s].replace("\n", " "), "after": a[e:e + CTX].replace("\n", " "),
             "lines": [lo, hi], "box": box, "clip": clip,
         })
@@ -163,7 +192,7 @@ def _fig_reps(cmp, spans=()):
 def resolve(cmp: dict, review: dict | None, figures: bool = True, ai_page: dict | None = None) -> str:
     """사람이 고른 대로 최종 글.
     review: {"d": {id: {"pick": "clova"|"ai"|"edit", "text"}}, "page": None|"clova"|"ai"|"edit", "text"}
-    page를 고르면 페이지 통째로(크게 다른 페이지, [이 페이지 모두 AI 쪽]이 아닌 통째 선택)."""
+    page를 고르면 페이지 통째로(크게 다른 페이지, [CLOVA 선택]/[Qwen 선택]이 크게 다른 쪽에서 쓰는 통째 선택)."""
     from .ocr_vision import page_text
 
     review = review or {}
@@ -183,18 +212,22 @@ def resolve(cmp: dict, review: dict | None, figures: bool = True, ai_page: dict 
                 reps.append((d["a"][0], d["a"][1], ""))
             continue
         if c.get("pick") == "ai":
-            reps.append((d["a"][0], d["a"][1], d["ai"]))
+            if "a_ws" in d:
+                reps.append((d["a_ws"][0], d["a_ws"][1], d["ai_ws"]))
+            else:
+                reps.append((d["a"][0], d["a"][1], d["ai"]))
         elif c.get("pick") == "edit":
             reps.append((d["a"][0], d["a"][1], nfc(c.get("text") or "")))
     if figures:
-        reps += _fig_reps(cmp, [tuple(d["a"]) for d in cmp["diffs"]])
+        reps += _fig_reps(cmp, [tuple(d.get("a_ws") or d["a"]) for d in cmp["diffs"]])
     return _apply(cmp["a"], reps).strip()
 
 
 def _apply(text, reps):
     """(시작, 끝, 새 글) 목록을 뒤에서부터 바꾼다. 같은 자리 삽입은 들어온 순서대로."""
     out = text
-    for s, e, new in sorted(reps, key=lambda r: (r[0], r[1]), reverse=True):
+    # 뒤에서부터. 같은 자리에 여럿 넣을 때는 나중 것을 먼저 넣어 결과가 들어온 순서가 되게(L1)
+    for _, (s, e, new) in sorted(enumerate(reps), key=lambda r: (r[1][0], r[1][1], r[0]), reverse=True):
         if not new and s < e:
             if s > 0 and e < len(out) and out[s - 1] == " " and out[e] == " ":
                 e += 1
@@ -219,8 +252,9 @@ def final_texts(sc: dict) -> list:
     from . import ocr, ocr_vision
 
     n = int(sc.get("pages") or 0)
-    clova = sc.get("clova") or []
-    ai = (sc.get("ai") or {}).get("pages") or []
+    mode = sc.get("mode") or "clova"
+    clova = (sc.get("clova") or []) if mode in ("clova", "hybrid") else []
+    ai = ((sc.get("ai") or {}).get("pages") or []) if mode in ("ai", "hybrid") else []
     mask = (sc.get("ai") or {}).get("mask") or 0
     out = []
     for p in range(n):
@@ -234,21 +268,21 @@ def final_texts(sc: dict) -> list:
             out.append(nfc(rv.get("text") or "").strip())
         elif cp_ok and ap_ok:
             out.append(resolve(compare(cp, ap, mask), rv, figs, ap))
-        elif cp:
+        elif cp_ok:
             out.append(ocr.page_text(cp))
-        elif ap_ok:
+        elif ap_ok:  # CLOVA가 이 쪽을 못 읽었으면 정상인 Qwen 글(M1)
             out.append(nfc(ocr_vision.page_text(ap, figs)))
         else:
-            out.append("")
+            out.append("")  # 둘 다 실패 — 실패 문구를 학생 내용에 넣지 않는다(화면은 '글자 없음')
     return out
 
 
 # ---------- 3단계: 글자 보정 제안(그림 없이 글만, 사용자가 버튼을 눌렀을 때만) ----------
 FIX_SYSTEM = (
-    "당신은 학생 학습지 OCR 결과를 비교하는 도우미입니다. 같은 손글씨 학습지를 두 OCR(CLOVA, AI)이 따로 읽었고, "
+    "당신은 학생 학습지 OCR 결과를 비교하는 도우미입니다. 같은 손글씨 학습지를 두 OCR(CLOVA, Qwen)이 따로 읽었고, "
     "두 결과가 다른 곳만 아래에 있습니다. 당신은 그림을 볼 수 없습니다.\n"
     "각 차이마다 학생이 실제로 썼을 가능성이 높은 쪽을 고르세요.\n"
-    "- pick: \"clova\"(CLOVA 쪽), \"ai\"(AI 쪽), \"merge\"(두 후보의 글자를 섞은 것 — text에 씀) 중 하나.\n"
+    "- pick: \"clova\"(CLOVA 쪽), \"ai\"(Qwen 쪽), \"merge\"(두 후보의 글자만 순서대로 골라 섞은 것 — text에 씀) 중 하나.\n"
     "- 목표는 학생이 쓴 글자 그대로입니다. 맞춤법이 맞다는 이유만으로 고르지 마세요(학생이 틀리게 썼을 수 있음). "
     "앞뒤 문맥에서 실제로 있는 낱말·말이 되는 문장인지, 글자 모양이 비슷해 헷갈리기 쉬운지를 근거로 하세요.\n"
     "- 한쪽이 '(없음)'이면 그 OCR이 글자를 빠뜨렸거나 다른 쪽이 덧붙인 것입니다.\n"
@@ -258,14 +292,60 @@ FIX_SYSTEM = (
 )
 
 
-def fix_user(diffs, clean=lambda s: s):
-    """보낼 글: 차이 id, 앞뒤 문맥, 두 후보. clean으로 학번·이름을 지운다."""
+def redact(text: str, values=(), regexes=()) -> str:
+    """신원 글자를 ○로 바꾼다(글자 수 유지 — 원문 위치로 자른 조각이 서로 맞게).
+    values: 지울 값(이름·학번, 사이 띄어쓰기 허용), regexes: 그룹 1(없으면 전체)을 지울 정규식."""
+    marks = [False] * len(text)
+    pats = []
+    for v in values:
+        v = re.sub(r"\s", "", str(v or ""))
+        if len(v) >= 2:
+            pats.append((re.compile(r"[ \t]*".join(re.escape(ch) for ch in v)), 0))
+    pats += [(r, 1 if r.groups else 0) for r in regexes]
+    for r, g in pats:
+        for m in r.finditer(text):
+            for i in range(m.start(g), m.end(g)):
+                marks[i] = True
+    return "".join("○" if mk and not ch.isspace() else ch for ch, mk in zip(text, marks))
+
+
+def fix_user(cmp: dict, scrub=lambda t: t) -> str:
+    """보낼 글: 차이 id, 앞뒤 문맥, 두 후보. scrub은 쪽 전체 글(CLOVA·Qwen 각각)에서 먼저 신원을 지우는 함수 —
+    조각으로 자른 뒤 지우면 이름이 차이 경계에서 쪼개져 새어 나간다(Codex 검토 H3)."""
+    A, B = scrub(cmp["a"]), scrub(cmp["b"])
     out = []
-    for d in diffs:
+    for d in cmp["diffs"]:
         if d["kind"] != "text":
             continue
-        out.append(f"[{d['id']}] 앞: {clean(d['before'])} | CLOVA: {clean(d['clova']) or '(없음)'} | AI: {clean(d['ai']) or '(없음)'} | 뒤: {clean(d['after'])}")
+        s, e = d["a"]
+        bs, be = d["b"]
+        before = A[max(0, s - CTX):s].replace("\n", " ")
+        after = A[e:e + CTX].replace("\n", " ")
+        qb = B[bs:be]
+        # CLOVA 쪽이 신원으로 지워진 자리면 Qwen 후보도 지운다(Qwen이 이름을 다르게 읽은 경우: 가나다/가누다)
+        if "○" in A[s:e] or (A[s - 1:s] == "○" and A[e:e + 1] == "○"):
+            qb = re.sub(r"\S", "○", qb)
+        out.append(f"[{d['id']}] 앞: {before} | CLOVA: {A[s:e] or '(없음)'} | Qwen: {qb or '(없음)'} | 뒤: {after}")
     return "\n".join(out)
+
+
+def _interleaves(text: str, a: str, b: str) -> bool:
+    """text가 a와 b에서 순서를 지켜 글자를 골라 섞은 것인지(같은 글자를 두 번 쓰지 않음)."""
+    from functools import lru_cache
+
+    @lru_cache(maxsize=None)
+    def ok(i, j, k):
+        if i == len(text):
+            return True
+        ch = text[i]
+        for jj in range(j, len(a)):
+            if a[jj] == ch and ok(i + 1, jj + 1, k):
+                return True
+        for kk in range(k, len(b)):
+            if b[kk] == ch and ok(i + 1, j, kk + 1):
+                return True
+        return False
+    return ok(0, 0, 0)
 
 
 def parse_fix(obj, diffs):
@@ -277,8 +357,8 @@ def parse_fix(obj, diffs):
             continue
         d = by[it["id"]]
         text = d["clova"] if it["pick"] == "clova" else d["ai"] if it["pick"] == "ai" else nfc(str(it.get("text") or ""))[:200]
-        pool = set(re.sub(r"\s", "", d["clova"] + d["ai"]))
-        new = any(ch not in pool for ch in re.sub(r"\s", "", text))
+        sq = lambda t: re.sub(r"\s", "", t)
+        new = len(sq(text)) > 60 or not _interleaves(sq(text), sq(d["clova"]), sq(d["ai"]))
         if it["pick"] == "merge" and text in (d["clova"], d["ai"]):
             it["pick"] = "clova" if text == d["clova"] else "ai"
         out[it["id"]] = {"pick": it["pick"], "text": text, "reason": str(it.get("reason") or "")[:80], "new": new}

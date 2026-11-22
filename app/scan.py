@@ -2,8 +2,12 @@
 import base64
 import io
 import re
+import threading
 
 from .paths import data_dir
+
+# PDFium(pypdfium2)은 스레드 안전하지 않다(문서 객체가 달라도). 열기·그리기·닫기를 모두 이 잠금 안에서 한다.
+PDFIUM_LOCK = threading.RLock()
 
 HEAD_LINES = 8  # 학번·이름은 보통 첫 몇 줄(머리글)에 있다
 RE_NO_LABEL = re.compile(r"학[ \t]*번[ \t]*[:：.]?[ \t]*(\d(?:[ \t]*\d){3,5})(?!\d)")
@@ -181,14 +185,16 @@ def render_page(year, batch_id, page: int, width: int = 900) -> str:
     path = pdf_path(year, batch_id)
     if not path.exists():
         raise FileNotFoundError("원본 PDF가 없습니다.")
-    pdf = pdfium.PdfDocument(str(path))
-    try:
-        p = pdf[int(page)]
-        bm = p.render(scale=width / p.get_width(), rev_byteorder=True)
-        png = _png(bm.width, bm.height, bm.n_channels, bm.stride, bytes(bm.buffer))
-        return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
-    finally:
-        pdf.close()
+    with PDFIUM_LOCK:
+        pdf = pdfium.PdfDocument(str(path))
+        try:
+            p = pdf[int(page)]
+            bm = p.render(scale=width / p.get_width(), rev_byteorder=True)
+            w, h, ch, stride, raw = bm.width, bm.height, bm.n_channels, bm.stride, bytes(bm.buffer)
+        finally:
+            pdf.close()
+    png = _png(w, h, ch, stride, raw)
+    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
 
 def page_count(path) -> int:
@@ -205,25 +211,25 @@ def render_crop(year, batch_id, page: int, box, w, h, clip=None, width: int = 14
     path = pdf_path(year, batch_id)
     if not path.exists():
         raise FileNotFoundError("원본 PDF가 없습니다.")
-    pdf = pdfium.PdfDocument(str(path))
-    try:
-        p = pdf[int(page)]
-        bm = p.render(scale=width / p.get_width(), rev_byteorder=True)
-        sy = bm.height / float(h or bm.height)
-        x0, y0, x1, y1 = (float(v) for v in box)
-        line_h = max(10.0, (y1 - y0) * sy)
-        top = max(0, int(y0 * sy - line_h * pad))
-        bot = min(bm.height, int(y1 * sy + line_h * pad))
-        c0, c1 = (list(clip) + [None, None])[:2] if clip else (None, None)
-        if c0 is not None:
-            top = max(top, min(int(y0 * sy), int(float(c0) * sy) + 2))
-        if c1 is not None:
-            bot = min(bot, max(int(y1 * sy) + 1, int(float(c1) * sy) - 2))
-        if bot <= top:
-            top, bot = 0, min(bm.height, 60)
-        raw = bytes(bm.buffer)
-        stride = bm.stride
-        png = _png(bm.width, bot - top, bm.n_channels, stride, raw[top * stride: bot * stride])
-        return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
-    finally:
-        pdf.close()
+    with PDFIUM_LOCK:
+        pdf = pdfium.PdfDocument(str(path))
+        try:
+            p = pdf[int(page)]
+            bm = p.render(scale=width / p.get_width(), rev_byteorder=True)
+            bw, bh, ch, stride, raw = bm.width, bm.height, bm.n_channels, bm.stride, bytes(bm.buffer)
+        finally:
+            pdf.close()
+    sy = bh / float(h or bh)
+    x0, y0, x1, y1 = (float(v) for v in box)
+    line_h = max(10.0, (y1 - y0) * sy)
+    top = max(0, int(y0 * sy - line_h * pad))
+    bot = min(bh, int(y1 * sy + line_h * pad))
+    c0, c1 = (list(clip) + [None, None])[:2] if clip else (None, None)
+    if c0 is not None:
+        top = max(top, min(int(y0 * sy), int(float(c0) * sy) + 2))
+    if c1 is not None:
+        bot = min(bot, max(int(y1 * sy) + 1, int(float(c1) * sy) - 2))
+    if bot <= top:
+        top, bot = 0, min(bh, 60)
+    png = _png(bw, bot - top, ch, stride, raw[top * stride: bot * stride])
+    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")

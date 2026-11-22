@@ -5,12 +5,25 @@
 - 보내기는 모든 행이 확정 또는 제외일 때만, 한 번에(전부 성공 또는 전부 취소).
 """
 import datetime as dt
+import functools
 import json
 import re
+import threading
 
 from .db import DbError, YearDb
 from .records import Records, one_tag
 from . import ocr, ocr_compare, ocr_vision, scan
+
+# 스캔 묶음 meta(JSON 한 덩어리)를 읽고-고치고-쓰는 작업은 한 번에 하나씩(엔진 저장·검토·제안이 서로 덮어쓰지 않게, Codex 검토 M6)
+_SCAN_META_LOCK = threading.RLock()
+
+
+def _scan_locked(fn):
+    @functools.wraps(fn)
+    def wrap(*a, **k):
+        with _SCAN_META_LOCK:
+            return fn(*a, **k)
+    return wrap
 from .roster import split_student_no
 from .textutil import count_bytes
 
@@ -525,6 +538,7 @@ class Inbox:
         return len(picks)
 
     # ---------- ① 가져오기: 스캔 PDF ----------
+    @_scan_locked
     def scan_set(self, bid, src_path, filename):
         import shutil
 
@@ -545,6 +559,7 @@ class Inbox:
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False), source="scan", structure="multi")
         return meta["scan"]
 
+    @_scan_locked
     def scan_save_ocr(self, bid, texts, per):
         b = self._editable_batch(bid)
         meta = b["meta"]
@@ -558,13 +573,21 @@ class Inbox:
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
 
     # v0.35 하이브리드 OCR: 엔진별 원 결과(sc["clova"], sc["ai"])와 검토(sc["review"])로 sc["ocr"](최종 글)를 만든다.
+    @_scan_locked
     def scan_store(self, bid, engine, pages=None, ai_page=None, ai_meta=None):
         """engine='clova': pages(페이지별 image_lines) 통째 저장. engine='ai': ai_page=(번호, 결과 또는 {"error"}) 한 쪽씩."""
         b = self.batch(bid)
         meta = b["meta"]
         sc = meta.get("scan") or {}
         if engine == "clova":
-            sc["clova"] = pages
+            if isinstance(pages, dict):  # 묶음(10쪽)마다 받은 만큼만 합친다
+                cl = list(sc.get("clova") or [None] * int(sc.get("pages") or 0))
+                for i, pg in pages.items():
+                    if 0 <= int(i) < len(cl):
+                        cl[int(i)] = pg
+                sc["clova"] = cl
+            else:
+                sc["clova"] = pages
         else:
             ai = sc.get("ai") or {}
             if ai_meta:
@@ -588,7 +611,8 @@ class Inbox:
         mode = sc.get("mode") or "clova"
         need_c = mode in ("clova", "hybrid")
         need_a = mode in ("ai", "hybrid")
-        c_ok = not need_c or bool(sc.get("clova"))
+        cl = sc.get("clova") or []
+        c_ok = not need_c or (bool(cl) and all(p is not None for p in cl))
         ps = (sc.get("ai") or {}).get("pages") or []
         a_ok = not need_a or (bool(ps) and all(p is not None for p in ps))
         return c_ok and a_ok
@@ -611,6 +635,7 @@ class Inbox:
             sc["starts"] = [g[0] for g in scan.default_groups(len(sc["ocr"]), sc.get("per") or 1)]
             sc["skipped"] = []
 
+    @_scan_locked
     def scan_reset_engine(self, bid, engine):
         """[OCR 다시 하기]: 그 엔진 결과와 검토를 지운다(다음 실행 때 다시 부름)."""
         b = self._editable_batch(bid)
@@ -628,6 +653,7 @@ class Inbox:
         with self.d.tx() as c:
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
 
+    @_scan_locked
     def scan_set_mode(self, bid, mode, per, mask=None, model=None):
         b = self._editable_batch(bid)
         meta = b["meta"]
@@ -643,6 +669,7 @@ class Inbox:
             if model and not any(ai["pages"]):
                 ai["model"] = model
             sc["ai"] = ai
+        self._scan_refresh(sc)  # 이미 받은 결과만으로 마칠 수 있으면 바로 최종 글(다시 부르지 않음, M2)
         meta["scan"] = sc
         with self.d.tx() as c:
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
@@ -668,6 +695,7 @@ class Inbox:
             out["unreviewed"] = ocr_compare.unreviewed(cmp, rv)
         return out
 
+    @_scan_locked
     def scan_decide(self, bid, page, data):
         """data: {"d": {id: {"pick", "text"}|None}} 차이별, {"page": "clova"|"ai"|"edit"|None, "text"} 통째,
         {"figs": bool} 그림 설명, {"all_ai": True} 이 쪽 차이 모두 AI 쪽, {"reset": True} 고른 것 모두 지우기."""
@@ -713,6 +741,7 @@ class Inbox:
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
         return self.scan_compare(bid, page)
 
+    @_scan_locked
     def scan_store_suggest(self, bid, page, sugg, cost):
         """3단계 보정 제안을 저장(미리 골라 두기만 — 고른 것으로 치지 않음)."""
         b = self._editable_batch(bid)
@@ -729,23 +758,31 @@ class Inbox:
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
         return self.scan_compare(bid, page)
 
-    def scan_privacy_clean(self, bid):
-        """보정 제안에 보낼 글에서 이 담당 명렬의 이름·학번을 ○○로 바꾸는 함수."""
+    def scan_page_compare(self, bid, page):
+        """한 쪽의 전체 비교 결과(원문 포함, 화면에 보내지 않는 것)."""
+        sc = self.batch(bid)["meta"].get("scan") or {}
+        p = int(page)
+        cp = (sc.get("clova") or [None] * (p + 1))[p] if sc.get("clova") else None
+        ps = (sc.get("ai") or {}).get("pages") or []
+        ap = ps[p] if p < len(ps) else None
+        if not (cp and ap) or ap.get("error") or cp.get("fail"):
+            return None
+        return ocr_compare.compare(cp, ap, (sc.get("ai") or {}).get("mask") or 0)
+
+    def scan_scrubber(self, bid, cmp):
+        """보정 제안에 보낼 글의 신원 지우기: 이 담당 명렬의 이름·학번, 이 쪽에서 규칙으로 읽은 학번·이름(명렬 밖 이름 포함),
+        '학번:'·'이름:'·'n학년 n반 n번' 뒤의 값. 쪽 전체 글에 먼저 적용한다(글자 수 유지)."""
         b = self.batch(bid)
         members = self.d.members(b["group_id"]) if b["group_id"] else []
-        pats = []
+        values = []
         for m in members:
-            for v in (m.get("name") or "", str(m.get("student_no") or m.get("no") or "")):
-                v = re.sub(r"\s", "", v)
-                if len(v) >= 2:
-                    pats.append(re.compile(r"[ \t]*".join(re.escape(ch) for ch in v)))
-        pats.sort(key=lambda r: -len(r.pattern))
-
-        def clean(text):
-            for r in pats:
-                text = r.sub("○○", text)
-            return text
-        return clean
+            values += [m.get("name") or "", str(m.get("student_no") or "")]
+        for t in (cmp["a"], cmp["b"]):
+            no, name = scan.extract_ids(t, members)
+            values += [no, name]
+        regexes = [scan.RE_NAME_LABEL, scan.RE_NO_LABEL, scan.RE_GCN]
+        values = sorted({v for v in values if v}, key=len, reverse=True)
+        return lambda text: ocr_compare.redact(text, values, regexes)
 
     def scan_review_counts(self, sc):
         """페이지별 남은 차이 수(하이브리드). 계산만 하고 저장하지 않는다."""
@@ -785,6 +822,7 @@ class Inbox:
                 "edited": sorted(int(k) for k, v in (sc.get("review") or {}).items() if (v or {}).get("page") == "edit"),
                 "ai_cost": (sc.get("ai") or {}).get("cost") or 0}
 
+    @_scan_locked
     def scan_confirm(self, bid, starts, skipped):
         self._editable_batch(bid)
         b, sc = self._scan(bid)

@@ -11,7 +11,7 @@ import json
 import requests
 
 from . import openrouter
-from .scan import _png
+from .scan import PDFIUM_LOCK, _png
 
 MODELS = [
     ("qwen/qwen3-vl-235b-a22b-instruct", "Qwen3 VL 235B (기본, 정확도 우선)"),
@@ -61,18 +61,19 @@ def render_png(pdf_path, page: int, mask: float = 0.0, width: int = RENDER_WIDTH
     import pypdfium2 as pdfium
 
     mask = max(0.0, min(0.5, float(mask or 0)))
-    pdf = pdfium.PdfDocument(str(pdf_path))
-    try:
-        p = pdf[int(page)]
-        bm = p.render(scale=width / p.get_width(), rev_byteorder=True)
-        buf = bytearray(bytes(bm.buffer))
-        row = bm.width * bm.n_channels
-        for y in range(int(bm.height * mask)):
-            s = y * bm.stride
-            buf[s:s + row] = b"\xff" * row
-        return _png(bm.width, bm.height, bm.n_channels, bm.stride, bytes(buf))
-    finally:
-        pdf.close()
+    with PDFIUM_LOCK:  # PDFium은 스레드 안전하지 않다 — 그림 만들기는 한 번에 하나씩, 보내기만 병렬
+        pdf = pdfium.PdfDocument(str(pdf_path))
+        try:
+            p = pdf[int(page)]
+            bm = p.render(scale=width / p.get_width(), rev_byteorder=True)
+            w, h, ch, stride, buf = bm.width, bm.height, bm.n_channels, bm.stride, bytearray(bytes(bm.buffer))
+        finally:
+            pdf.close()
+    row = w * ch
+    for y in range(int(h * mask)):
+        s = y * stride
+        buf[s:s + row] = b"\xff" * row
+    return _png(w, h, ch, stride, bytes(buf))
 
 
 def payload(model: str, png: bytes) -> dict:
@@ -132,6 +133,15 @@ def _explain(status: int, msg: str) -> VisionError:
     return VisionError(f"OpenRouter 오류(HTTP {status}){(' - ' + msg[:200]) if msg else ''}", "bad")
 
 
+def _not_sent(e) -> bool:
+    """요청이 서버에 닿기 전에 실패했는지(연결 시간 초과·주소 찾기·연결 거부)."""
+    if isinstance(e, requests.ConnectTimeout):
+        return True
+    t = repr(e)
+    return isinstance(e, requests.ConnectionError) and any(
+        k in t for k in ("NewConnectionError", "NameResolutionError", "Failed to establish", "getaddrinfo", "Connection refused"))
+
+
 def read_page(key: str, model: str, png: bytes, post=None) -> dict:
     """한 페이지 읽기 → {"lines", "figures", "cost", "provider", "model"}. 연결 끊김·서버 오류만 한 번 더 시도."""
     if not (key or "").strip():
@@ -143,8 +153,12 @@ def read_page(key: str, model: str, png: bytes, post=None) -> dict:
             res = post(f"{openrouter.BASE}/chat/completions", json=payload(model, png), timeout=(10, 180),
                        headers=openrouter._headers(key.strip()))
         except requests.RequestException as e:
-            last = VisionError(f"OpenRouter에 연결하지 못했습니다({e.__class__.__name__}).", "down")
-            continue
+            if _not_sent(e):  # 연결 자체가 안 됨 — 보내지 않았으니 한 번 더
+                last = VisionError(f"OpenRouter에 연결하지 못했습니다({e.__class__.__name__}).", "down")
+                continue
+            # 보낸 뒤 응답이 끊김: 이미 처리·과금됐을 수 있어 자동으로 다시 보내지 않는다(Codex 검토 M11, 사용자 결정)
+            raise VisionError("보낸 뒤 응답을 받지 못했습니다(이미 처리돼 비용이 들었을 수 있음). "
+                              "[실패한 쪽만 다시 읽기]로 다시 보낼 수 있습니다.", "unknown")
         try:
             body = res.json()
         except ValueError:

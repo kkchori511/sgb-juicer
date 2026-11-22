@@ -9,10 +9,12 @@ PDF = os.path.join(HERE, "fixtures", "scan_sample.pdf")  # 6쪽: 학생 3명 × 
 OCR_TEXT = ["2학년 3반 1번 이름: 김철수\n진로 독서 감상문\n책을 읽고 감명받음.", "(뒷면) 실험 실패를 기록하겠다.",
             "학번 20302 성명 이영희\n직업 탐색 보고서", "(뒷면) 윤리 문제도 생각함.", "20303 박민순\n꿈 발표 준비", ""]
 CALLS = []
-def fake_ocr(path, url, secret, lang, progress=None, should_stop=None):
+def fake_ocr(path, url, secret, lang, progress=None, should_stop=None, pages=None, on_chunk=None):
     CALLS.append(path)
     if progress: progress(0, 1, 6)
-    return [{"lines": [{"text": l, "box": None} for l in t.split("\n") if l], "w": 0, "h": 0, "fail": ""} for t in OCR_TEXT]
+    out = [{"lines": [{"text": l, "box": None} for l in t.split("\n") if l], "w": 0, "h": 0, "fail": ""} for t in OCR_TEXT]
+    if on_chunk: on_chunk(dict(enumerate(out)))
+    return out
 ocr.ocr_pdf_pages = fake_ocr
 SENT = []
 openrouter.chat = lambda key, model, system, user, privacy_block=False: (SENT.append(user) or ("정제: " + user, 0.0))

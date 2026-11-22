@@ -165,14 +165,20 @@ def test_api():
     ok(api.inbox_scan_decide(bid, 0, {"figs": True}))
     sg = ok(api.inbox_scan_suggest(bid, 0))
     model, system, user = SENT_AI[-1]
-    assert model == "m" and "그림을 볼 수 없습니다" in system and "가나다" not in user and "10399" not in user and "CLOVA: 햇 | AI: 했" in user, user
+    assert model == "m" and "그림을 볼 수 없습니다" in system and "가나다" not in user and "10399" not in user and "CLOVA: 햇 | Qwen: 했" in user, user
     assert sg["unreviewed"] == 2 and sg["review"]["s"]["d0"]["pick"] == "clova" and sg["review"]["s"]["d2"]["new"] is True
     config.save({"ocr_fix_model": "fix/model"})
     ok(api.inbox_scan_suggest(bid, 0)); assert SENT_AI[-1][0] == "fix/model"
     acc = ok(api.inbox_scan_decide(bid, 0, {"accept_suggest": True}))
     assert acc["unreviewed"] == 0 and "넣어 준 엷은" in acc["final"] and "실험햇다" in acc["final"]
-    clean = api._ib().scan_privacy_clean(bid)
-    assert clean("가 나 다가 1 0 3 9 9번") == "○○가 ○○번"
+    # H3: 이름·학번이 차이 경계에서 쪼개져도 새지 않음(쪽 전체에서 먼저 지움), 명렬 밖 머리글 이름도
+    fake = {"a": "학번: 10399 이름: 마바사\n내 이름은 가나다입니다.", "b": "학번: 10389 이름: 마바사\n내 이름은 가누다입니다.", "diffs": []}
+    import app.ocr_compare as occ
+    fake["diffs"] = occ.compare({"lines": [{"text": l, "box": None} for l in fake["a"].split("\n")]},
+                                {"lines": [{"text": l, "unreadable": False} for l in fake["b"].split("\n")], "figures": []})["diffs"]
+    out = occ.fix_user(fake, api._ib().scan_scrubber(bid, fake))
+    for leak in ("가", "누", "다입", "10399", "103", "89", "마바사"):
+        assert leak not in out.replace("가린", ""), (leak, out)
     ok(api.inbox_scan_decide(bid, 0, {"reset": True}))
     # 학생 묶기 확정: 최종 글이 쓰이고 학번·이름은 빠짐
     assert ok(api.inbox_scan_confirm(bid, [0, 1], []))["count"] == 2
