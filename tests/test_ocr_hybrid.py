@@ -141,6 +141,9 @@ def test_api():
     # 검토: 한 곳 고르기, 이 쪽 모두 AI, 그림 설명 끄기
     cmpr = ok(api.inbox_scan_decide(bid, 0, {"d": {"d0": {"pick": "ai"}}}))
     assert cmpr["unreviewed"] == 1 and "실험했다" in cmpr["final"]
+    cmpr = ok(api.inbox_scan_decide(bid, 1, {"all_clova": True}))
+    assert cmpr["unreviewed"] == 0 and "잎이 빛을" in cmpr["final"] and all(v["pick"] == "clova" for v in cmpr["review"]["d"].values())
+    assert ok(api.inbox_scan_compare(bid, 0))["cmp"]["diffs"][0]["clip"] == [703, 774]
     cmpr = ok(api.inbox_scan_decide(bid, 1, {"all_ai": True}))
     assert cmpr["unreviewed"] == 0 and "일이 빛을" in cmpr["final"]
     cmpr = ok(api.inbox_scan_decide(bid, 0, {"figs": False}))
@@ -186,6 +189,20 @@ def test_api():
     assert CALLS["clova"] == 1 and sorted(CALLS["ai"]) == [0, 1]
     g = ok(api.inbox_scan_groups(bid2))
     assert g["mode"] == "ai" and "[그림:" in g["page_texts"][0]
+    # 어느 방식이든 쪽 통째로 직접 고치기(AI만 묶음)
+    e = ok(api.inbox_scan_decide(bid2, 1, {"page": "edit", "text": "두 OCR 모두 틀려 직접 씀"}))
+    assert e["edited"] and ok(api.inbox_scan_groups(bid2))["page_texts"][1] == "두 OCR 모두 틀려 직접 씀"
+    ok(api.inbox_scan_decide(bid2, 1, {"page": None}))
+    assert ok(api.inbox_scan_groups(bid2))["page_texts"][1].startswith("탐구 주제")
+    # 옛 묶음(v0.34 이전, sc["ocr"]만): 직접 고치기와 되돌리기
+    bid3 = ok(api.inbox_create("옛 묶음", hr, "career"))["id"]
+    ok(api.inbox_scan_pick(bid3))
+    ib = api._ib()
+    ib.scan_save_ocr(bid3, ["옛 1쪽 글", "옛 2쪽 글"], 1)
+    ok(api.inbox_scan_decide(bid3, 0, {"page": "edit", "text": "고친 1쪽"}))
+    assert ok(api.inbox_scan_groups(bid3))["page_texts"] == ["고친 1쪽", "옛 2쪽 글"]
+    ok(api.inbox_scan_decide(bid3, 0, {"page": None}))
+    assert ok(api.inbox_scan_groups(bid3))["page_texts"] == ["옛 1쪽 글", "옛 2쪽 글"]
     # 키가 없으면 그 방식은 시작하지 않음
     config.save({"clova_secret": ""})
     assert not api.inbox_scan_ocr(bid2, 1, "hybrid")["ok"]

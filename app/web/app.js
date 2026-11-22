@@ -397,6 +397,7 @@
       $('modalCancel').hidden = !withCancel;
       $('modalOk').textContent = okText || '확인';
       $('modalOk').classList.toggle('btn-danger', /삭제|지우|초기화|비우|복원/.test(okText || ''));
+      $('modalOk').classList.toggle('btn-ai', okText === '제안 받기'); // AI 실행 버튼은 보라 계열(앱의 AI 색)
       $('modalCancel').textContent = cancelText || '취소';
       $('modal').hidden = false;
       $('modal').setAttribute('aria-modal', 'true');
@@ -7715,7 +7716,7 @@
     const ready = await call('clova_ready');
     if (!ready) return;
     if (!ready.ready) {
-      const go = await modal(`스캔 PDF를 글자로 읽으려면 <b>CLOVA OCR 키</b>나 <b>OpenRouter API 키</b>가 필요합니다.<br>CLOVA: 네이버 클라우드 플랫폼에 가입하고 CLOVA OCR을 설정한 뒤, 설정 &gt; 연결·모델에 ${ready.missing.join(', ')}를 넣어 주세요.<br>OpenRouter 키만 있으면 AI로 읽기(시험 기능)를 쓸 수 있습니다.<br><span class="muted">가입·발급 안내가 설정 화면에 있습니다.</span>`, true, true, '설정으로 가기');
+      const go = await modal(`스캔 PDF를 글자로 읽으려면 <b>CLOVA OCR 키</b>나 <b>OpenRouter API 키</b>가 필요합니다.<br>CLOVA: 네이버 클라우드 플랫폼에 가입하고 CLOVA OCR을 설정한 뒤, 설정 &gt; 연결·모델에 ${ready.missing.join(', ')}를 넣어 주세요.<br>OpenRouter 키만 있으면 Qwen으로 읽기(시험 기능)를 쓸 수 있습니다.<br><span class="muted">가입·발급 안내가 설정 화면에 있습니다.</span>`, true, true, '설정으로 가기');
       if (go) { showPanel('settings'); showSettingsTab('conn'); $('clovaGuide').open = true; $('clovaGuide').scrollIntoView(); }
       return;
     }
@@ -7761,14 +7762,20 @@
           g.ext_no || g.ext_name ? el('span', { class: 'tag', text: `읽은 값: ${g.ext_no || '학번?'} ${g.ext_name || '이름?'}` }) : el('span', { class: 'tag warn-tag', text: '학번·이름을 읽지 못함' }),
           el('span', { class: 'muted', text: `${g.pages.map((x) => x + 1).join('·')}쪽` })]));
         const isSkip = skip.has(p);
+        const rv = r.mode === 'hybrid' ? r.review[p] : null;
+        const needText = !rv ? '' : rv.ai_error ? 'Qwen 실패 · CLOVA 글 사용' : rv.big && rv.left ? '통째로 검토 필요' : rv.left ? `${rv.left}개 검토 필요` : '';
+        const toggleSkip = () => { if (isSkip) SC.skipped = SC.skipped.filter((x) => x !== p); else SC.skipped.push(p); renderBatch(); };
         list.appendChild(el('div', { class: 'ref-card', style: isSkip ? 'opacity:.5' : '' }, [
-          el('div', { class: 'rcard-head' }, [el('b', { text: `${p + 1}쪽` }),
+          el('div', { class: 'rcard-head', style: 'flex-wrap:wrap' }, [el('b', { text: `${p + 1}쪽` }),
             el('label', { class: 'inline', style: 'margin:0' }, [el('input', { type: 'checkbox', disabled: p === 0, checked: p === 0 || starts.has(p), onchange: (e) => { if (e.target.checked) SC.starts.push(p); else SC.starts = SC.starts.filter((x) => x !== p); renderBatch(); } }), '여기서 새 학생']),
-            el('button', { type: 'button', class: 'small', text: isSkip ? '되살리기' : '빼기(백지 등)', onclick: () => { if (isSkip) SC.skipped = SC.skipped.filter((x) => x !== p); else SC.skipped.push(p); renderBatch(); } }),
-            el('button', { type: 'button', class: 'small', text: '원본 보기', onclick: () => showOriginal(b.id, [p]) }),
-            r.mode === 'hybrid' ? diffBadge(r.review[p]) : null,
-            r.mode === 'hybrid' && r.review[p] ? el('button', { type: 'button', class: 'small', text: '차이 검토', onclick: () => showDiffReview(b.id, p) }) : null,
-            t.trim() ? null : el('span', { class: 'tag warn-tag', text: '글자 없음' })]),
+            needText ? el('span', { class: 'review-need', text: needText }) : null,
+            rv && rv.left ? el('button', { type: 'button', class: 'small', text: '검토 및 수정', onclick: () => showDiffReview(b.id, p) })
+              : el('button', { type: 'button', class: 'small', text: '원본 보기', onclick: () => showOriginal(b.id, [p], { grouping: true, hybrid: !!(rv && !rv.ai_error) }) }),
+            (r.edited || []).includes(p) ? el('span', { class: 'tag', text: '직접 고침' }) : null,
+            t.trim() ? null : el('span', { class: 'tag warn-tag', text: '글자 없음' }),
+            el('span', { class: 'spacer' }),
+            isSkip ? el('button', { type: 'button', class: 'small', text: '↩ 되살리기', onclick: toggleSkip })
+              : el('button', { type: 'button', class: 'small btn-skip', text: '페이지 빼기', onclick: toggleSkip })]),
           el('div', { class: 'snip', style: 'max-width:none', text: t.split('\n').slice(0, 3).join('\n') || '(인식된 글자 없음)' }),
         ]));
       });
@@ -7777,9 +7784,9 @@
     })();
   }
   const OCR_MODES = [
-    ['hybrid', '하이브리드 (추천)', 'CLOVA와 AI가 따로 읽은 뒤, 서로 다르게 읽은 곳만 원본을 보며 고릅니다.'],
+    ['hybrid', '하이브리드 (추천)', 'CLOVA와 Qwen(그림을 보는 AI)이 따로 읽은 뒤, 서로 다르게 읽은 곳만 원본을 보며 고릅니다.'],
     ['clova', 'CLOVA만', '지금까지와 같습니다.'],
-    ['ai', 'AI만 (시험 기능)', 'CLOVA 키 없이 OpenRouter AI(그림을 보는 모델)로 읽습니다. 손글씨 정확도는 아직 충분히 검증되지 않았습니다.'],
+    ['ai', 'Qwen만 (시험 기능)', 'CLOVA 키 없이 OpenRouter의 Qwen(그림을 보는 AI)으로 읽습니다. 손글씨 정확도는 아직 충분히 검증되지 않았습니다.'],
   ];
   function renderScanStart(body, b, sc) {
     const box = el('div', {});
@@ -7811,7 +7818,7 @@
       const warn = el('div', { class: 'warn', style: 'margin-top:12px' });
       const startBtn = el('button', { type: 'button', class: 'primary', text: 'OCR 시작' });
       const doneAi = ((sc.ai && sc.ai.pages) || []).filter((x) => x && !x.error).length;
-      const resume = sc.clova || doneAi ? el('div', { class: 'tag', style: 'margin:8px 0', text: `이미 읽은 결과가 있습니다(${[sc.clova ? 'CLOVA 전체' : '', doneAi ? `AI ${doneAi}쪽` : ''].filter(Boolean).join(', ')}). 다시 보내지 않고 남은 것만 읽습니다.` }) : null;
+      const resume = sc.clova || doneAi ? el('div', { class: 'tag', style: 'margin:8px 0', text: `이미 읽은 결과가 있습니다(${[sc.clova ? 'CLOVA 전체' : '', doneAi ? `Qwen ${doneAi}쪽` : ''].filter(Boolean).join(', ')}). 다시 보내지 않고 남은 것만 읽습니다.` }) : null;
       box.append(
         el('div', { class: 'wsection', style: 'margin-top:0' }, [el('h3', { text: `🖨 ${sc.filename} / ${sc.pages}쪽` }),
           el('div', { class: 'map-row' }, [el('label', {}, ['학생 1명당 페이지 수', per]), est]),
@@ -7819,27 +7826,27 @@
         resume, modeBox, opts, warn,
         el('div', { class: 'sheet-foot' }, [el('button', { type: 'button', class: 'file-pdf', text: '다른 PDF 고르기', onclick: () => startScanPick(b) }), el('span', { class: 'spacer' }), startBtn]),
       );
-      let unmasked = false; // AI만: 가리지 않고 보내기
+      let unmasked = false; // Qwen만: 가리지 않고 보내기
       function drawOpts() {
         opts.innerHTML = '';
         const useAi = SC.mode !== 'clova';
         const lines = [];
         if (SC.mode !== 'ai') lines.push('⚠ <b>스캔 이미지가 그대로 네이버 CLOVA OCR로 전송됩니다.</b> 손으로 쓴 이름·학번도 함께 전송됩니다.');
         if (useAi) {
-          lines.push(`⚠ <b>${unmasked && SC.mode === 'ai' ? '스캔 이미지 전체가' : '위쪽 머리글을 흰색으로 가린 스캔 이미지가'} OpenRouter AI(${escHtml(ready.ai_model_label)})로 전송됩니다.</b> 학습 차단·보존 안 함 조건을 받는 제공업체에만 보내고, 없으면 보내지 않습니다. 쪽마다 한 번만 보내며 쪽당 약 1~3원이 듭니다(모델 단가 기준 추정).`);
+          lines.push(`⚠ <b>${unmasked && SC.mode === 'ai' ? '스캔 이미지 전체가' : '위쪽 머리글을 흰색으로 가린 스캔 이미지가'} OpenRouter의 Qwen(${escHtml(ready.ai_model_label)})로 전송됩니다.</b> 학습 차단·보존 안 함 조건을 받는 제공업체에만 보내고, 없으면 보내지 않습니다. 쪽마다 한 번만 보내며 쪽당 약 1~3원이 듭니다(모델 단가 기준 추정).`);
           const pct = el('b', { text: `${Math.round(SC.mask * 100)}%` });
           const range = el('input', { type: 'range', min: 0, max: 40, step: 1, value: Math.round(SC.mask * 100), style: 'width:220px' });
           const img = el('img', { alt: '첫 쪽 미리보기', style: 'width:260px;border:1px solid var(--border);border-radius:8px;background:#fff;display:block;margin-top:8px' });
           let t = null;
           const preview = () => { clearTimeout(t); t = setTimeout(async () => { const r = await call('inbox_scan_mask_preview', b.id, unmasked && SC.mode === 'ai' ? 0 : SC.mask); if (r) img.src = r.src; }, 250); };
           range.addEventListener('input', () => { SC.mask = (+range.value) / 100; pct.textContent = `${range.value}%`; preview(); });
-          const sec = el('div', { class: 'wsection' }, [el('h3', { text: 'AI에 보낼 때 머리글(학번·이름) 가리기' }),
+          const sec = el('div', { class: 'wsection' }, [el('h3', { text: 'Qwen에 보낼 때 머리글(학번·이름) 가리기' }),
             el('div', { class: 'map-row' }, [el('label', {}, ['위쪽 가리기 ', range]), pct, el('span', { class: 'muted', text: '첫 쪽에서 학번·이름 칸이 흰색으로 덮이게 맞추세요(이 PC 안에서 처리).' })])]);
           if (SC.mode === 'ai') {
             sec.appendChild(el('label', { class: 'inline', style: 'display:block;margin-top:6px' }, [
               el('input', { type: 'checkbox', checked: unmasked, onchange: async (e) => {
                 if (e.target.checked && !ready.consent) {
-                  const yes = await modal('머리글을 가리지 않으면 <b>손으로 쓴 이름·학번이 담긴 그림이 OpenRouter와 AI 제공업체로 전송</b>됩니다(학습 차단·보존 안 함 조건).<br>가리면 학번·이름을 자동으로 찾지 못해, 다음 단계에서 학생을 직접 골라야 합니다.<br><br>가리지 않고 보낼까요? 이 동의는 설정에 저장됩니다.', true, true, '동의하고 가리지 않기');
+                  const yes = await modal('머리글을 가리지 않으면 <b>손으로 쓴 이름·학번이 담긴 그림이 OpenRouter와 Qwen 제공업체로 전송</b>됩니다(학습 차단·보존 안 함 조건).<br>가리면 학번·이름을 자동으로 찾지 못해, 다음 단계에서 학생을 직접 골라야 합니다.<br><br>가리지 않고 보낼까요? 이 동의는 설정에 저장됩니다.', true, true, '동의하고 가리지 않기');
                   if (!yes) { e.target.checked = false; return; }
                   if (!(await mutate('save_config', { ocr_ai_consent: true }))) { e.target.checked = false; return; }
                   ready.consent = true;
@@ -7860,16 +7867,16 @@
       startBtn.addEventListener('click', () => runOcr(b, Math.max(1, +per.value || 1), SC.mode, { mask: SC.mode === 'ai' && unmasked ? 0 : SC.mask }));
     })();
   }
-  // 하이브리드·AI OCR 상태 줄: 방식, AI 비용, 실패한 쪽 다시 읽기, OCR 다시 하기
+  // 하이브리드·Qwen OCR 상태 줄: 방식, Qwen 비용, 실패한 쪽 다시 읽기, OCR 다시 하기
   function scanStatusBar(b, sc, r) {
     const mode = sc.mode || 'clova';
-    const label = { clova: 'CLOVA', ai: 'AI만(시험)', hybrid: '하이브리드' }[mode];
+    const label = { clova: 'CLOVA', ai: 'Qwen만(시험)', hybrid: '하이브리드' }[mode];
     const aiPages = (sc.ai && sc.ai.pages) || [];
     const failed = aiPages.filter((x) => x && x.error).length;
     const rev = r.review || [];
     const left = rev.reduce((s, x) => s + (x.left || 0), 0);
     const bar = el('div', { class: 'map-row', style: 'flex-wrap:wrap;gap:8px' }, [el('span', { class: 'tag', text: `읽은 방식: ${label}` })]);
-    if (mode !== 'clova') bar.appendChild(el('span', { class: 'muted', text: `AI OCR 비용 $${(+r.ai_cost || 0).toFixed(4)}` }));
+    if (mode !== 'clova') bar.appendChild(el('span', { class: 'muted', text: `Qwen OCR 비용 $${(+r.ai_cost || 0).toFixed(4)}` }));
     if (mode === 'hybrid') {
       bar.appendChild(left ? el('span', { class: 'tag warn-tag', text: `미검토 차이 ${left}곳 — 고르지 않은 곳은 CLOVA 글을 씁니다` }) : el('span', { class: 'tag', text: '✓ 차이 검토 끝' }));
       const firstLeft = rev.findIndex((x) => x.left);
@@ -7877,36 +7884,29 @@
     }
     if (failed) {
       const msg = (aiPages.find((x) => x && x.error) || {}).error || '';
-      bar.appendChild(el('span', { class: 'tag warn-tag', title: msg, text: `AI가 읽지 못한 쪽 ${failed}개` }));
+      bar.appendChild(el('span', { class: 'tag warn-tag', title: msg, text: `Qwen이 읽지 못한 쪽 ${failed}개` }));
       bar.appendChild(el('button', { type: 'button', class: 'small', text: '실패한 쪽만 다시 읽기', onclick: () => runOcr(b, sc.per || 1, mode, { mask: (sc.ai && sc.ai.mask) || 0 }) }));
     }
-    if (mode === 'clova' && sc.clova) bar.appendChild(el('button', { type: 'button', class: 'small', text: 'AI로도 읽어 비교하기', title: 'CLOVA는 다시 부르지 않고 AI만 읽습니다',
+    if (mode === 'clova' && sc.clova) bar.appendChild(el('button', { type: 'button', class: 'small', text: 'Qwen으로도 읽어 비교하기', title: 'CLOVA는 다시 부르지 않고 Qwen만 읽습니다',
       onclick: async () => {
         const ready = await call('clova_ready');
         if (!ready) return;
         if (!ready.openrouter) { alertBox('OpenRouter API 키가 없습니다. 설정 › 연결·모델에서 넣어 주세요.'); return; }
-        if (!(await modal(`머리글 위 ${Math.round(ready.mask * 100)}%를 흰색으로 가린 스캔 이미지를 OpenRouter AI(${escHtml(ready.ai_model_label)})로 보냅니다(쪽당 약 1~3원, 학습 차단·보존 안 함). 가림 비율은 설정 › 연결·모델에서 바꿀 수 있습니다.<br>CLOVA는 다시 부르지 않습니다.`, true, true, 'AI로 읽기'))) return;
+        if (!(await modal(`머리글 위 ${Math.round(ready.mask * 100)}%를 흰색으로 가린 스캔 이미지를 OpenRouter의 Qwen(${escHtml(ready.ai_model_label)})로 보냅니다(쪽당 약 1~3원, 학습 차단·보존 안 함). 가림 비율은 설정 › 연결·모델에서 바꿀 수 있습니다.<br>CLOVA는 다시 부르지 않습니다.`, true, true, 'Qwen으로 읽기'))) return;
         runOcr(b, sc.per || 1, 'hybrid', { mask: ready.mask });
       } }));
     bar.appendChild(el('span', { class: 'spacer' }));
     bar.appendChild(el('button', { type: 'button', class: 'small', text: 'OCR 다시 하기', onclick: async () => {
-      if (!(await modal('저장한 OCR 결과와 차이 검토를 모두 지우고 방식 고르기로 돌아갑니다.<br><b>CLOVA를 다시 부르면 무료 사용량을 넘어 과금될 수 있고</b>, AI도 쪽마다 다시 비용이 듭니다.<br>보통은 필요 없습니다. 계속할까요?', true, true, '지우고 다시 하기'))) return;
+      if (!(await modal('저장한 OCR 결과와 차이 검토를 모두 지우고 방식 고르기로 돌아갑니다.<br><b>CLOVA를 다시 부르면 무료 사용량을 넘어 과금될 수 있고</b>, Qwen도 쪽마다 다시 비용이 듭니다.<br>보통은 필요 없습니다. 계속할까요?', true, true, '지우고 다시 하기'))) return;
       if (await mutate('inbox_scan_reset', b.id, 'all')) { SC.starts = null; loadBatch(); }
     } }));
     return bar;
   }
-  function diffBadge(rv) {
-    if (!rv) return null;
-    if (rv.ai_error) return el('span', { class: 'tag warn-tag', text: 'AI 실패 — CLOVA 글 사용' });
-    if (rv.big && rv.left) return el('span', { class: 'tag warn-tag', text: '크게 다름 — 통째로 비교' });
-    if (rv.left) return el('span', { class: 'tag warn-tag', text: `차이 ${rv.left}곳 남음` });
-    if (rv.total || rv.big) return el('span', { class: 'tag', text: '✓ 검토 끝' });
-    return el('span', { class: 'tag', text: '두 결과 같음' });
-  }
-  // 하이브리드 차이 검토 창: 원본 줄 확대 + CLOVA/AI/직접 고르기. API는 부르지 않는다(저장된 결과만).
+  // 하이브리드 차이 검토 창: 원본 줄 확대 + CLOVA/Qwen/직접 고르기. API는 부르지 않는다(저장된 결과만).
   function showDiffReview(bid, page) {
     const total = ((IB.view && IB.view.batch.meta.scan) || {}).pages || 1;
     let cur = +page;
+    let editSlot = null;
     const close = () => { closeSheet(); SC.starts = null; loadBatch(); };
     openSheet((box) => {
       box.style.width = 'min(1240px, 97vw)';
@@ -7937,25 +7937,37 @@
         api.inbox_page_image(bid, cur).then((x) => { if (x && x.ok) img.src = x.src; });
         const right = el('div', {});
         bodyEl.appendChild(el('div', { class: 'split2', style: 'grid-template-columns:minmax(260px,38%) 1fr' }, [el('div', {}, [el('div', { class: 'col-label', text: '원본(이 PC 안에서만)' }), img]), right]));
-        if (r.ai_error) right.appendChild(el('div', { class: 'warn', text: `AI가 이 쪽을 읽지 못했습니다: ${r.ai_error} — CLOVA 글을 씁니다. [실패한 쪽만 다시 읽기]로 이 쪽만 다시 보낼 수 있습니다.` }));
+        // 전체 페이지 수정: 이 쪽 전체에 한 번에 적용하는 버튼(맨 위, 검정 테두리 상자)
+        if (r.cmp || r.ai_error || r.clova != null || r.ai != null) {
+          const texts = r.cmp ? r.cmp.diffs.filter((d) => d.kind === 'text') : [];
+          const dec = (r.review && r.review.d) || {};
+          const pg = r.review && r.review.page;
+          const allOf = (side) => (r.cmp && r.cmp.big ? pg === side : !pg && texts.length > 0 && texts.every((d) => (dec[d.id] || {}).pick === side));
+          const sideBtn = (eng, side, label) => el('button', { type: 'button', class: `ocr-eng-btn ocr-eng-${eng}` + (allOf(side) ? ' picked' : ''),
+            text: allOf(side) ? `✓ ${label}` : label, disabled: !r.cmp,
+            onclick: () => decide(side === 'ai' ? { all_ai: true } : { all_clova: true }) });
+          editSlot = el('div', {});
+          right.appendChild(el('div', { class: 'ocr-page-box' }, [
+            el('h3', { text: '전체 페이지 수정' }),
+            el('div', { class: 'ocr-page-btns' }, [
+              sideBtn('clova', 'clova', 'CLOVA 선택'), sideBtn('qwen', 'ai', 'Qwen 선택'),
+              r.review && r.review.s && Object.keys(r.review.s).length
+                ? el('button', { type: 'button', class: 'wiz-btn', text: '제안대로 고르기', title: 'AI 제안을 이 쪽 모든 차이에 고릅니다(차이마다 [이 제안 고르기]도 있음)', onclick: () => decide({ accept_suggest: true }) })
+                : el('button', { type: 'button', class: 'wiz-btn', text: 'AI 제안', disabled: !(r.cmp && !r.cmp.big && texts.length), title: '차이 난 글자와 앞뒤 문맥만 글 AI에 보내 어느 쪽이 맞을지 제안을 받습니다', onclick: () => suggest(r) }),
+              el('button', { type: 'button', class: pg === 'edit' ? 'primary' : '', text: pg === 'edit' ? '✓ 직접 입력함' : '직접 입력', onclick: () => editWhole(r) })]),
+            pg === 'edit' ? el('div', { class: 'warn', style: 'margin-top:8px' }, ['이 쪽은 통째로 직접 고친 글을 씁니다(아래 차이 고르기는 쓰이지 않음). ',
+              el('button', { type: 'button', class: 'small', text: '직접 입력 취소', onclick: () => decide({ page: null }) })]) : null,
+            editSlot]));
+        }
+        if (r.ai_error) right.appendChild(el('div', { class: 'warn', text: `Qwen이 이 쪽을 읽지 못했습니다: ${r.ai_error} — CLOVA 글을 씁니다. [실패한 쪽만 다시 읽기]로 이 쪽만 다시 보낼 수 있습니다.` }));
         else if (!r.cmp) right.appendChild(el('p', { class: 'hint', text: '이 쪽은 비교할 두 결과가 없습니다.' }));
-        if (r.review && r.review.page === 'edit') right.appendChild(el('div', { class: 'warn', style: 'margin-bottom:8px' }, ['이 쪽은 통째로 직접 고친 글을 씁니다(아래 차이 고르기는 쓰이지 않음). ',
-          el('button', { type: 'button', class: 'small', text: '직접 고친 것 취소', onclick: () => decide({ page: null }) })]));
         if (r.cmp && r.cmp.big) right.appendChild(bigPage(r));
         else if (r.cmp) right.appendChild(diffList(r));
         if (r.figures.length) {
-          right.appendChild(el('div', { class: 'wsection' }, [el('h3', { text: '그림 설명 (AI가 본 것 — 확인하세요)' }),
+          right.appendChild(el('div', { class: 'wsection' }, [el('h3', { text: '그림 설명 (Qwen이 본 것 — 확인하세요)' }),
             ...r.figures.map((f) => el('div', { class: 'snip', style: 'max-width:none', text: `[그림: ${f.desc}]` })),
             el('label', { class: 'inline', style: 'display:block;margin-top:6px' }, [el('input', { type: 'checkbox', checked: r.figs, onchange: (e) => decide({ figs: e.target.checked }) }), ' 본문에 그림 설명 넣기']),
             el('p', { class: 'hint', text: '그림이 없는데 설명이 있거나 틀렸으면 끄세요. 끄면 CLOVA가 읽은 그림 속 글자가 그대로 남습니다.' })]));
-        }
-        if (r.cmp) {
-          right.appendChild(el('div', { class: 'map-row', style: 'flex-wrap:wrap;gap:6px;margin-top:10px' }, [
-            r.cmp.big || !r.cmp.diffs.some((d) => d.kind === 'text') ? null : el('button', { type: 'button', class: 'wiz-btn', text: '💡 AI 보정 제안 받기', onclick: () => suggest(r) }),
-            r.review && r.review.s && Object.keys(r.review.s).length ? el('button', { type: 'button', text: '제안대로 모두 고르기', onclick: () => decide({ accept_suggest: true }) }) : null,
-            r.cmp.big ? null : el('button', { type: 'button', text: '이 쪽 모두 AI 쪽', onclick: () => decide({ all_ai: true }) }),
-            el('button', { type: 'button', text: '고른 것 모두 지우기(CLOVA 글로)', onclick: () => decide({ reset: true }) }),
-            el('button', { type: 'button', text: '쪽 통째로 직접 고치기', onclick: () => editWhole(r) })]));
         }
         right.appendChild(el('div', { class: 'col-label', style: 'margin-top:12px', text: '이 쪽 최종 글(학번·이름 줄은 다음 단계에서 빠짐)' }));
         right.appendChild(el('div', { class: 'rcard-body', style: 'max-height:none;white-space:pre-wrap;background:var(--input);border:1px solid var(--border);border-radius:8px;padding:8px', text: r.final || '(글자 없음)' }));
@@ -7974,22 +7986,26 @@
           const c = dec[d.id];
           const pick = c ? c.pick : null;
           const crop = el('img', { alt: '원본 줄', style: 'width:100%;max-height:120px;object-fit:contain;object-position:left;background:#fff;border:1px solid var(--border);border-radius:6px' });
-          if (d.box) api.inbox_scan_crop(bid, cur, d.box, r.w, r.h).then((x) => { if (x && x.ok) crop.src = x.src; });
-          const line = (mid, cls) => el('div', { style: 'font-size:1.05em;line-height:1.7' }, [el('span', { class: 'muted', text: d.before }), el('mark', { class: cls, text: show(mid) }), el('span', { class: 'muted', text: d.after })]);
+          if (d.box) api.inbox_scan_crop(bid, cur, d.box, r.w, r.h, d.clip || null).then((x) => { if (x && x.ok) crop.src = x.src; });
+          // 엔진별 결과 칸(CLOVA 초록·Qwen 보라)과 그 아래 같은 폭 고르기 버튼
+          const engBox = (eng, mid) => el('div', { class: `ocr-eng ocr-eng-${eng}` }, [
+            el('div', { class: 'ocr-eng-label', text: eng === 'clova' ? 'CLOVA' : 'Qwen' }),
+            el('div', { class: 'ocr-eng-text' }, [d.before, mid === '' ? el('mark', { class: 'ocr-empty', text: '(없음)' }) : el('mark', { text: show(mid) }), d.after]),
+            el('button', { type: 'button', class: 'ocr-eng-btn' + (pick === (eng === 'clova' ? 'clova' : 'ai') ? ' picked' : ''),
+              text: pick === (eng === 'clova' ? 'clova' : 'ai') ? `✓ ${eng === 'clova' ? 'CLOVA' : 'Qwen'} 고름` : `${eng === 'clova' ? '①' : '②'} ${eng === 'clova' ? 'CLOVA' : 'Qwen'} 쪽 고르기`,
+              onclick: () => decide({ d: { [d.id]: { pick: eng === 'clova' ? 'clova' : 'ai' } } }) })]);
           const input = el('input', { type: 'text', value: pick === 'edit' ? c.text : d.clova, style: 'width:12em', placeholder: '고친 글' });
-          const btn = (key, label, data) => el('button', { type: 'button', class: 'small' + (pick === key ? ' primary' : ''), text: label, onclick: () => decide({ d: { [d.id]: data } }) });
           const sg = ((r.review && r.review.s) || {})[d.id];
-          const sgLine = sg ? el('div', { class: sg.new ? 'warn' : 'hint', style: 'margin-top:4px' }, [
-            `💡 AI 제안: ${{ clova: 'CLOVA 쪽', ai: 'AI 쪽', merge: '합친 글' }[sg.pick]} "${show(sg.text)}"${sg.reason ? ' — ' + sg.reason : ''}`,
+          const sgLine = sg ? el('div', { class: sg.new ? 'warn' : 'hint', style: 'margin-top:6px' }, [
+            `💡 AI 제안: ${{ clova: 'CLOVA 쪽', ai: 'Qwen 쪽', merge: '합친 글' }[sg.pick]} "${show(sg.text)}"${sg.reason ? ' — ' + sg.reason : ''}`,
             sg.new ? el('b', { text: ' ⚠ 두 후보에 없는 글자를 만들었습니다(그림을 보지 못한 짐작). 원본을 꼭 확인하세요.' }) : null,
             !pick ? el('button', { type: 'button', class: 'small', style: 'margin-left:6px', text: '이 제안 고르기', onclick: () => decide({ d: { [d.id]: sg.pick === 'merge' ? { pick: 'edit', text: sg.text } : { pick: sg.pick } } }) }) : null]) : null;
-          const row = el('div', { class: 'ref-card ocr-diff' + (pick ? ' done' : ''), tabindex: 0, style: pick ? 'opacity:.75' : '' }, [sgLine,
-            el('div', { class: 'rcard-head' }, [el('b', { text: `차이 ${i + 1}` }), pick ? el('span', { class: 'tag', text: { clova: 'CLOVA 고름', ai: 'AI 고름', edit: '직접 고침' }[pick] }) : el('span', { class: 'tag warn-tag', text: '미검토(CLOVA 글 사용 중)' })]),
+          const row = el('div', { class: 'ref-card ocr-diff' + (pick ? ' done' : ''), tabindex: 0 }, [
+            el('div', { class: 'rcard-head' }, [el('b', { text: `차이 ${i + 1}` }), pick ? el('span', { class: 'tag', text: { clova: 'CLOVA 고름', ai: 'Qwen 고름', edit: '직접 고침' }[pick] }) : null]),
             d.box ? crop : el('div', { class: 'muted', text: '(이 곳의 원본 위치를 알 수 없어 왼쪽 원본에서 찾아 주세요)' }),
-            el('div', { style: 'display:grid;grid-template-columns:auto 1fr;gap:2px 10px;align-items:center;margin-top:6px' }, [
-              el('b', { text: 'CLOVA' }), line(d.clova, 'ocr-a'), el('b', { text: 'AI' }), line(d.ai, 'ocr-b')]),
-            el('div', { class: 'map-row', style: 'flex-wrap:wrap;gap:6px;margin-top:6px' }, [
-              btn('clova', `① CLOVA: ${show(d.clova)}`, { pick: 'clova' }), btn('ai', `② AI: ${show(d.ai)}`, { pick: 'ai' }),
+            el('div', { class: 'ocr-eng-pair' }, [engBox('clova', d.clova), engBox('qwen', d.ai)]),
+            sgLine,
+            el('div', { class: 'map-row', style: 'flex-wrap:wrap;gap:6px;margin-top:8px' }, [
               input, el('button', { type: 'button', class: 'small' + (pick === 'edit' ? ' primary' : ''), text: '직접 고치기', onclick: () => decide({ d: { [d.id]: { pick: 'edit', text: input.value } } }) }),
               pick ? el('button', { type: 'button', class: 'small', text: '고른 것 취소', onclick: () => decide({ d: { [d.id]: null } }) }) : null]),
           ]);
@@ -8005,13 +8021,19 @@
           });
           wrap.appendChild(row);
         });
-        if (texts.length) wrap.appendChild(el('p', { class: 'hint', text: '차이 칸을 누른 뒤 키보드 1 = CLOVA, 2 = AI, ↑↓ = 다른 차이로.' }));
+        if (texts.length) wrap.appendChild(el('p', { class: 'hint', text: '차이 칸을 누른 뒤 키보드 1 = CLOVA, 2 = Qwen, ↑↓ = 다른 차이로.' }));
         if (figs.length) wrap.appendChild(el('div', { class: 'snip', style: 'max-width:none', text: `그림 속 글자 ${figs.length}곳: CLOVA가 본문에 넣은 그림 이름표(${figs.map((d) => show(d.clova)).join(' / ')}). 그림 설명을 넣으면 그 설명이 대신합니다.` }));
         return wrap;
       }
       async function suggest(r) {
         const n = r.cmp.diffs.filter((d) => d.kind === 'text').length;
-        if (!(await modal(`차이 ${n}곳의 두 후보와 앞뒤 몇 글자만 글 AI(설정의 'OCR 보정 모델', 빈칸이면 기본 모델)에 보내 어느 쪽이 맞을지 제안을 받습니다.<br>그림은 보내지 않고, 이 담당 명렬의 이름·학번은 ○○로 바꿉니다. 비용은 보통 1원 안팎입니다.<br><span class="muted">AI는 그림을 못 보고 문맥으로 짐작합니다. 제안은 미리 골라 두기만 하며, 확정은 직접 하세요.</span>`, true, true, '제안 받기'))) return;
+        const fixModel = (cfg.ocr_fix_model || '').trim() || ((cfg.models || [])[cfg.default_model || 0] || '');
+        const sgHtml = '<div class="ocr-sugg-note"><div class="ocr-sugg-title">AI 제안을 받기 전에 확인하세요</div><ol>'
+          + `<li><div class="pt">글자만 보냅니다</div><div class="ex">차이 ${n}곳의 두 후보와 앞뒤 몇 글자만 보냅니다.<br>그림은 보내지 않습니다.</div></li>`
+          + '<li><div class="pt">이름·학번은 ○○로 바꿉니다</div><div class="ex">이 담당 명렬에 있는 이름과 학번을<br>지우고 보냅니다.</div></li>'
+          + '<li><div class="pt">확정은 직접 하세요</div><div class="ex">AI는 그림을 못 보고 문맥으로 짐작합니다.<br>제안은 미리 표시만 하고,<br>두 후보에 없는 글자를 만들면 ⚠로 알립니다.</div></li></ol>'
+          + `<div class="ocr-sugg-model">제안 모델: <b>${escHtml(fixModel || '(모델 없음)')}</b><div class="muted">설정 › 연결·모델의 'OCR 보정 모델'${(cfg.ocr_fix_model || '').trim() ? '' : ' (빈칸이라 기본 모델)'}</div></div></div>`;
+        if (!(await modal(sgHtml, true, true, '제안 받기'))) return;
         const res = await mutate('inbox_scan_suggest', bid, cur);
         if (res) { draw(res); toast(`제안을 받았습니다. 비용 $${(+res.suggest_cost || 0).toFixed(4)}`); }
       }
@@ -8020,21 +8042,17 @@
         const col = (label, text) => el('div', {}, [el('div', { class: 'col-label', text: label }), el('div', { class: 'rcard-body', style: 'max-height:50vh;white-space:pre-wrap;background:var(--input);border:1px solid var(--border);border-radius:8px;padding:8px', text: text || '(글자 없음)' })]);
         return el('div', {}, [
           el('div', { class: 'warn', text: `두 결과가 크게 다릅니다(비슷한 정도 ${Math.round(r.cmp.ratio * 100)}%). 표·두 단·그림 속 글자가 많은 쪽에서 자주 생깁니다. 원본을 보고 한쪽을 통째로 고르거나 직접 고치세요.` }),
-          el('div', { class: 'split2', style: 'margin-top:8px' }, [col('CLOVA', r.clova), col('AI', r.ai)]),
-          el('div', { class: 'map-row', style: 'gap:6px;margin-top:6px' }, [
-            el('button', { type: 'button', class: (pick === 'clova' ? 'primary' : ''), text: 'CLOVA 글 쓰기', onclick: () => decide({ page: 'clova' }) }),
-            el('button', { type: 'button', class: (pick === 'ai' ? 'primary' : ''), text: 'AI 글 쓰기', onclick: () => decide({ page: 'ai' }) }),
-            pick ? el('span', { class: 'tag', text: { clova: 'CLOVA 고름', ai: 'AI 고름', edit: '직접 고침' }[pick] }) : el('span', { class: 'tag warn-tag', text: '미검토(CLOVA 글 사용 중)' })]),
+          el('div', { class: 'split2', style: 'margin-top:8px' }, [col('CLOVA', r.clova), col('Qwen', r.ai)]),
+          pick ? el('span', { class: 'tag', style: 'margin-top:6px', text: { clova: 'CLOVA 글 고름', ai: 'Qwen 글 고름', edit: '직접 고침' }[pick] }) : el('p', { class: 'hint', text: '위 [CLOVA 선택]·[Qwen 선택]으로 한쪽을 통째로 고르거나 [직접 입력]하세요. 고르지 않으면 CLOVA 글을 씁니다.' }),
         ]);
       }
       function editWhole(r) {
-        const ta = el('textarea', { rows: 14, style: 'width:100%' });
+        const ta = el('textarea', { rows: 14, style: 'width:100%;margin-top:8px' });
         ta.value = r.final || '';
-        const wrap = el('div', { class: 'wsection' }, [el('h3', { text: '쪽 통째로 직접 고치기' }), ta,
-          el('div', { class: 'map-row', style: 'gap:6px;margin-top:6px' }, [
-            el('button', { type: 'button', class: 'primary', text: '이 글로 쓰기', onclick: () => decide({ page: 'edit', text: ta.value }) }),
-            r.review && r.review.page ? el('button', { type: 'button', text: '통째로 고른 것 취소', onclick: () => decide({ page: null }) }) : null])]);
-        bodyEl.querySelector('.split2 > div:last-child').prepend(wrap);
+        editSlot.innerHTML = '';
+        editSlot.append(ta, el('div', { class: 'map-row', style: 'gap:6px;margin-top:6px' }, [
+          el('button', { type: 'button', class: 'primary small', text: '이 글로 쓰기', onclick: () => decide({ page: 'edit', text: ta.value }) }),
+          el('button', { type: 'button', class: 'small', text: '닫기(쓰지 않음)', onclick: () => { editSlot.innerHTML = ''; } })]));
         ta.focus();
       }
       load();
@@ -8042,14 +8060,14 @@
   }
   function runOcr(b, per, mode, opts) {
     mode = mode || 'clova';
-    const msg = el('div', { class: 'modal-msg', text: mode === 'ai' ? 'AI에 보내는 중…' : mode === 'hybrid' ? 'CLOVA와 AI에 보내는 중…' : 'CLOVA OCR에 보내는 중…' });
+    const msg = el('div', { class: 'modal-msg', text: mode === 'ai' ? 'Qwen에 보내는 중…' : mode === 'hybrid' ? 'CLOVA와 Qwen에 보내는 중…' : 'CLOVA OCR에 보내는 중…' });
     const time = el('b', { text: '0:00' });
     const stopBtn = el('button', { type: 'button', class: 'btn-danger', text: '중지', onclick: () => { stopBtn.disabled = true; stopBtn.textContent = '중지 중…'; api.inbox_ocr_stop(); } });
     openSheet((box) => {
       box.style.height = 'auto';
       box.style.width = 'min(500px, 92vw)';
       box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: 'OCR 진행 중' })]), msg,
-        mode !== 'clova' ? el('p', { class: 'hint', text: '중지해도 이미 AI에 보낸 쪽은 결과를 받아 저장합니다(비용이 이미 들었으므로). 다시 시작하면 남은 쪽만 읽습니다.' }) : null,
+        mode !== 'clova' ? el('p', { class: 'hint', text: '중지해도 이미 Qwen에 보낸 쪽은 결과를 받아 저장합니다(비용이 이미 들었으므로). 다시 시작하면 남은 쪽만 읽습니다.' }) : null,
         el('div', { class: 'sheet-foot' }, [el('span', {}, ['경과 시간 ', time, ' — 멈춘 게 아니니 기다려 주세요']), el('span', { class: 'spacer' }), stopBtn]));
     });
     SC.start = Date.now();
@@ -8061,7 +8079,7 @@
       if (!r || !r.ok) { clearInterval(SC.timer); closeSheet(); alertBox((r && r.error) || 'OCR을 시작하지 못했습니다.'); return; }
       const parts = [];
       if (r.clova) parts.push('CLOVA: 보내는 중');
-      if (r.ai_pages) parts.push(`AI: 0 / ${r.ai_pages}쪽`);
+      if (r.ai_pages) parts.push(`Qwen: 0 / ${r.ai_pages}쪽`);
       if (!parts.length) parts.push('이미 읽은 결과로 정리하는 중…');
       msg.textContent = parts.join(' · ');
     });
@@ -8069,36 +8087,71 @@
   function ocrEvent(ev) {
     if (ev.type === 'ocr_progress') {
       SC.prog = SC.prog || {};
-      SC.prog[ev.engine || 'clova'] = ev.engine === 'ai' ? `AI: ${ev.done} / ${ev.total}쪽` : `CLOVA: ${ev.pages}쪽을 10쪽씩 나눠 읽는 중(${ev.done + 1} / ${ev.total} 구간)`;
+      SC.prog[ev.engine || 'clova'] = ev.engine === 'ai' ? `Qwen: ${ev.done} / ${ev.total}쪽` : `CLOVA: ${ev.pages}쪽을 10쪽씩 나눠 읽는 중(${ev.done + 1} / ${ev.total} 구간)`;
       if (SC.msg) SC.msg.textContent = Object.values(SC.prog).join(' · ');
       return;
     }
     clearInterval(SC.timer);
     closeSheet();
     if (ev.type === 'ocr_done') {
-      toast(`${ev.pages}쪽을 읽었습니다.${ev.ai_cost ? ` AI 비용 $${(+ev.ai_cost).toFixed(4)}.` : ''} 학생별로 묶인 것을 확인하세요.`);
-      if (ev.ai_failed) alertBox(`AI가 ${ev.ai_failed}쪽을 읽지 못했습니다.${ev.ai_message ? ' ' + ev.ai_message : ''} 그 쪽은 CLOVA 글을 씁니다(AI만 쓰는 방식이면 빈 글). [실패한 쪽만 다시 읽기]로 그 쪽만 다시 보낼 수 있습니다.`);
+      toast(`${ev.pages}쪽을 읽었습니다.${ev.ai_cost ? ` Qwen 비용 $${(+ev.ai_cost).toFixed(4)}.` : ''} 학생별로 묶인 것을 확인하세요.`);
+      if (ev.ai_failed) alertBox(`Qwen이 ${ev.ai_failed}쪽을 읽지 못했습니다.${ev.ai_message ? ' ' + ev.ai_message : ''} 그 쪽은 CLOVA 글을 씁니다(Qwen만 쓰는 방식이면 빈 글). [실패한 쪽만 다시 읽기]로 그 쪽만 다시 보낼 수 있습니다.`);
       SC.starts = null;
     }
     else if (ev.type === 'ocr_stopped') toast('OCR을 중지했습니다. 다시 시작하면 남은 쪽만 읽습니다.');
     else alertBox('OCR 실패: ' + ev.message);
     if (IB.bid === ev.bid && panel === 'inbox') loadBatch();
   }
-  function showOriginal(bid, pages) {
+  function showOriginal(bid, pages, opts) {
+    opts = opts || {};
+    const close = () => { closeSheet(); if (opts.grouping) renderBatch(); };
     openSheet(async (box) => {
-      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `원본 보기 / ${pages.map((p) => +p + 1).join('·')}쪽` }), el('span', { class: 'muted', text: '이 PC 안에서만 보여 줍니다' }), el('span', { class: 'spacer' }), el('button', { type: 'button', text: '닫기', onclick: closeSheet })]));
+      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: `원본 보기 / ${pages.map((p) => +p + 1).join('·')}쪽` }), el('span', { class: 'muted', text: '이 PC 안에서만 보여 줍니다' }), el('span', { class: 'spacer' }), el('button', { type: 'button', text: '닫기', onclick: close })]));
       const body = el('div', { class: 'sheet-body' });
       box.appendChild(body);
-      const t = await call('inbox_scan_text', bid, pages);
+      const t = opts.grouping ? null : await call('inbox_scan_text', bid, pages);
       for (const p of pages) {
         const img = el('img', { alt: `${+p + 1}쪽`, style: 'width:100%;border:1px solid var(--border);border-radius:8px;background:#fff' });
-        const txt = ((t && t.pages.find((x) => x.page === +p)) || {}).text || '';
-        body.appendChild(el('div', { class: 'split2', style: 'margin-bottom:14px' }, [el('div', {}, [el('div', { class: 'col-label', text: `${+p + 1}쪽 스캔` }), img]),
-          el('div', {}, [el('div', { class: 'col-label', text: 'OCR 글자(학번·이름 포함, AI로 보내지 않음)' }), el('div', { class: 'rcard-body', style: 'max-height:none;background:var(--input);border:1px solid var(--border);border-radius:8px;padding:8px', text: txt || '(글자 없음)' })])]));
+        const right = el('div', {});
+        const block = el('div', { class: 'split2', style: 'margin-bottom:14px' }, [el('div', {}, [el('div', { class: 'col-label', text: `${+p + 1}쪽 스캔` }), img]), right]);
+        body.appendChild(block);
         api.inbox_page_image(bid, p).then((r) => { if (r && r.ok) img.src = r.src; else img.alt = (r && r.error) || '그림을 불러오지 못했습니다'; });
+        if (!opts.grouping) {
+          const txt = ((t && t.pages.find((x) => x.page === +p)) || {}).text || '';
+          right.append(el('div', { class: 'col-label', text: 'OCR 글자(학번·이름 포함, AI로 보내지 않음)' }), el('div', { class: 'rcard-body', style: 'max-height:none;background:var(--input);border:1px solid var(--border);border-radius:8px;padding:8px', text: txt || '(글자 없음)' }));
+          continue;
+        }
+        // 페이지 묶기 단계: 페이지 빼기 + 언제나 쪽 글 고치기
+        const draw = (r) => {
+          right.innerHTML = '';
+          const isSkip = SC.skipped.includes(+p);
+          block.style.opacity = isSkip ? '.55' : '';
+          const textBox = el('div', { class: 'rcard-body', style: 'max-height:none;white-space:pre-wrap;background:var(--input);border:1px solid var(--border);border-radius:8px;padding:8px', text: r.final || '(글자 없음)' });
+          right.append(
+            el('div', { class: 'map-row', style: 'flex-wrap:wrap;gap:6px;margin-bottom:6px' }, [
+              el('button', { type: 'button', class: 'small', text: '✏️ 이 쪽 글 고치기', onclick: () => {
+                const ta = el('textarea', { rows: 14, style: 'width:100%' });
+                ta.value = r.final || '';
+                textBox.replaceWith(el('div', {}, [ta, el('div', { class: 'map-row', style: 'gap:6px;margin-top:6px' }, [
+                  el('button', { type: 'button', class: 'small primary', text: '저장', onclick: async () => { const x = await mutate('inbox_scan_decide', bid, +p, { page: 'edit', text: ta.value }); if (x) draw(x); } }),
+                  el('button', { type: 'button', class: 'small', text: '취소', onclick: () => draw(r) })])]));
+                ta.focus();
+              } }),
+              r.edited ? el('span', { class: 'tag', text: '직접 고침' }) : null,
+              r.edited ? el('button', { type: 'button', class: 'small', text: '고친 것 되돌리기', onclick: async () => { if (!(await confirmBox('직접 고친 글을 지우고 OCR 결과로 돌아갑니다.', '되돌리기'))) return; const x = await mutate('inbox_scan_decide', bid, +p, { page: null }); if (x) draw(x); } }) : null,
+              r.cmp ? el('button', { type: 'button', class: 'small', text: '차이 검토 창 열기', onclick: () => { closeSheet(); showDiffReview(bid, +p); } }) : null,
+              el('span', { class: 'spacer' }),
+              isSkip ? el('button', { type: 'button', class: 'small', text: '↩ 되살리기', onclick: () => { SC.skipped = SC.skipped.filter((x) => x !== +p); draw(r); } })
+                : el('button', { type: 'button', class: 'small btn-skip', text: '페이지 빼기', onclick: () => { SC.skipped.push(+p); draw(r); } })]),
+            el('div', { class: 'col-label', text: isSkip ? '뺀 쪽(창을 닫으면 목록에 반영, [확정하고 매칭으로] 때 저장)' : '이 쪽 글(학번·이름 줄은 다음 단계에서 빠짐)' }),
+            textBox);
+          markDismiss(box);
+        };
+        call('inbox_scan_compare', bid, +p).then((r) => { if (r) draw(r); });
       }
     });
   }
+
 
   // =====================================================================
   // v0.5: 성취기준(붙여넣기·PDF·hwpx) · 세특 종합에 반영 · 성취기준만으로 생성

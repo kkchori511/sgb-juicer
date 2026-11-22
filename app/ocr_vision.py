@@ -101,7 +101,7 @@ def parse(content: str) -> dict:
     except ValueError:
         v = None
     if not isinstance(v, dict) or not isinstance(v.get("lines"), list):
-        raise VisionError("AI가 읽은 결과의 형식이 올바르지 않습니다. 이 쪽만 다시 읽어 주세요.", "bad")
+        raise VisionError("Qwen이 읽은 결과의 형식이 올바르지 않습니다. 이 쪽만 다시 읽어 주세요.", "bad")
     lines = []
     for x in v["lines"][:MAX_LINES]:
         if isinstance(x, dict) and isinstance(x.get("text"), str):
@@ -126,7 +126,7 @@ def _explain(status: int, msg: str) -> VisionError:
     if status == 402:
         return VisionError("OpenRouter 잔액이 부족합니다. 크레딧을 충전해 주세요.", "balance")
     if status == 404 or "no endpoints" in low or "no allowed providers" in low:
-        return VisionError("학습 차단·보존 안 함 조건을 받는 제공업체가 지금 없어 그림을 보내지 않았습니다. 잠시 뒤 다시 하거나 설정에서 다른 OCR 모델을 고르세요.", "provider")
+        return VisionError("학습 차단·보존 안 함 조건을 받는 제공업체가 지금 없어 그림을 보내지 않았습니다. 잠시 뒤 다시 하거나 설정에서 다른 그림 읽기 모델을 고르세요.", "provider")
     if status == 429 or status in openrouter.DOWN or status == 0:
         return VisionError(f"OpenRouter가 응답하지 않습니다(HTTP {status or '연결 끊김'}). 잠시 뒤 다시 시도해 주세요.", "down")
     return VisionError(f"OpenRouter 오류(HTTP {status}){(' - ' + msg[:200]) if msg else ''}", "bad")
@@ -164,7 +164,7 @@ def read_page(key: str, model: str, png: bytes, post=None) -> dict:
     except (KeyError, IndexError, TypeError, AttributeError):
         raise VisionError("OpenRouter 응답 형식이 올바르지 않습니다.", "bad")
     if ch.get("finish_reason") not in (None, "stop"):
-        raise VisionError("AI가 이 쪽을 끝까지 읽지 못했습니다(글이 너무 길거나 거부됨).", "bad")
+        raise VisionError("Qwen이 이 쪽을 끝까지 읽지 못했습니다(글이 너무 길거나 거부됨).", "bad")
     out = parse(content)
     out["cost"] = float((body.get("usage") or {}).get("cost") or 0)
     out["provider"] = body.get("provider") or ""

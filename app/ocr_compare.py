@@ -108,6 +108,11 @@ def compare(clova_page: dict, ai_page: dict, mask: float = 0.0) -> dict:
         lo, hi = _line_of(starts, s), _line_of(starts, max(s, e - 1))
         boxes = [alines[i].get("box") for i in range(lo, hi + 1) if i < len(alines) and alines[i].get("box")]
         box = [min(x[0] for x in boxes), min(x[1] for x in boxes), max(x[2] for x in boxes), max(x[3] for x in boxes)] if boxes else None
+        # 확대 그림이 이웃 줄 글씨를 물지 않게: 윗줄 아래 끝·아랫줄 위 끝(겹치지 않을 때만)
+        prev_b = alines[lo - 1].get("box") if 0 < lo <= len(alines) else None
+        next_b = alines[hi + 1].get("box") if hi + 1 < len(alines) else None
+        clip = [prev_b[3] if prev_b and box and prev_b[3] < box[1] else None,
+                next_b[1] if next_b and box and next_b[1] > box[3] else None]
         kind = "text"
         piece = a[s:e]
         if not b[bs:be].strip() and fig_words and piece.strip():
@@ -118,7 +123,7 @@ def compare(clova_page: dict, ai_page: dict, mask: float = 0.0) -> dict:
         diffs.append({
             "id": f"d{n}", "kind": kind, "a": [s, e], "b": [bs, be], "clova": piece, "ai": b[bs:be],
             "before": a[max(0, s - CTX):s].replace("\n", " "), "after": a[e:e + CTX].replace("\n", " "),
-            "lines": [lo, hi], "box": box,
+            "lines": [lo, hi], "box": box, "clip": clip,
         })
     # AI 그림 설명을 CLOVA 글 어디에 넣을지: AI 줄 끝 → 맞는 CLOVA 위치 → 그 줄 끝
     blines = _line_starts(b)

@@ -3121,9 +3121,9 @@ class Api:
         return out
 
     @safe
-    def inbox_scan_crop(self, bid, page, box, w, h):
-        """차이 난 줄의 원본 확대 그림(이 PC 안에서만). box는 CLOVA 좌표(w×h 기준)."""
-        return {"src": scan.render_crop(self._db().year, bid, page, box, w, h)}
+    def inbox_scan_crop(self, bid, page, box, w, h, clip=None):
+        """차이 난 줄의 원본 확대 그림(이 PC 안에서만). box·clip은 CLOVA 좌표(w×h 기준)."""
+        return {"src": scan.render_crop(self._db().year, bid, page, box, w, h, clip)}
 
     def inbox_ocr_stop(self):
         self._ocr_stop.set()

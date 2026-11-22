@@ -197,8 +197,9 @@ def page_count(path) -> int:
     return len(PdfReader(str(path)).pages)
 
 
-def render_crop(year, batch_id, page: int, box, w, h, width: int = 1400, pad: float = 0.35) -> str:
-    """차이 난 줄 확대: box([x0, y0, x1, y1], CLOVA 좌표 w×h 기준)에 위아래 여백을 두고 페이지 가로 전체를 잘라 PNG로."""
+def render_crop(year, batch_id, page: int, box, w, h, clip=None, width: int = 1400, pad: float = 0.35) -> str:
+    """차이 난 줄 확대: box([x0, y0, x1, y1], CLOVA 좌표 w×h 기준)에 위아래 여백을 두고 페이지 가로 전체를 잘라 PNG로.
+    clip([윗줄 아래 끝, 아랫줄 위 끝], 없으면 None): 여백이 이웃 줄 글씨까지 들어가지 않게 자른다."""
     import pypdfium2 as pdfium
 
     path = pdf_path(year, batch_id)
@@ -213,6 +214,11 @@ def render_crop(year, batch_id, page: int, box, w, h, width: int = 1400, pad: fl
         line_h = max(10.0, (y1 - y0) * sy)
         top = max(0, int(y0 * sy - line_h * pad))
         bot = min(bm.height, int(y1 * sy + line_h * pad))
+        c0, c1 = (list(clip) + [None, None])[:2] if clip else (None, None)
+        if c0 is not None:
+            top = max(top, min(int(y0 * sy), int(float(c0) * sy) + 2))
+        if c1 is not None:
+            bot = min(bot, max(int(y1 * sy) + 1, int(float(c1) * sy) - 2))
         if bot <= top:
             top, bot = 0, min(bm.height, 60)
         raw = bytes(bm.buffer)

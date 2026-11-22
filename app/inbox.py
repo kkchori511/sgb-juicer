@@ -596,7 +596,14 @@ class Inbox:
     def _scan_refresh(self, sc):
         """엔진 결과가 다 모였으면 최종 글을 다시 만든다(처음 모였을 때 학생 나누기 기본값)."""
         if not (sc.get("clova") or sc.get("ai")):
-            return  # v0.34 이전 묶음: sc["ocr"]만 있음
+            # v0.34 이전 묶음(sc["ocr"]만 있음): 쪽 통째로 직접 고친 것만 반영, 원래 글은 ocr_orig에 둔다
+            if sc.get("ocr") is None:
+                return
+            orig = sc.setdefault("ocr_orig", list(sc["ocr"]))
+            rvs = sc.get("review") or {}
+            sc["ocr"] = [ocr_compare.nfc((rvs.get(str(i)) or {}).get("text") or "").strip()
+                         if (rvs.get(str(i)) or {}).get("page") == "edit" else t for i, t in enumerate(orig)]
+            return
         if not self.scan_engines_done(sc):
             return
         sc["ocr"] = ocr_compare.final_texts(sc)
@@ -653,7 +660,8 @@ class Inbox:
                "clova": ocr.page_text(cp) if cp else None, "ai_error": (ap or {}).get("error") if ap else None,
                "ai": ocr_vision.page_text(ap, False) if ap and not ap.get("error") else None,
                "figures": (ap or {}).get("figures") or [], "final": (sc.get("ocr") or [""] * (p + 1))[p] if sc.get("ocr") else "",
-               "cmp": None, "w": (cp or {}).get("w") or 0, "h": (cp or {}).get("h") or 0, "unreviewed": 0}
+               "cmp": None, "w": (cp or {}).get("w") or 0, "h": (cp or {}).get("h") or 0, "unreviewed": 0,
+               "edited": rv.get("page") == "edit"}
         if cp and ap and not ap.get("error") and not cp.get("fail"):
             cmp = ocr_compare.compare(cp, ap, (sc.get("ai") or {}).get("mask") or 0)
             out["cmp"] = {k: cmp[k] for k in ("ratio", "big", "diffs")}
@@ -682,9 +690,14 @@ class Inbox:
             rv["page"] = data["page"] if data["page"] in ("clova", "ai", "edit") else None
             if data["page"] == "edit":
                 rv["text"] = str(data.get("text") or "")[:20000]
-        if data.get("all_ai"):
-            cmpd = self.scan_compare(bid, page).get("cmp") or {}
-            rv["d"] = {**(rv.get("d") or {}), **{d["id"]: {"pick": "ai"} for d in cmpd.get("diffs") or [] if d["kind"] == "text"}}
+        for flag, side in (("all_ai", "ai"), ("all_clova", "clova")):
+            if data.get(flag):  # [Qwen 선택]/[CLOVA 선택]: 이 쪽 모든 차이를 그쪽으로(검토 끝). 크게 다른 쪽은 통째로
+                cmpd = self.scan_compare(bid, page).get("cmp") or {}
+                if cmpd.get("big"):
+                    rv["page"] = side
+                else:
+                    rv.pop("page", None) if rv.get("page") in ("clova", "ai") else None
+                    rv["d"] = {**(rv.get("d") or {}), **{d["id"]: {"pick": side} for d in cmpd.get("diffs") or [] if d["kind"] == "text"}}
         for k, v in (data.get("d") or {}).items():
             dd = rv.get("d") or {}
             if v is None or (isinstance(v, dict) and v.get("pick") not in ("clova", "ai", "edit")):
@@ -769,6 +782,7 @@ class Inbox:
                         "content": scan.strip_pages([texts[p] for p in g], no, name, members), "empty": not raw.strip()})
         return {"groups": out, "page_texts": [t[:300] for t in texts], "starts": starts, "skipped": skipped,
                 "mode": sc.get("mode") or "clova", "review": self.scan_review_counts(sc),
+                "edited": sorted(int(k) for k, v in (sc.get("review") or {}).items() if (v or {}).get("page") == "edit"),
                 "ai_cost": (sc.get("ai") or {}).get("cost") or 0}
 
     def scan_confirm(self, bid, starts, skipped):
