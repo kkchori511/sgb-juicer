@@ -363,7 +363,8 @@ class Records:
         f = self.final(r["group_id"], r["item"], r["student_no"])
         return {"id": r["id"], "content": r["content"], "date": r["date"] or "", "title": r["title"] or "", "tag_ids": tids,
                 "bytes": count_bytes(r["content"]), "updated_at": r["updated_at"],
-                "closed": bool(f and f["closed"]), "stale": bool(f and f["stale"]), "has_final": bool(f and f["text"])}
+                "closed": bool(f and f["closed"]), "stale": bool(f and f["stale"]), "has_final": bool(f and f["text"]),
+                "orig": r["original"] if r["original"] is not None else r["content"], "confirmed": bool(r["confirmed"])}
 
     def revert_record(self, rid, before, after):
         """이 화면에서 저장한 것을 되돌린다. 그 뒤 다른 곳에서 다시 고쳤거나 마감했으면 덮지 않는다."""

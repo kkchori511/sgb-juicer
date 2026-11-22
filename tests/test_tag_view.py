@@ -146,6 +146,21 @@ def main():
     assert d0 == {"ok": True, "deleted": 2, "students": 1} or (d0["deleted"] == 2 and d0["students"] == 1)
     assert not {r["id"] for r in ok(api.tag_view(0, {}))["records"]} & {x1, x2}
     assert not api.delete_records([x1], "확인")["ok"]  # 이미 지워짐
+    # Codex v1 F4: 저장·되돌리기·다시 불러오기 응답에 실제 원문·확정 상태(화면이 짐작하지 않게)
+    st = ok(api.record_state(e))["record"]
+    assert st["orig"] == st["content"] == "태그 없음" and st["confirmed"] is False, st
+    ok(api.confirm_record(e, "확정본"))
+    st = ok(api.update_record(e, {"content": "확정본 고침"}))["record"]
+    assert st["orig"] == "태그 없음" and st["confirmed"] is True and st["content"] == "확정본 고침", st
+    ok(api.update_record(e, {"orig": "원문 고침"}))  # 다른 곳에서 원문만 바뀐 뒤 다시 불러오기
+    st = ok(api.record_state(e))["record"]
+    assert st["orig"] == "원문 고침" and st["content"] == "확정본 고침", st
+    st = ok(api.update_record(e, {"content": "원문 고침"}))["record"]  # 본문이 우연히 원문과 같아짐
+    assert st["orig"] == "원문 고침" and st["confirmed"] is True, st
+    st = ok(api.update_record(e, {"content": "새 확정본"}))["record"]  # 그 뒤 본문을 고쳐도 원문은 그대로
+    assert st["orig"] == "원문 고침" and st["content"] == "새 확정본", st
+    st = ok(api.revert_record(e, {"content": "확정본 고침"}, {"content": "새 확정본"}))["record"]
+    assert st["orig"] == "원문 고침" and st["content"] == "확정본 고침", st
     print("TAG VIEW OK")
 
 

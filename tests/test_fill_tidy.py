@@ -8,6 +8,7 @@ from app.standards import new_words
 
 ANSWER = {}
 openrouter.chat = lambda key, model, system, user, privacy=False: (ANSWER["v"], 0.0)
+openrouter.balance = lambda key: 1.0  # 잔액 조회도 가짜(시험이 바깥으로 나가지 않게, Codex v1 F8)
 
 
 def ok(r):

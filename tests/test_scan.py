@@ -52,7 +52,7 @@ def test():
     assert any("ocr_done" in e for e in w.events), w.events
     g = ok(api.inbox_scan_groups(bid))
     assert [x["pages"] for x in g["groups"]] == [[0, 1], [2, 3], [4, 5]]
-    assert [(x["ext_no"], x["ext_name"]) for x in g["groups"]] == [("20301", "김철수"), ("20302", "이영희"), ("20303", "박민순")]
+    assert [(x["ext_no"], x["ext_name"]) for x in g["groups"]] == [("20301", "김철수"), ("20302", "이영희"), ("20303", "")]  # 명렬 밖 이름(잘못 읽음)은 이름으로 안 씀, 지우기는 함
     assert "김철수" not in g["groups"][0]["content"] and "20301" not in g["groups"][0]["content"] and "진로 독서" in g["groups"][0]["content"]
     # 다시 묶기: 6쪽(백지) 빼고 1쪽만 따로
     g2 = ok(api.inbox_scan_groups(bid, [0, 1, 2, 4], [5]))

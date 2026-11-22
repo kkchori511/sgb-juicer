@@ -788,7 +788,7 @@ class Inbox:
             values += [m.get("name") or "", str(m.get("student_no") or "")]
         for t in (cmp["a"], cmp["b"]):
             no, name = scan.extract_ids(t, members)
-            values += [no, name]
+            values += [no, name, *scan.label_names(t, members)]
         regexes = [scan.RE_NAME_LABEL, scan.RE_NO_LABEL, scan.RE_GCN]
         values = sorted({v for v in values if v}, key=len, reverse=True)
         return lambda text: ocr_compare.redact(text, values, regexes)

@@ -2201,14 +2201,15 @@ button.btn-skip::before { content: ''; display: inline-block; flex: none; width:
 .ocr-mode.off { opacity: .5; cursor: not-allowed; }
 /* 스캔 전송 안내(노란 칸): 모든 줄을 같은 갈색 굵은 글씨로, 넓은 창에서는 줄마다 한 줄 */
 .ocr-warn > div { color: var(--warn-text); font-weight: 700; line-height: 1.7; }
-@media (min-width: 1200px) { .ocr-warn > div { white-space: nowrap; } }
+/* 줄은 칸 폭에 맞춰 줄바꿈(글자 크기 150%에서도 잘리지 않게, Codex v1 F3) */
 /* 읽는 방식 화면을 한 화면에: 넓은 창에서는 선택 상자 셋을 나란히, 가림 미리보기는 오른쪽에 첫 쪽 위쪽만 */
 .ocr-modes { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .ocr-modes .ocr-mode { margin: 0; }
 @media (min-width: 1100px) { .ocr-modes { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-.ocr-mask { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+.ocr-mask { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 16px; align-items: start; }
 .ocr-mask h3 { margin-top: 0; }
-.ocr-mask-prev { height: 88px; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+/* 첫 쪽 위 40%가 통째로 보이게(A4 세로 기준 폭×1.414×0.4), 전체는 [크게 보기] (Codex v1 F3) */
+.ocr-mask-prev { aspect-ratio: 1 / .566; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
 .ocr-mask-prev img { width: 100%; display: block; }
 @media (max-width: 900px) { .ocr-mask { grid-template-columns: 1fr; } }
 /* 스캔 상태 줄의 '읽은 방식: …' — 옆 버튼과 같은 크기, 노란 바탕·진한 글씨, 누를 수 없음 */
@@ -2231,7 +2232,7 @@ button.small.ocr-read-chip, button.small.ocr-read-chip:hover, button.small.ocr-r
 .ocr-mask .hint { margin: 4px 0 0; }
 .ocr-mask .map-row { flex-wrap: wrap; gap: 8px; }
 .ocr-warn { padding-top: 8px; padding-bottom: 8px; }
-.ocr-warn > div { line-height: 1.55; }
+.ocr-warn > div { line-height: 1.45; }
 .ocr-file .map-row, .ocr-mask .map-row { margin: 0; }
 .ocr-modes + .hint { margin-bottom: 0; }
 .wsection:has(> .ocr-modes) { padding-top: 10px; padding-bottom: 12px; }
