@@ -1063,6 +1063,13 @@ button.ai-btn::before { content: '✧'; font-size: 1.25em; line-height: 1; flex:
 .cw-cand.locked { background: var(--warn-bg); }
 .cw-cand-text { font-size: 12.5px; white-space: pre-wrap; color: var(--text); }
 @media (max-width: 980px) { .cw-body { grid-template-columns: minmax(0, 1fr); } .wiz-picks { grid-template-columns: 1fr; } }
+/* 넓은 창: 입력 칸·[보내기]는 늘 창 아래에 보이고 대화 칸만 줄어들며 스크롤(W2: 125% 노트북에서 [보내기]가 잘리던 것) */
+@media (min-width: 981px) {
+  .sheet-box .sheet-body.cw-body { overflow: hidden; grid-template-rows: minmax(0, 1fr); }
+  .cw-main { overflow: hidden; }
+  .cw-main > .cw-src, .cw-main > .cw-input { flex: none; }
+  .cw-chat { flex: 1 1 0; min-height: 120px; max-height: none; }
+}
 
 /* 앱 창(pywebview)은 글자 선택을 막아 두므로, 글 내용 칸만 끌어 고를 수 있게 푼다(원문에서 고른 부분 넣기·복사) */
 .cmp-text, .tw-cand-text, .cw-msg .cw-text, .cw-cand-text, .rcard-body, .cand-body { -webkit-user-select: text; user-select: text; cursor: text; }
@@ -1931,6 +1938,9 @@ button.file-pdf, button.primary.file-pdf { background: #fdecea; color: #b3261e; 
 button.file-pdf:hover:not(:disabled) { background: #fadad6; border-color: #b3261e; color: #b3261e; }
 button.file-hwpx, button.primary.file-hwpx { background: #eaf2fc; color: #1557a8; border-color: #1f6fd1; box-shadow: none; }
 button.file-hwpx:hover:not(:disabled) { background: #d8e7f9; border-color: #1557a8; color: #1557a8; }
+/* 꺼진 파일 버튼은 다른 버튼처럼 회색(파일 색이 꺼짐 모양을 덮지 않게, Windows 시험 W6). 형식 아이콘은 흐리게 */
+button:is(.file-xlsx, .file-pdf, .file-hwpx):disabled { background: var(--disabled-bg); color: var(--disabled-text); border-color: color-mix(in srgb, var(--disabled-text) 35%, var(--disabled-bg)); box-shadow: none; cursor: not-allowed; }
+button:is(.file-xlsx, .file-pdf, .file-hwpx):disabled::before { opacity: .45; filter: grayscale(1); }
 
 /* 성취기준 / 활동 개요 목록: 분야(항목) 색. 비어 있으면 연하게, 입력되면 진하게 + '✔ 입력됨' */
 #stdList .ib-item[data-category] { background: var(--category-bg); border: 1.5px solid color-mix(in srgb, var(--category-color) 25%, white); color: var(--text); }
@@ -2083,7 +2093,7 @@ textarea.cell-edit { font-size: calc(13px * var(--bs)); }
 .fs-preview { border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); padding: 10px 14px; background: var(--surface); }
 .fs-preview .rcard-body { max-height: none; }
 /* 이미 보낸 행: 보낸 내용 칸이 표 남은 폭을 다 쓰게(앞 세 칸은 내용만큼) */
-.ib-sent-tbl td:not(:last-child) { width: 1%; white-space: nowrap; }
+.ib-sent-tbl :is(th, td):not(:last-child) { width: 1%; white-space: nowrap; } /* 머리글도 한 줄(W4: '원본 위치'가 세로로 꺾이던 것) */
 .ib-sent-tbl .snip { max-width: none; max-height: 180px; font-size: calc(13px * var(--bs)); }
 
 /* 세로로 긴 화면(v0.31.2): 탭 없이 최종안을 맨 위, 기록을 그 아래에 쌓고 가운데 칸 전체를 한 번에 스크롤 */

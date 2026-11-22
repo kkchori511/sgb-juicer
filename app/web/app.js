@@ -444,10 +444,15 @@
   }
   // 되돌릴 수 없는(치명적인) 작업: 안내를 읽고 '확인'을 직접 쳐야 [확인] 버튼이 눌린다.
   const TYPED_WORD = '확인';
+  // 목적격 조사: 마지막 글자에 받침이 있으면 '을', 없으면 '를'(한글이 아니면 '를')
+  function eulReul(w) {
+    const c = String(w || '').trim().slice(-1).charCodeAt(0);
+    return c >= 0xac00 && c <= 0xd7a3 && (c - 0xac00) % 28 ? '을' : '를';
+  }
   function typedConfirm(msg, okText) {
     const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const html = `<div class="typed-conf"><div>${esc(msg).replace(/\n/g, '<br>')}</div>`
-      + `<p class="typed-warn">⚠ 되돌릴 수 없는 작업입니다. 계속하려면 아래 칸에 '<b>${TYPED_WORD}</b>'를 그대로 입력하세요.</p>`
+      + `<p class="typed-warn">⚠ 되돌릴 수 없는 작업입니다. 계속하려면 아래 칸에 '<b>${TYPED_WORD}</b>'${eulReul(TYPED_WORD)} 그대로 입력하세요.</p>`
       + `<input type="text" id="typedConfInp" autocomplete="off" placeholder="${TYPED_WORD}"></div>`;
     const p = modal(html, true, true, okText);
     const ok = $('modalOk');
@@ -1980,7 +1985,7 @@
         el('div', { class: 'sheet-body' }, [
           el('div', { class: 'warn upd-warn', text: info.warning }),
           el('p', { class: 'hint', text: '업데이트 직전에 자료 전체를 백업합니다(설정 > 백업에서 복원 가능). 이 백업은 하루 백업에 밀려 지워지지 않게 따로 보관합니다.' }),
-          el('label', {}, [`내용을 확인했으면 아래 칸에 '${word}'를 그대로 입력하세요.`]), inp,
+          el('label', {}, [`내용을 확인했으면 아래 칸에 '${word}'${eulReul(word)} 그대로 입력하세요.`]), inp,
         ]),
         el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: () => done(null) }), go]),
       );
@@ -2970,11 +2975,12 @@
     if (!list.length) return null;
     const wrap = el('div', { class: 'bundle' });
     const items = el('div', { class: 'bundle-list' });
-    const latest = list[0];
+    // '최신'은 원문(확정한 기록은 목록 맨 앞에 붙임)을 빼고 고른다(Windows 시험 W5)
+    const latest = list.find((x) => x.op !== 'orig');
     const tgl = el('button', { type: 'button', class: 'bundle-tgl' });
     const draw = () => {
       const open = BO.open.has(r.id);
-      tgl.textContent = `${open ? '▾' : '▸'} ${title} ${list.length}개${open ? '' : ` / 최신: ${bundleLabel(latest)} ${(latest.created_at || '').slice(5, 16)}`}`;
+      tgl.textContent = `${open ? '▾' : '▸'} ${title} ${list.length}개${open || !latest ? '' : ` / 최신: ${bundleLabel(latest)} ${(latest.created_at || '').slice(5, 16)}`}`;
       items.hidden = !open;
       items.innerHTML = '';
       if (!open) return;
@@ -4855,8 +4861,14 @@
     Object.keys(u.before).forEach((k) => { u.after[k] = now[k]; });
     st.undo = Object.keys(u.before).length ? u : null;
     if (st.undo) TV.undo.set(rid, st.undo); else TV.undo.delete(rid);
+    tvSyncOrig(st, before.content, now.content);
     st.saved = now;
     tvApplyState(st, r.record);
+  }
+  // 저장·되돌리기 뒤 화면이 들고 있는 원문(r.orig)도 새 글로: [AI 변환] 확인 창 바이트·프롬프트 마법사가 옛 글을 쓰지 않게(W3).
+  // 원문을 고친 경우(원문 = 저장 전 내용)만 바꾼다. 확정본을 고친 경우 원문은 그대로.
+  function tvSyncOrig(st, prevContent, newContent) {
+    if (st && st.r && st.r.orig === prevContent) st.r.orig = newContent;
   }
   // 서버의 기록 상태를 화면에 반영(태그·제외 예정·최종안 확인 필요)
   function tvApplyState(st, rec) {
@@ -4889,7 +4901,9 @@
       st.busy = false;
       if (!r || r.ok === false) { tvMark(st); await alertBox((r && r.error) || '되돌리지 못했습니다.'); return; }
       markSaved();
+      const prevC = st.saved.content;
       st.saved = tvFields(r.record); st.draft = { ...st.saved }; st.undo = null; st.err = null;
+      tvSyncOrig(st, prevC, st.saved.content);
       TV.undo.delete(rid);
       tvApplyState(st, r.record);
       toast('이 화면에서 고치기 전 내용으로 되돌렸습니다.');
@@ -4902,7 +4916,9 @@
     if (copy && !(await tvCopy(st.draft.content))) return;
     const r = await call('record_state', rid);
     if (!r) return;
+    const prevC = st.saved.content;
     st.saved = tvFields(r.record); st.draft = { ...st.saved }; st.err = null; st.undo = null; TV.undo.delete(rid);
+    tvSyncOrig(st, prevC, st.saved.content);
     st.r.closed = !!r.record.closed;
     const old = st.ui && st.ui.card;
     if (old && old.isConnected) old.replaceWith(tvRecordCard(st.r));
@@ -5378,7 +5394,8 @@
     };
     const draw = () => {
       const open = TVB.has(r.id);
-      tgl.textContent = list.length ? `${open ? '▾' : '▸'} ${r.confirmed ? '원문·변환 결과' : '변환 결과'} ${list.length}개${open ? '' : ` / 최신: ${bundleLabel(list[0])} ${(list[0].created_at || '').slice(5, 16)}`}` : '';
+      const latest = list.find((x) => x.op !== 'orig'); // 원문은 '최신'으로 치지 않음(W5)
+      tgl.textContent = list.length ? `${open ? '▾' : '▸'} ${r.confirmed ? '원문·변환 결과' : '변환 결과'} ${list.length}개${open || !latest ? '' : ` / 최신: ${bundleLabel(latest)} ${(latest.created_at || '').slice(5, 16)}`}` : '';
       tgl.hidden = !list.length;
       items.hidden = !open;
       items.innerHTML = '';
@@ -7763,7 +7780,7 @@
           el('span', { class: 'muted', text: `${g.pages.map((x) => x + 1).join('·')}쪽` })]));
         const isSkip = skip.has(p);
         const rv = r.mode === 'hybrid' ? r.review[p] : null;
-        const needText = !rv ? '' : rv.ai_error ? 'Qwen 실패 · CLOVA 글 사용' : rv.big && rv.left ? '통째로 검토 필요' : rv.left ? `${rv.left}개 검토 필요` : '';
+        const needText = !rv ? '' : rv.ai_error ? 'Qwen 실패 / CLOVA 글 사용' : rv.big && rv.left ? '통째로 검토 필요' : rv.left ? `${rv.left}개 검토 필요` : '';
         const toggleSkip = () => { if (isSkip) SC.skipped = SC.skipped.filter((x) => x !== p); else SC.skipped.push(p); renderBatch(); };
         list.appendChild(el('div', { class: 'ref-card', style: isSkip ? 'opacity:.5' : '' }, [
           el('div', { class: 'rcard-head', style: 'flex-wrap:wrap' }, [el('b', { text: `${p + 1}쪽` }),
@@ -7784,9 +7801,10 @@
     })();
   }
   const OCR_MODES = [
-    ['hybrid', '하이브리드 (추천)', 'CLOVA와 Qwen(그림을 보는 AI)이 따로 읽은 뒤, 서로 다르게 읽은 곳만 원본을 보며 고릅니다.'],
-    ['clova', 'CLOVA만', '지금까지와 같습니다.'],
+    // 순서·기본값: CLOVA만(기본) → Qwen만(시험 기능) → 하이브리드(사용자 지정 2026-11-22)
+    ['clova', 'CLOVA만 이용 (기본)', 'CLOVA OCR 하나로 읽습니다. 대부분의 학습지는 이것으로 충분합니다.'],
     ['ai', 'Qwen만 (시험 기능)', 'CLOVA 키 없이 OpenRouter의 Qwen(그림을 보는 AI)으로 읽습니다. 손글씨 정확도는 아직 충분히 검증되지 않았습니다.'],
+    ['hybrid', '하이브리드', '원본 인식이 어렵고(흐린 손글씨, 작은 글씨, 표·그림이 섞인 학습지 등) 세밀한 스캔 확인이 필요할 때 씁니다. CLOVA와 Qwen이 따로 읽은 뒤, 서로 다르게 읽은 곳만 원본을 보며 고릅니다. 두 곳에 보내므로 시간·비용이 더 듭니다.'],
   ];
   function renderScanStart(body, b, sc) {
     const box = el('div', {});
@@ -7795,7 +7813,7 @@
       const ready = await call('clova_ready');
       if (!ready) return;
       const can = { clova: ready.clova, ai: ready.openrouter, hybrid: ready.clova && ready.openrouter };
-      if (!SC.mode || !can[SC.mode]) SC.mode = can.hybrid ? 'hybrid' : can.clova ? 'clova' : 'ai';
+      if (!SC.mode || !can[SC.mode]) SC.mode = can.clova ? 'clova' : can.ai ? 'ai' : 'hybrid'; // 기본은 CLOVA만
       if (SC.mask == null) SC.mask = ready.mask;
       const per = el('input', { type: 'number', class: 'num', min: 1, value: sc.per || 1 });
       const est = el('span', { class: 'muted' });
@@ -7824,7 +7842,7 @@
         el('div', { class: 'wsection', style: 'margin-top:0' }, [el('h3', { text: `🖨 ${sc.filename} / ${sc.pages}쪽` }),
           el('div', { class: 'map-row' }, [el('label', {}, ['학생 1명당 페이지 수', per]), est]),
           el('div', { class: 'hint', text: '단면 스캔은 1, 양면 스캔은 2입니다. 백지가 섞여 있어도 다음 단계에서 페이지를 빼거나 경계를 옮길 수 있습니다.' })]),
-        resume, modeBox, opts, warn,
+        resume || '', modeBox, opts, warn, // DOM append는 null을 'null' 글자로 붙인다(W10) — 빈 값은 ''로
         el('div', { class: 'sheet-foot' }, [el('button', { type: 'button', class: 'file-pdf', text: '다른 PDF 고르기', onclick: () => startScanPick(b) }), el('span', { class: 'spacer' }), startBtn]),
       );
       let unmasked = false; // Qwen만: 가리지 않고 보내기
@@ -7972,7 +7990,7 @@
         shown = r.page;
         head.innerHTML = '';
         head.append(el('h2', { text: `${r.page + 1}쪽 차이 검토` }),
-          r.cmp ? el('span', { class: 'muted', text: r.unreviewed ? `남은 차이 ${r.unreviewed}곳 · 고르지 않은 곳은 CLOVA 글` : '✓ 이 쪽 검토 끝' }) : null,
+          r.cmp ? el('span', { class: 'muted', text: r.unreviewed ? `남은 차이 ${r.unreviewed}곳 / 고르지 않은 곳은 CLOVA 글` : '✓ 이 쪽 검토 끝' }) : '', // append에 null 금지(W10)
           el('span', { class: 'spacer' }),
           el('button', { type: 'button', class: 'small', 'data-nav': '1', text: '◀ 이전 쪽', disabled: r.page <= 0, onclick: () => nav(r.page - 1) }),
           el('button', { type: 'button', class: 'small', 'data-nav': '1', text: '다음 쪽 ▶', disabled: r.page >= total - 1, onclick: () => nav(r.page + 1) }),
@@ -8114,7 +8132,7 @@
       box.style.height = 'auto';
       box.style.width = 'min(500px, 92vw)';
       box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: 'OCR 진행 중' })]), msg,
-        mode !== 'clova' ? el('p', { class: 'hint', text: '중지해도 이미 Qwen에 보낸 쪽은 결과를 받아 저장합니다(비용이 이미 들었으므로). 다시 시작하면 남은 쪽만 읽습니다.' }) : null,
+        mode !== 'clova' ? el('p', { class: 'hint', text: '중지해도 이미 Qwen에 보낸 쪽은 결과를 받아 저장합니다(비용이 이미 들었으므로). 다시 시작하면 남은 쪽만 읽습니다.' }) : '', // append에 null 금지(W10)
         el('div', { class: 'sheet-foot' }, [el('span', {}, ['경과 시간 ', time, ' — 멈춘 게 아니니 기다려 주세요']), el('span', { class: 'spacer' }), stopBtn]));
     });
     SC.start = Date.now();
@@ -8128,14 +8146,14 @@
       if (r.clova) parts.push('CLOVA: 보내는 중');
       if (r.ai_pages) parts.push(`Qwen: 0 / ${r.ai_pages}쪽`);
       if (!parts.length) parts.push('이미 읽은 결과로 정리하는 중…');
-      msg.textContent = parts.join(' · ');
+      msg.textContent = parts.join(' / ');
     });
   }
   function ocrEvent(ev) {
     if (ev.type === 'ocr_progress') {
       SC.prog = SC.prog || {};
       SC.prog[ev.engine || 'clova'] = ev.engine === 'ai' ? `Qwen: ${ev.done} / ${ev.total}쪽` : `CLOVA: ${ev.pages}쪽을 10쪽씩 나눠 읽는 중(${ev.done + 1} / ${ev.total} 구간)`;
-      if (SC.msg) SC.msg.textContent = Object.values(SC.prog).join(' · ');
+      if (SC.msg) SC.msg.textContent = Object.values(SC.prog).join(' / ');
       return;
     }
     clearInterval(SC.timer);

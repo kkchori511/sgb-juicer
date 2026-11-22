@@ -12,6 +12,11 @@ PDFIUM_LOCK = threading.RLock()
 HEAD_LINES = 8  # 학번·이름은 보통 첫 몇 줄(머리글)에 있다
 RE_NO_LABEL = re.compile(r"학[ \t]*번[ \t]*[:：.]?[ \t]*(\d(?:[ \t]*\d){3,5})(?!\d)")
 RE_NAME_LABEL = re.compile(r"(?:이[ \t]*름|성[ \t]*명)[ \t]*[:：.]?[ \t]*([가-힣](?:[ \t]?[가-힣]){1,4})(?![가-힣])")
+# '이름:'이 줄 끝에 있고 이름은 다음 줄에 따로 있는 모양(손글씨 칸을 OCR이 줄을 나눠 읽을 때)
+RE_NAME_LABEL_EOL = re.compile(r"(?:이[ \t]*름|성[ \t]*명)[ \t]*[:：][ \t]*$")  # 쌍점 필수('10399 이름' 같은 줄과 구분)
+RE_NAME_ONLY_LINE = re.compile(r"^[ \t]*([가-힣](?:[ \t]?[가-힣]){1,4})[ \t]*$")
+# 이름으로 잡으면 안 되는 라벨 낱말(머리글 칸 이름)
+RE_NOT_NAME = re.compile(r"^(?:이름|성명|학번|학년|번호|반|번|날짜|일자|과목|주제)")
 RE_GCN = re.compile(r"(\d)[ \t]*학년[ \t]*(\d{1,2})[ \t]*반[ \t]*(\d{1,2})[ \t]*번")
 RE_NO = re.compile(r"(?<!\d)(\d{5})(?!\d)")
 LABEL_WORDS = re.compile(r"(학\s*번|이\s*름|성\s*명|학년|반|번호|번)\s*[:：.]?")
@@ -96,6 +101,17 @@ def extract_ids(text: str, members: list[dict]):
         if m:
             no = m.group(1)
     m = RE_NAME_LABEL.search(head)
+    if m and RE_NOT_NAME.match(re.sub(r"\s", "", m.group(1))):
+        m = None
+    if not m:
+        # '이름:' 줄 끝 → 다음 줄이 이름 하나뿐이면 그 줄
+        head_lines = lines[:HEAD_LINES]
+        for i, line in enumerate(head_lines[:-1]):
+            if RE_NAME_LABEL_EOL.search(line):
+                m = RE_NAME_ONLY_LINE.match(head_lines[i + 1])
+                if m and RE_NOT_NAME.match(re.sub(r"\s", "", m.group(1))):
+                    m = None
+                break
     if m:
         name = re.sub(r"\s", "", m.group(1))
         names = {x["name"] for x in members}
@@ -112,7 +128,7 @@ def extract_ids(text: str, members: list[dict]):
     if not name and no:
         # 학번 바로 뒤의 한글 2~4자
         m = re.search(re.escape(no) + r"\s*([가-힣]{2,4})", head.replace(" ", " "))
-        if m:
+        if m and not RE_NOT_NAME.match(m.group(1)):  # 다음 칸 라벨('이름:')을 이름으로 잡지 않게
             name = m.group(1)
     return no, name
 

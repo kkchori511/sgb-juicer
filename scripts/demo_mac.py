@@ -190,6 +190,9 @@ def _demo_scan(api, hr, year):
     for i in (0, 1):
         q = json.load(open(os.path.join(_FX, f"qwen_p{i + 1}.json"), encoding="utf-8"))["result"]
         ib.scan_store(bid, "ai", ai_page=(i, {"lines": q["lines"], "figures": q["figures"], "cost": 0.0015, "provider": "(시험용)", "model": "qwen/qwen3-vl-235b-a22b-instruct"}))
+    # 아직 읽지 않은 스캔 PDF 묶음: 파일 창 없이 '읽는 방식' 화면과 [OCR 시작](가짜 응답)을 볼 수 있게
+    b2 = ok(api.inbox_create("스캔 PDF(읽기 전 예시)", hr, "career"), "Inbox")["id"]
+    ib.scan_set(b2, os.path.join(_FX, "dummy.pdf"), "스캔_더미학습지_2쪽.pdf")
 
 
 def _demo_xlsx(year, names):
