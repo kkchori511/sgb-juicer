@@ -7,6 +7,10 @@
 
 - 작업 브랜치: `feature/v0.19` (원격과 같음). 원격에 `main` 브랜치는 없다.
 - 최신 릴리스: **[v1.0.1](https://github.com/kkchori511/sgb-juicer/releases/tag/v1.0.1)** (2026-11-22, Windows '애니메이션 효과'가 꺼진 PC에서 인트로·진행 막대가 멈춰 보이던 것 고침 — 움직임 줄이기(prefers-reduced-motion) 규칙을 모두 지움, 사용자 지정: 어느 PC에서나 애니메이션이 살아 있게. 원격 조종(Playwright)으로 붙으면 이 값을 덮어써 재현이 안 되니 화면 찍기로 확인할 것). 그 전 **[v1.0.0](https://github.com/kkchori511/sgb-juicer/releases/tag/v1.0.0)** (2026-11-22, 정식 출시, 커밋 `7c1490a`). 정식 버전 표시와 Windows exe·Mac 소스 지원 범위, 수동 업데이트·자료 복구 안내를 반영했다. 로컬 오프라인 백엔드 시험 50/50, JS 문법 검사 통과. 이전 **v0.36.0**은 Codex 최종 확인 1~5를 반영한 후보였다. 그 전 **v0.35.3** (2026-11-22, 모양 일관성: V자 꺾쇠·큰 세모·버튼은 알약/표시는 둥근 네모). 그 전 **v0.35.2** (화면 다듬기: 스캔 읽는 방식 선택 상자·한 화면, 안내 창 ①②③ 형식·노란 상자, '확인' 입력 창 빨간 ⚠, 제안 설문지 연결). 그 전 **v0.35.1** (2026-11-22, Windows 시험 반영 W1~W10 + 스캔 읽는 방식 기본 'CLOVA만 이용'). 결과·고친 것: `docs/review/windows_test_v035.md`. 그 전 v0.35.0(하이브리드 OCR) 계획은 `docs/plan/ocr-hybrid.md`.
+- **다음 작업 고르기(2026-11-22 정리)** — 어느 컴퓨터에서든 `git pull` 후 아래 중 사용자가 고른 것부터:
+  1. **1.0.0 다음 버전 개선**: 아래 '이어서 할 수 있는 일'의 세 가지(마감 ■ 크게, '통째로 검토'에 [AI로 조합하기], 원본 그림 확대·이동).
+  2. **사용자가 직접 할 확인**: v1.0.1 exe로 [지금 업데이트] 뒤 인트로가 끝까지 움직이는지, 실제 CLOVA·Qwen 스캔 시험, Mac 소스 실행 확인.
+- **Codex 권한 메모**: 옆 창 Codex가 기본 권한(샌드박스)이면 GitHub push·`gh`·herdr 메시지가 막힌다. 필요하면 Codex에서 `/permissions` › 전체 권한, 또는 `codex --sandbox danger-full-access --ask-for-approval on-request`로 다시 켠다. `gh`는 PowerShell에서 `& "C:\Program Files\GitHub CLI\gh.exe"`(Git Bash PATH에 없음).
 - **화면 점검·더미 자료 꺼내 쓰기**: `scripts/e2e_steps/README.md`(다른 컴퓨터에서 `git pull` → `requirements-dev.txt` 설치 → 데모 켜고 점검). 더미 자료는 `scripts/demo_mac.py`와 `tests/fixtures/`에서 매번 새로 만든다.
 - **Windows 화면 시험 자동화**: `scripts/e2e_windows.py` + `scripts/e2e_steps/s01~s12`. 데모를 원격 조종 포트로 켜고(`$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222"`) `.\.venv\Scripts\python scripts\e2e_windows.py` — 새로 켠 데모에서 한 번에 81개 확인(약 4분), 캡처는 `e2e/`. 화면에 'null' 글자도 찾음. 창 크기는 CDP 화면 흉내로. 시험 프로세스에서 자료 sqlite를 열지 말 것(Windows 파일 잠김으로 복원 실패).
 - 스캔 읽는 방식(사용자 지정 2026-11-22): **CLOVA만 이용(기본)** → Qwen만(시험 기능) → 하이브리드(원본 인식이 어렵고 세밀한 확인이 필요할 때).
