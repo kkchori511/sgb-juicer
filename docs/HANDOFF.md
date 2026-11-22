@@ -7,6 +7,7 @@
 
 - 작업 브랜치: `feature/v0.19` (원격과 같음). 원격에 `main` 브랜치는 없다.
 - 최신 릴리스: **[v1.0.0](https://github.com/kkchori511/sgb-juicer/releases/tag/v1.0.0)** (2026-11-22, 정식 출시, 커밋 `7c1490a`). 정식 버전 표시와 Windows exe·Mac 소스 지원 범위, 수동 업데이트·자료 복구 안내를 반영했다. 로컬 오프라인 백엔드 시험 50/50, JS 문법 검사 통과. 이전 **v0.36.0**은 Codex 최종 확인 1~5를 반영한 후보였다. 그 전 **v0.35.3** (2026-11-22, 모양 일관성: V자 꺾쇠·큰 세모·버튼은 알약/표시는 둥근 네모). 그 전 **v0.35.2** (화면 다듬기: 스캔 읽는 방식 선택 상자·한 화면, 안내 창 ①②③ 형식·노란 상자, '확인' 입력 창 빨간 ⚠, 제안 설문지 연결). 그 전 **v0.35.1** (2026-11-22, Windows 시험 반영 W1~W10 + 스캔 읽는 방식 기본 'CLOVA만 이용'). 결과·고친 것: `docs/review/windows_test_v035.md`. 그 전 v0.35.0(하이브리드 OCR) 계획은 `docs/plan/ocr-hybrid.md`.
+- **화면 점검·더미 자료 꺼내 쓰기**: `scripts/e2e_steps/README.md`(다른 컴퓨터에서 `git pull` → `requirements-dev.txt` 설치 → 데모 켜고 점검). 더미 자료는 `scripts/demo_mac.py`와 `tests/fixtures/`에서 매번 새로 만든다.
 - **Windows 화면 시험 자동화**: `scripts/e2e_windows.py` + `scripts/e2e_steps/s01~s12`. 데모를 원격 조종 포트로 켜고(`$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222"`) `.\.venv\Scripts\python scripts\e2e_windows.py` — 새로 켠 데모에서 한 번에 81개 확인(약 4분), 캡처는 `e2e/`. 화면에 'null' 글자도 찾음. 창 크기는 CDP 화면 흉내로. 시험 프로세스에서 자료 sqlite를 열지 말 것(Windows 파일 잠김으로 복원 실패).
 - 스캔 읽는 방식(사용자 지정 2026-11-22): **CLOVA만 이용(기본)** → Qwen만(시험 기능) → 하이브리드(원본 인식이 어렵고 세밀한 확인이 필요할 때).
 - 개발 브랜치 `feature/ocr-hybrid`를 `feature/v0.19`로 합침(빨리 감기, 작업 브랜치는 지움). 다음 작업도 `feature/v0.19`에서.

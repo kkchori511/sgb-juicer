@@ -1,0 +1,3 @@
+# 개발·시험용(앱 실행에는 필요 없음). 설치: .venv 파이썬으로 pip install -r requirements.txt -r requirements-dev.txt
+playwright==1.65.2
+pytest
