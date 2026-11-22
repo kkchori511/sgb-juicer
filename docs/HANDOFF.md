@@ -7,7 +7,8 @@
 
 - 작업 브랜치: `feature/v0.19` (원격과 같음). 원격에 `main` 브랜치는 없다.
 - 최신 릴리스: **v0.35.0** (2026-11-22, 하이브리드 OCR: CLOVA + Qwen 비전). 계획·결정은 `docs/plan/ocr-hybrid.md`, Codex 검토 두 번(`docs/review/codex_ocr_hybrid.md`, `_2.md`) 지적은 모두 고침.
-- 개발 브랜치 `feature/ocr-hybrid`를 `feature/v0.19`로 합침(빨리 감기). 다음 작업도 `feature/v0.19`에서.
+- 개발 브랜치 `feature/ocr-hybrid`를 `feature/v0.19`로 합침(빨리 감기, 작업 브랜치는 지움). 다음 작업도 `feature/v0.19`에서.
+- v0.35.0 뒤 커밋: 차이 검토 버튼 문구 `CLOVA 인식으로 선택` / `Qwen 인식으로 선택`(고른 뒤 `✓ … 인식 선택됨`). 아직 exe에는 없음(다음 릴리스에 들어감).
 - 옛 버전 브랜치(`feature/v0.1` ~ `v0.18`, `design-meta`)는 사용자 결정으로 **그대로 둔다**(정리하자고 묻지 않는다).
 - 이어서 시작할 때: `git fetch --all` → `git checkout feature/v0.19` → `git pull`.
 

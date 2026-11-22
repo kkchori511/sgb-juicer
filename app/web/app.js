@@ -8038,17 +8038,17 @@
             el('div', { class: 'ocr-eng-label', text: eng === 'clova' ? 'CLOVA' : 'Qwen' }),
             el('div', { class: 'ocr-eng-text' }, [d.before, mid === '' ? el('mark', { class: 'ocr-empty', text: '(없음)' }) : el('mark', { text: show(mid) }), d.after]),
             el('button', { type: 'button', class: 'ocr-eng-btn' + (pick === (eng === 'clova' ? 'clova' : 'ai') ? ' picked' : ''),
-              text: pick === (eng === 'clova' ? 'clova' : 'ai') ? `✓ ${eng === 'clova' ? 'CLOVA' : 'Qwen'} 고름` : `${eng === 'clova' ? '①' : '②'} ${eng === 'clova' ? 'CLOVA' : 'Qwen'} 쪽 고르기`,
+              text: pick === (eng === 'clova' ? 'clova' : 'ai') ? `✓ ${eng === 'clova' ? 'CLOVA' : 'Qwen'} 인식 선택됨` : `${eng === 'clova' ? '①' : '②'} ${eng === 'clova' ? 'CLOVA' : 'Qwen'} 인식으로 선택`,
               onclick: () => decide({ d: { [d.id]: { pick: eng === 'clova' ? 'clova' : 'ai' } } }) })]);
           const input = el('input', { type: 'text', value: pick === 'edit' ? c.text : d.clova, style: 'width:12em', placeholder: '고친 글' });
           const sg = ((r.review && r.review.s) || {})[d.id];
           const sgLine = sg ? el('div', { class: sg.new ? 'warn' : 'hint', style: 'margin-top:6px' }, [
-            `💡 AI 제안: ${{ clova: 'CLOVA 쪽', ai: 'Qwen 쪽', merge: '합친 글' }[sg.pick]} "${show(sg.text)}"${sg.reason ? ' — ' + sg.reason : ''}`,
+            `💡 AI 제안: ${{ clova: 'CLOVA 인식', ai: 'Qwen 인식', merge: '합친 글' }[sg.pick]} "${show(sg.text)}"${sg.reason ? ' — ' + sg.reason : ''}`,
             sg.new ? el('b', { text: ' ⚠ 두 후보에 없는 글자를 만들었습니다(그림을 보지 못한 짐작). 원본을 꼭 확인하세요.' }) : null,
             sg.unchecked ? el('b', { text: ' (글이 길어 두 후보에서 나온 글자인지 자동으로 확인하지 못했습니다. 원본을 확인하세요.)' }) : null,
             !pick ? el('button', { type: 'button', class: 'small', style: 'margin-left:6px', text: '이 제안 고르기', onclick: () => decide({ d: { [d.id]: sg.pick === 'merge' ? { pick: 'edit', text: sg.text } : { pick: sg.pick } } }) }) : null]) : null;
           const row = el('div', { class: 'ref-card ocr-diff' + (pick ? ' done' : ''), tabindex: 0 }, [
-            el('div', { class: 'rcard-head' }, [el('b', { text: `차이 ${i + 1}` }), pick ? el('span', { class: 'tag', text: { clova: 'CLOVA 고름', ai: 'Qwen 고름', edit: '직접 고침' }[pick] }) : null]),
+            el('div', { class: 'rcard-head' }, [el('b', { text: `차이 ${i + 1}` }), pick ? el('span', { class: 'tag', text: { clova: '✓ CLOVA 인식 선택됨', ai: '✓ Qwen 인식 선택됨', edit: '직접 고침' }[pick] }) : null]),
             d.box ? crop : el('div', { class: 'muted', text: '(이 곳의 원본 위치를 알 수 없어 왼쪽 원본에서 찾아 주세요)' }),
             el('div', { class: 'ocr-eng-pair' }, [engBox('clova', d.clova), engBox('qwen', d.ai)]),
             sgLine,
@@ -8090,7 +8090,7 @@
         return el('div', {}, [
           el('div', { class: 'warn', text: `두 결과가 크게 다릅니다(비슷한 정도 ${Math.round(r.cmp.ratio * 100)}%). 표·두 단·그림 속 글자가 많은 쪽에서 자주 생깁니다. 원본을 보고 한쪽을 통째로 고르거나 직접 고치세요.` }),
           el('div', { class: 'split2', style: 'margin-top:8px' }, [col('CLOVA', r.clova), col('Qwen', r.ai)]),
-          pick ? el('span', { class: 'tag', style: 'margin-top:6px', text: { clova: 'CLOVA 글 고름', ai: 'Qwen 글 고름', edit: '직접 고침' }[pick] }) : el('p', { class: 'hint', text: '위 [CLOVA 선택]·[Qwen 선택]으로 한쪽을 통째로 고르거나 [직접 입력]하세요. 고르지 않으면 CLOVA 글을 씁니다.' }),
+          pick ? el('span', { class: 'tag', style: 'margin-top:6px', text: { clova: '✓ CLOVA 인식 선택됨', ai: '✓ Qwen 인식 선택됨', edit: '직접 고침' }[pick] }) : el('p', { class: 'hint', text: '위 [CLOVA 선택]·[Qwen 선택]으로 한쪽을 통째로 고르거나 [직접 입력]하세요. 고르지 않으면 CLOVA 글을 씁니다.' }),
         ]);
       }
       function editWhole(r) {
