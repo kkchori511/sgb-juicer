@@ -143,9 +143,14 @@
     const body = [...t.replace(/ /g, '')].map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
     return new RegExp(`(?<![A-Za-z0-9])${body}(?![A-Za-z0-9])`, 'gi');
   }
+  // 쓸 수 있는 글자 밖은 한 글자씩 형광펜(app/banned.py BAD_CHAR·char_repl과 같은 규칙)
+  const BAN_CHAR = /[^가-힣A-Za-z0-9 \n\r.,'()\-~%:/?!]/gu;
+  const banCharRepl = (ch) => ("‘’“”\"`´′″＇＂".includes(ch) ? "작은따옴표(')로" : '·ㆍ･・•∙'.includes(ch) ? "쉼표나 '와/과'로" : '빼거나 한글로');
   function banFind(text) {
     const hits = [];
-    if (!text || !BAN.length) return hits;
+    if (!text) return hits;
+    BAN_CHAR.lastIndex = 0;
+    for (const m of text.matchAll(BAN_CHAR)) hits.push({ a: m.index, b: m.index + m[0].length, word: m[0], repl: banCharRepl(m[0]) });
     BAN.forEach((e) => {
       const ex = [];
       e.except.forEach((w) => { let i = text.indexOf(w); while (i >= 0) { ex.push([i, i + w.length]); i = text.indexOf(w, i + 1); } });
@@ -2252,10 +2257,11 @@
     clearTimeout(c._glowT);
     c._glowT = setTimeout(() => c.classList.remove('glow'), 3200);
   }
+  const UTF8 = new TextEncoder();
   function bytesOf(t) {
-    let n = 0;
-    for (const ch of t || '') { const c = ch.codePointAt(0); n += (c >= 0xac00 && c <= 0xd7a3) || (c >= 0x1100 && c <= 0x11ff) || (c >= 0x3130 && c <= 0x318f) || (c >= 0xa960 && c <= 0xa97f) || (c >= 0xd7b0 && c <= 0xd7ff) ? 3 : 1; }
-    return n;
+    // app/textutil.py count_bytes와 같은 규칙: UTF-8 바이트 + 줄바꿈 2
+    const s = (t || '').replace(/\r\n?/g, '\n');
+    return UTF8.encode(s).length + (s.match(/\n/g) || []).length;
   }
   // 바이트 칩: 2줄 고정 크기(윗줄 'Byte', 아랫줄 '0000/1500'). 앞 숫자 4자리 기준 폭이라 숫자가 바뀌어도 줄이 밀리지 않는다. 넘으면 빨강(넘은 양은 마우스 오버)
   function bytesEl(n, target) {

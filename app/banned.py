@@ -75,10 +75,23 @@ def _pattern(t):
     return re.compile(re.escape(t))
 
 
+# 쓸 수 있는 글자(사용자 지정 2026-11-23): 한글·영문·숫자·띄어쓰기·줄바꿈과 문장부호 . , ' ( ) - ~ % : / ? !
+# 그 밖(큰따옴표·둥근 따옴표·가운뎃점·특수기호·한자·이모지 등)은 한 글자씩 형광펜. app.js의 BAN_CHAR와 같아야 한다.
+BAD_CHAR = re.compile(r"[^가-힣A-Za-z0-9 \n\r.,'()\-~%:/?!]")
+
+
+def char_repl(ch):
+    if ch in "‘’“”\"`´′″＇＂":
+        return "작은따옴표(')로"
+    if ch in "·ㆍ･・•∙":
+        return "쉼표나 '와/과'로"
+    return "빼거나 한글로"
+
+
 def find(text, lib=None):
-    """글에서 찾은 [(시작, 끝, 찾은 글, 대체 표현)] — 겹치면 긴 것 우선."""
+    """글에서 찾은 [(시작, 끝, 찾은 글, 대체 표현)] — 겹치면 긴 것 우선. 쓰면 안 되는 글자도 한 글자씩."""
     lib = load() if lib is None else lib
-    hits = []
+    hits = [(m.start(), m.end(), m.group(0), char_repl(m.group(0))) for m in BAD_CHAR.finditer(text or "")]
     for e in lib:
         ex = [(m.start(), m.end()) for w in e["except"] for m in re.finditer(re.escape(w), text)]
         for t in e["terms"]:
@@ -95,12 +108,18 @@ def find(text, lib=None):
     return out
 
 
+CHAR_RULE = ("\n\n[쓰는 글자 — 항상 지킴]\n"
+             "- 한글·영문·숫자·띄어쓰기·줄바꿈과 문장부호 . , ' ( ) - ~ % : / ? ! 만 쓴다.\n"
+             "- 따옴표는 작은따옴표(')만 쓴다. 큰따옴표(\")·둥근 따옴표(‘ ’ “ ”)는 쓰지 않는다.\n"
+             "- 가운뎃점(·)은 쓰지 않고 쉼표나 '와/과'로 바꾼다. 특수기호(① → ㎝ ※ 등)·한자·이모지도 쓰지 않는다.")
+
+
 def rule():
     lib = load()
     if not lib:
-        return ""
+        return CHAR_RULE
     lines = [f"- {', '.join(e['terms'])} → {e['repl'] or '(일반적인 말로 바꿈)'}" for e in lib]
-    return ("\n\n[기재 유의어 — 생기부에 쓰지 않는 말, 항상 지킴]\n"
+    return CHAR_RULE + ("\n\n[기재 유의어 — 생기부에 쓰지 않는 말, 항상 지킴]\n"
             "- 아래 왼쪽 말(상표·서비스·기관 이름 등)은 결과에 쓰지 않고 오른쪽 대체 표현으로 바꿔 쓴다. 자료에 그 말이 있어도 대체 표현으로 쓴다.\n"
             + "\n".join(lines))
 
