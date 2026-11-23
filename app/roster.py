@@ -35,6 +35,48 @@ def parse_text(text: str, delim: str | None = None) -> list[list[str]]:
     return _clean(rows)
 
 
+def is_csv(path) -> bool:
+    return str(path or "").lower().endswith(".csv")
+
+
+def csv_text(path: str) -> str:
+    """CSV 파일 글: UTF-8(BOM 포함) 먼저, 안 되면 CP949(윈도우 엑셀 '쉼표로 구분' 저장)."""
+    raw = open(path, "rb").read()
+    for enc in ("utf-8-sig", "cp949"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            pass
+    raise ValueError("CSV 글자 인코딩을 알아보지 못했습니다(UTF-8 또는 CP949로 저장해 주세요).")
+
+
+def csv_rows(path: str) -> list[list[str]]:
+    """CSV → 칸 목록(줄·열 자리 그대로 — 줄 번호 안내가 엑셀과 같게). 쉼표가 기본, 쉼표 없이 탭만 있으면 탭."""
+    text = csv_text(path).replace("\r\n", "\n").replace("\r", "\n")
+    first = next((ln for ln in text.split("\n") if ln.strip()), "")
+    delim = "\t" if "\t" in first and "," not in first else ","
+    return [[c.strip() for c in r] for r in csv.reader(io.StringIO(text), delimiter=delim)]
+
+
+def parse_csv(path: str) -> list[list[str]]:
+    """CSV → parse_xlsx와 같은 모양(빈 줄·빈 열 뺌)."""
+    return _clean(csv_rows(path))
+
+
+def table_rows(path: str, prefer=None) -> list[list]:
+    """엑셀(xlsx) 또는 CSV의 표 한 장 → 줄 목록(열 자리 그대로). xlsx는 prefer 이름의 시트, 없으면 첫 시트."""
+    if is_csv(path):
+        return csv_rows(path)
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path, read_only=True, data_only=True)
+    try:
+        ws = wb[prefer] if prefer and prefer in wb.sheetnames else wb.worksheets[0]
+        return [list(r or []) for r in ws.iter_rows(values_only=True)]
+    finally:
+        wb.close()
+
+
 def parse_xlsx(path: str, sheet=None) -> list[list[str]]:
     """sheet: 시트 이름(없으면 첫 번째 시트)."""
     from openpyxl import load_workbook

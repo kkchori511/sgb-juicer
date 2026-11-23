@@ -193,33 +193,28 @@ def template(path, members, designs, dic):
 
 def read_xlsx(path):
     """설계 엑셀 → [{row, sno, name, design}] (빈 줄 건너뜀)."""
-    from openpyxl import load_workbook
+    from . import roster
 
     try:
-        wb = load_workbook(path, read_only=True, data_only=True)
+        it = iter(roster.table_rows(path, "행특 설계"))
     except Exception:
-        raise DbError("엑셀 파일을 열지 못했습니다(xlsx인지 확인하세요).")
-    try:
-        ws = wb["행특 설계"] if "행특 설계" in wb.sheetnames else wb.worksheets[0]
-        it = ws.iter_rows(values_only=True)
-        head = [str(v or "").strip() for v in (next(it, None) or [])]
-        if head[:4] != XHEAD[:4]:
-            raise DbError("행특 설계 엑셀 모양이 아닙니다. [설계 엑셀 양식 내려받기]로 받은 파일에 채워 주세요.")
-        out = []
-        for i, r in enumerate(it, 2):
-            r = [("" if v is None else str(v).strip()) for v in list(r or []) + [None] * 16][:16]
-            if not any(r[2:]):
-                continue
-            areas = {}
-            for k, a in enumerate(AREAS):
-                b = 4 + k * 4
-                areas[a] = {"case": r[b], "kws": [x for x in r[b + 1:b + 4] if x]}
-            try:
-                d = normalize({"type": r[2], "desc": r[3], "areas": areas})
-            except DbError as e:
-                out.append({"row": i, "sno": r[0], "name": r[1], "error": str(e)})
-                continue
-            out.append({"row": i, "sno": r[0], "name": r[1], "design": d})
-        return out
-    finally:
-        wb.close()
+        raise DbError("파일을 열지 못했습니다(xlsx 또는 csv인지 확인하세요).")
+    head = [str(v or "").strip() for v in (next(it, None) or [])]
+    if head[:4] != XHEAD[:4]:
+        raise DbError("행특 설계 엑셀 모양이 아닙니다. [설계 엑셀 양식 내려받기]로 받은 파일에 채워 주세요.")
+    out = []
+    for i, r in enumerate(it, 2):
+        r = [("" if v is None else str(v).strip()) for v in list(r or []) + [None] * 16][:16]
+        if not any(r[2:]):
+            continue
+        areas = {}
+        for k, a in enumerate(AREAS):
+            b = 4 + k * 4
+            areas[a] = {"case": r[b], "kws": [x for x in r[b + 1:b + 4] if x]}
+        try:
+            d = normalize({"type": r[2], "desc": r[3], "areas": areas})
+        except DbError as e:
+            out.append({"row": i, "sno": r[0], "name": r[1], "error": str(e)})
+            continue
+        out.append({"row": i, "sno": r[0], "name": r[1], "design": d})
+    return out

@@ -86,15 +86,11 @@ def rule():
 
 
 def from_xlsx(path):
-    import openpyxl
+    from . import roster
     try:
-        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        rows = [[("" if c is None else str(c).strip()) for c in r] for r in roster.table_rows(path)]
     except Exception:
-        raise DbError("엑셀 파일을 열지 못했습니다. xlsx 파일인지 확인해 주세요.")
-    try:
-        rows = [[("" if c is None else str(c).strip()) for c in r] for r in wb.worksheets[0].iter_rows(values_only=True)]
-    finally:
-        wb.close()
+        raise DbError("파일을 열지 못했습니다. xlsx 또는 csv 파일인지 확인해 주세요.")
     rows = [r for r in rows if any(r)]
     if not rows:
         raise DbError("엑셀에 단어가 없습니다.")

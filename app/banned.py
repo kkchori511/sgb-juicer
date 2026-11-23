@@ -126,15 +126,11 @@ def rule():
 
 def from_xlsx(path):
     """열: 기재 유의어 / 한글·다른 표기 / 대체 표현 / (제외할 말). 머리글 줄('유의어'·'대체' 글이 든 줄) 위는 건너뛴다."""
-    import openpyxl
+    from . import roster
     try:
-        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        rows = [[("" if c is None else str(c).strip()) for c in r] for r in roster.table_rows(path)]
     except Exception:
-        raise DbError("엑셀 파일을 열지 못했습니다. xlsx 파일인지 확인해 주세요.")
-    try:
-        rows = [[("" if c is None else str(c).strip()) for c in r] for r in wb.worksheets[0].iter_rows(values_only=True)]
-    finally:
-        wb.close()
+        raise DbError("파일을 열지 못했습니다. xlsx 또는 csv 파일인지 확인해 주세요.")
     rows = [r + [""] * (4 - len(r)) for r in rows if any(r)]
     head = next((i for i, r in enumerate(rows) if any("유의어" in c for c in r) and any("대체" in c for c in r)), None)
     if head is not None:

@@ -98,6 +98,8 @@ def _copied(prompt, texts, n=20):
 
 SHARED_RULE = ("\n\n[같은 자료를 쓴 다른 학생과 겹치지 않기]\n- 이 원문은 여러 학생이 함께 낸 같은 자료다. [이 학생의 역할]이 있으면 그 역할과 기여를 중심으로 쓴다.\n"
                "- 같은 자료를 쓴 다른 학생과 표현·문장 구성이 50% 이상 다르게 작성한다. 없는 사실을 지어내지 않는다.")
+# 표 한 장을 읽는 곳의 파일 창 종류(xlsx·csv, 사용자 지정 2026-11-24). 엑셀 백업 복구는 시트가 여러 장이라 xlsx만
+TABLE_TYPES = ("표 파일 (*.xlsx;*.csv)", "Excel 파일 (*.xlsx)", "CSV 파일 (*.csv)")
 TAG_TEMP = 0.3  # 태그 AI 변환(시험·나머지 변환·스킬화 검증): 같은 프롬프트면 결과가 고르게 나오도록 무작위성을 낮춘다
 
 
@@ -537,17 +539,8 @@ class Api:
         for path in paths:
             name = os.path.basename(path)
             try:
-                if path.lower().endswith(".csv"):
-                    raw = open(path, "rb").read()
-                    for enc in ("utf-8-sig", "cp949"):
-                        try:
-                            text = raw.decode(enc)
-                            break
-                        except UnicodeDecodeError:
-                            text = None
-                    if text is None:
-                        raise ValueError
-                    rows = roster.parse_text(text)
+                if roster.is_csv(path):
+                    rows = roster.parse_text(roster.csv_text(path))
                 else:
                     rows, pick = self._xlsx_pick(path)
                     if pick:
@@ -1307,7 +1300,7 @@ class Api:
     def banned_import(self, path=None):
         from . import banned
         if path is None:
-            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
+            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=TABLE_TYPES)
             if not res:
                 return {"ok": False, "cancelled": True}
             path = res[0] if isinstance(res, (list, tuple)) else res
@@ -1349,7 +1342,7 @@ class Api:
         """엑셀을 읽어 바로 바꾼다(앞 목록은 화면의 되돌리기로)."""
         from . import vocab
         if path is None:
-            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
+            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=TABLE_TYPES)
             if not res:
                 return {"ok": False, "cancelled": True}
             path = res[0] if isinstance(res, (list, tuple)) else res
@@ -1506,7 +1499,7 @@ class Api:
         """사전 엑셀 고르기 → 바뀌는 수(아직 바꾸지 않음). 바꾸기는 trait_dict_import_apply."""
         from . import trait_dict
         if path is None:
-            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
+            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=TABLE_TYPES)
             if not res:
                 return {"ok": False, "cancelled": True}
             path = res[0] if isinstance(res, (list, tuple)) else res
@@ -1585,7 +1578,7 @@ class Api:
         rec = Records(d)
         rec.slot(gid, "behavior")
         if path is None:
-            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
+            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=TABLE_TYPES)
             if not res:
                 return {"ok": False, "cancelled": True}
             path = res[0] if isinstance(res, (list, tuple)) else res
@@ -2917,11 +2910,16 @@ class Api:
         if token:
             path = self._xlsx_path(token)
         else:
-            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
+            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=TABLE_TYPES)
             if not res:
                 return None, None
             path = res[0] if isinstance(res, (list, tuple)) else res
         self._last_xlsx = path
+        if roster.is_csv(path):
+            try:
+                return roster.parse_csv(path), None
+            except Exception as e:
+                raise db.DbError(str(e) if isinstance(e, ValueError) and "인코딩" in str(e) else "csv 파일을 읽지 못했습니다.")
         try:
             if token:
                 return roster.parse_xlsx(path, sheet), None

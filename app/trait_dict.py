@@ -147,37 +147,32 @@ def to_xlsx(d, path):
 
 def from_xlsx(path):
     """8열 엑셀 → 사전. 첫 시트(또는 '역량요소')의 1행은 머리글."""
-    from openpyxl import load_workbook
+    from . import roster
 
     try:
-        wb = load_workbook(path, read_only=True, data_only=True)
+        it = iter(roster.table_rows(path, "역량요소"))
     except Exception:
-        raise DbError("엑셀 파일을 열지 못했습니다(xlsx인지 확인하세요).")
-    try:
-        ws = wb["역량요소"] if "역량요소" in wb.sheetnames else wb.worksheets[0]
-        it = ws.iter_rows(values_only=True)
-        head = [_s(v, 40) for v in (next(it, None) or [])][:8]
-        if len(head) < 8 or "성격유형" not in head[0] or "키워드" not in head[2]:
-            raise DbError("사전 엑셀 모양이 아닙니다. 1행이 '성격유형 / 성격유형에 따른 설명 / 학업역량 키워드 / …' 8열이어야 합니다.")
-        types, areas = {}, {a: {} for a in AREAS}
-        for r in it:
-            r = list(r or []) + [None] * 8
-            t, td = _s(r[0], 30), _s(r[1], 120)
-            if t and td:
-                types.setdefault(t, [])
-                if td not in types[t]:
-                    types[t].append(td)
-            for k, a in enumerate(AREAS):
-                kw, desc = _s(r[2 + k * 2], 30), _s(r[3 + k * 2], 200)
-                if not kw:
-                    continue
-                e = areas[a].setdefault(kw, {"kw": kw, "desc": desc, "types": []})
-                if desc and not e["desc"]:
-                    e["desc"] = desc
-                if t and t not in e["types"]:
-                    e["types"].append(t)
-    finally:
-        wb.close()
+        raise DbError("파일을 열지 못했습니다(xlsx 또는 csv인지 확인하세요).")
+    head = [_s(v, 40) for v in (next(it, None) or [])][:8]
+    if len(head) < 8 or "성격유형" not in head[0] or "키워드" not in head[2]:
+        raise DbError("사전 엑셀 모양이 아닙니다. 1행이 '성격유형 / 성격유형에 따른 설명 / 학업역량 키워드 / …' 8열이어야 합니다.")
+    types, areas = {}, {a: {} for a in AREAS}
+    for r in it:
+        r = list(r or []) + [None] * 8
+        t, td = _s(r[0], 30), _s(r[1], 120)
+        if t and td:
+            types.setdefault(t, [])
+            if td not in types[t]:
+                types[t].append(td)
+        for k, a in enumerate(AREAS):
+            kw, desc = _s(r[2 + k * 2], 30), _s(r[3 + k * 2], 200)
+            if not kw:
+                continue
+            e = areas[a].setdefault(kw, {"kw": kw, "desc": desc, "types": []})
+            if desc and not e["desc"]:
+                e["desc"] = desc
+            if t and t not in e["types"]:
+                e["types"].append(t)
     d = normalize({"types": [{"name": k, "descs": v} for k, v in types.items()], "areas": {a: list(v.values()) for a, v in areas.items()}})
     if not d["types"]:
         raise DbError("성격유형과 설명이 있는 줄이 없습니다.")
