@@ -226,11 +226,15 @@
   // 펼침·접힘 표시: V자 꺾쇠(펼침 = 아래 V, 접힘 = 오른쪽 >). 글자(▸▾) 대신 CSS로 그린다(사용자 지정 2026-11-22)
   const chev = (open, cls) => el('span', { class: `chev${open ? ' open' : ''}${cls ? ' ' + cls : ''}`, 'aria-hidden': 'true' });
   // 세모 화살표(▲▼◀▶▾)는 버튼·메뉴 안에서 크게 보이게 감싼다(줄 높이는 그대로). 새로 그린 화면도 따라가게 지켜본다
-  const TRI_RE = /[▲▼◀▶▾]/;
+  // 마감 네모(■)도 같은 방식으로 크게(사용자 지정 2026-11-24) — 버튼만이 아니라 안내 줄·범례 등 모든 곳(입력 칸·사용 안내 본문·상태 아이콘 제외)
+  const TRI_RE = /[▲▼◀▶▾■]/;
   function wrapTriText(n) {
     const p = n.parentElement;
-    if (!p || !TRI_RE.test(n.nodeValue) || p.closest('.tri, textarea, option, select') || !p.closest('button, summary')) return;
-    n.replaceWith(...n.nodeValue.split(/([▲▼◀▶▾])/).filter((t) => t).map((t) => (TRI_RE.test(t) && t.length === 1 ? el('span', { class: 'tri', text: t }) : document.createTextNode(t))));
+    if (!p || !TRI_RE.test(n.nodeValue) || p.closest('.tri, .sq, .st-ico, textarea, option, select, .guide-body')) return;
+    const inBtn = !!p.closest('button, summary');
+    if (!inBtn && !n.nodeValue.includes('■')) return;
+    n.replaceWith(...n.nodeValue.split(/([▲▼◀▶▾■])/).filter((t) => t).map((t) => (t === '■' ? el('span', { class: 'sq', text: t })
+      : TRI_RE.test(t) && t.length === 1 && inBtn ? el('span', { class: 'tri', text: t }) : document.createTextNode(t))));
   }
   function bigTriangles(root) {
     if (root.nodeType === 3) { wrapTriText(root); return; }
