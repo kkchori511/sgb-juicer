@@ -120,7 +120,7 @@
     const e = document.createElement(tag);
     Object.entries(attrs || {}).forEach(([k, v]) => {
       if (k === 'class') e.className = v;
-      else if (k === 'drop' || k === 'dropCompact') { /* 아래에서 끌어 놓기 칸으로 */ }
+      else if (k === 'drop') { /* 아래에서 불러오기 상자를 쓰는 버튼으로 */ }
       else if (k === 'text') e.textContent = v;
       else if (k === 'stepText') numberedLabel(e, v);
       else if (k === 'html') e.innerHTML = v;
@@ -132,7 +132,7 @@
     (children || []).forEach((c) => c !== null && c !== undefined && c !== false && e.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c));
     // 안내 문장 안의 원문자는 원래 글자를 보존하고 크기만 키운다(기록 본문·폼 값 제외).
     if (tag === 'p' || (tag === 'span' && e.classList.contains('muted'))) bigCircled(e);
-    if (attrs && attrs.drop) dropZone(e, attrs.drop, { compact: !!attrs.dropCompact });
+    if (attrs && attrs.drop) dropZone(e, attrs.drop);
     if (attrs && typeof attrs.text === 'string' && (e.classList.contains('rcard-body') || e.classList.contains('cand-body')) && !e.classList.contains('rcard-empty')) banMark(e, attrs.text);
     return e;
   }
@@ -299,51 +299,81 @@
     img.addEventListener('load', reset);
     return box;
   }
-  // ---------- 파일 끌어 놓기(사용자 지정 2026-11-24) ----------
-  // 불러오기 버튼을 점선 칸으로: 눌러도(파일 창) 되고 끌어 놓아도 된다. 놓으면 파이썬이 맡아 둔 경로 표(token)를 받아
-  // 그 버튼을 누른 것처럼 실행하고, 버튼의 불러오기 호출이 dropArg()로 그 표를 넘긴다.
+  // ---------- 파일 불러오기 상자(사용자 지정 2026-11-24) ----------
+  // 불러오기 버튼은 모양 그대로. 누르면 상자가 떠서 [파일 불러오기](파일 창) 또는 상자에 끌어 놓기로 고른다.
+  // 끌어 놓으면 파이썬이 맡아 둔 경로 표(token)를 받아 그 버튼의 원래 동작을 실행하고, 불러오기 호출이 dropArg()로 표를 넘긴다.
   let DROP = null;
+  let DROP_BYPASS = false; // 상자에서 고른 뒤 버튼의 원래 동작을 부를 때는 상자를 다시 띄우지 않음
   const dropArg = () => { const d = DROP; DROP = null; return d; };
   function dropZone(btn, exts, opts) {
     if (!btn || btn.dataset.drop) return btn;
-    const o = opts || {};
     btn.dataset.drop = exts;
-    btn.classList.add('drop-zone');
-    if (!o.compact) btn.appendChild(el('small', { class: 'drop-hint', text: '또는 여기에 끌어 놓기' }));
-    btn.title = `${btn.title ? btn.title + '\n' : ''}${exts} 파일을 여기에 끌어 놓거나, 눌러서 고르세요.`;
-    btn.addEventListener('click', (e) => { if (e.isTrusted) DROP = null; }, true); // 직접 누르면 남은 표는 버림(파일 창)
-    btn.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = btn.disabled ? 'none' : 'copy'; btn.classList.add('drag-on'); });
-    btn.addEventListener('dragleave', () => btn.classList.remove('drag-on'));
-    btn.addEventListener('drop', async (e) => {
+    if (opts && opts.multiple) btn.dataset.dropMulti = '1';
+    return btn;
+  }
+  function runDropBtn(btn, token) {
+    DROP = token;
+    DROP_BYPASS = true;
+    try { btn.click(); } finally { DROP_BYPASS = false; }
+    if (token) setTimeout(() => { if (DROP === token) DROP = null; }, 30000);
+  }
+  function openDropBox(btn) {
+    const exts = btn.dataset.drop;
+    const multi = !!btn.dataset.dropMulti;
+    const label = (btn.textContent || '').replace(/[…\s]+$/, '').trim() || '파일 불러오기';
+    const icon = el('div', { class: 'drop-ov-icon', 'aria-hidden': 'true', text: '📥' });
+    const over = el('div', { class: 'drop-ov' }, [icon, el('div', { class: 'drop-ov-text', text: '여기에 놓으세요' })]);
+    let done = false;
+    const close = () => { done = true; back.remove(); document.removeEventListener('keydown', onKey, true); };
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+    const pickBtn = el('button', { type: 'button', class: 'primary drop-pick', text: '파일 불러오기', onclick: () => { close(); runDropBtn(btn, null); } });
+    const box = el('div', { class: 'modal-box drop-box' }, [
+      el('h3', { class: 'drop-title', text: label }),
+      el('p', { class: 'drop-guide', text: '드래그 앤 드롭으로 파일을 끌어오거나 버튼을 눌러 불러오기를 해주세요' }),
+      el('div', { class: 'drop-center' }, [pickBtn]),
+      el('p', { class: 'drop-types', text: `지원 파일: ${exts}${multi ? ' (여러 개 가능)' : ''}` }),
+      el('div', { class: 'modal-actions' }, [el('button', { type: 'button', text: '닫기', onclick: close })]),
+      over]);
+    const back = el('div', { class: 'modal drop-modal' }, [box]);
+    back.addEventListener('mousedown', (e) => { if (e.target === back) close(); });
+    let depth = 0;
+    box.addEventListener('dragenter', (e) => { e.preventDefault(); depth++; box.classList.add('drag-on'); });
+    box.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) box.classList.remove('drag-on'); });
+    box.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+    box.addEventListener('drop', async (e) => {
       e.preventDefault(); // 문서 쪽 처리기(파이썬이 경로를 맡는 곳)까지는 올라가게 stopPropagation은 하지 않음
-      btn.classList.remove('drag-on');
-      document.body.classList.remove('file-dragging');
-      if (btn.disabled) return;
+      depth = 0; box.classList.remove('drag-on');
       const since = Date.now() / 1000;
       let r = null;
       for (let i = 0; i < 20 && !(r && r.token); i++) { r = await api.drop_take(since); if (!(r && r.token)) await new Promise((ok) => setTimeout(ok, 100)); }
-      if (!r || !r.token) { toast('끌어 놓은 파일을 받지 못했습니다. 버튼을 눌러 골라 주세요.', 5000); return; }
-      DROP = r.token;
-      btn.click();
-      setTimeout(() => { if (DROP === r.token) DROP = null; }, 30000);
+      if (done) return;
+      if (!r || !r.token) { toast('끌어 놓은 파일을 받지 못했습니다. [파일 불러오기]를 눌러 골라 주세요.', 5000); return; }
+      close();
+      runDropBtn(btn, r.token);
     });
-    return btn;
+    document.addEventListener('keydown', onKey, true);
+    document.body.appendChild(back);
+    pickBtn.focus();
   }
-  // 점선 칸 밖에 놓으면 창이 파일을 열어 버리지 않게 막고, 끌고 있는 동안 놓을 수 있는 칸을 강조
   function watchFileDrag() {
+    // 불러오기 버튼을 직접 누르면(사람이 누른 클릭만) 원래 동작 대신 상자를 띄움 — 문서 단계에서 먼저 가로챔
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest && e.target.closest('button[data-drop]');
+      if (!b || DROP_BYPASS || !e.isTrusted || b.disabled) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      DROP = null;
+      openDropBox(b);
+    }, true);
+    // 상자 밖에 놓으면 창이 파일을 열어 버리지 않게 막음
     const isFile = (e) => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
-    let t = null;
     document.addEventListener('dragover', (e) => {
-      if (!isFile(e)) return;
-      document.body.classList.add('file-dragging');
-      clearTimeout(t); t = setTimeout(() => document.body.classList.remove('file-dragging'), 300);
-      if (!e.target.closest || !e.target.closest('.drop-zone')) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; }
+      if (!isFile(e) || (e.target.closest && e.target.closest('.drop-box'))) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = 'none';
     });
     document.addEventListener('drop', (e) => {
-      if (!isFile(e) || (e.target.closest && e.target.closest('.drop-zone'))) return;
+      if (!isFile(e) || (e.target.closest && e.target.closest('.drop-box'))) return;
       e.preventDefault();
-      document.body.classList.remove('file-dragging');
-      toast('파일은 점선으로 된 불러오기 칸에 놓아 주세요.', 4000);
+      toast('파일은 불러오기 버튼을 눌러 나오는 상자에 끌어 놓아 주세요.', 4000);
     });
   }
   // 표시용 단계 번호만 원형 숫자 배지로 그린다. 원본 상수·입력값·기록 본문은 바꾸지 않는다.
@@ -1323,7 +1353,7 @@
         directBox(),
         el('div', { class: 'toolbar' }, [
           el('button', { type: 'button', class: 'primary', text: '📋 클립보드에서 추가', onclick: addClip }),
-          dropZone(el('button', { type: 'button', text: '📂 파일 추가(여러 개)', onclick: addFiles }), 'xlsx·csv'),
+          dropZone(el('button', { type: 'button', text: '📂 파일 추가(여러 개)', onclick: addFiles }), 'xlsx·csv', { multiple: true }),
           el('button', { type: 'button', text: '👥 다른 담당 명렬 가져오기', onclick: addCopy }),
           el('button', { type: 'button', text: '+ 한 줄 추가', onclick: () => addLine() }),
           undoBtn, el('span', { class: 'spacer' }), logBox]),
@@ -7481,8 +7511,8 @@
         el('div', { class: 'sh-doc' }, [
           el('div', { class: 'tw-row' }, [el('div', { class: 'col-label', text: '문서 내용' }), count, el('span', { class: 'spacer' }),
             el('button', { type: 'button', class: 'small', text: '📋 붙여넣기', onclick: async () => { const c = await api.read_clipboard(); put(c && c.ok ? c.text : ''); } }),
-            el('button', { type: 'button', class: 'file-pdf small', drop: 'pdf', dropCompact: true, text: 'PDF', title: '글자가 있는 PDF', onclick: async () => { const r2 = await call('standards_read_file', 'pdf', dropArg()); if (r2) put(r2.text); } }),
-            el('button', { type: 'button', class: 'file-hwpx small', drop: 'hwpx', dropCompact: true, text: '한글(hwpx)', onclick: async () => { const r2 = await call('standards_read_file', 'hwpx', dropArg()); if (r2) put(r2.text); } })]),
+            el('button', { type: 'button', class: 'file-pdf small', drop: 'pdf', text: 'PDF', title: '글자가 있는 PDF', onclick: async () => { const r2 = await call('standards_read_file', 'pdf', dropArg()); if (r2) put(r2.text); } }),
+            el('button', { type: 'button', class: 'file-hwpx small', drop: 'hwpx', text: '한글(hwpx)', onclick: async () => { const r2 = await call('standards_read_file', 'hwpx', dropArg()); if (r2) put(r2.text); } })]),
           ta,
           el('div', { class: 'tw-row' }, [el('label', { class: 'inline', style: 'margin:0' }, ['활동명', label]), el('label', { class: 'inline', style: 'margin:0' }, ['날짜', date])]),
           el('div', { class: 'tw-row' }, [el('label', { class: 'inline', style: 'margin:0' }, ['태그', tagSel]), newTag,
@@ -7992,7 +8022,7 @@
         el('div', { class: 'wsection ocr-file', style: 'margin-top:0' }, [el('div', { class: 'map-row' }, [el('b', { class: 'ocr-file-name', text: `🖨 ${sc.filename} / ${sc.pages}쪽` }),
           el('label', { title: '백지가 섞여 있어도 다음 단계에서 페이지를 빼거나 경계를 옮길 수 있습니다.' }, ['학생 1명당 페이지 수 (단면 1 / 양면 2)', per]), est])]),
         resume || '', modeBox, opts, warn, // DOM append는 null을 'null' 글자로 붙인다(W10) — 빈 값은 ''로
-        el('div', { class: 'sheet-foot' }, [dropZone(el('button', { type: 'button', class: 'file-pdf', text: '다른 PDF 고르기', onclick: () => startScanPick(b) }), 'pdf', { compact: true }), el('span', { class: 'spacer' }), startBtn]),
+        el('div', { class: 'sheet-foot' }, [dropZone(el('button', { type: 'button', class: 'file-pdf', text: '다른 PDF 고르기', onclick: () => startScanPick(b) }), 'pdf'), el('span', { class: 'spacer' }), startBtn]),
       );
       let unmasked = false; // Qwen만: 가리지 않고 보내기
       function drawOpts() {
@@ -9428,7 +9458,7 @@
     $('recBulkFinal').addEventListener('click', openFinalBulk);
     $('recTraitBulk').addEventListener('click', () => openTraitBulk());
     $('recTraitTpl').addEventListener('click', traitTemplate);
-    dropZone($('recTraitImp'), 'xlsx·csv', { compact: true });
+    dropZone($('recTraitImp'), 'xlsx·csv');
     $('recTraitImp').addEventListener('click', traitImport);
     $('tdEditBtn').addEventListener('click', openTraitDictEditor);
     $('tdExportBtn').addEventListener('click', async () => { const r = await call('trait_dict_export'); if (r && r.path) toast(`사전 엑셀을 저장했습니다: ${r.path}`, 6000); });
@@ -9651,7 +9681,7 @@
   const appReady = () => { try { if (api && api.app_ready) api.app_ready(); } catch (e) { /* 인트로가 없으면 그만 */ } };
   async function init() {
     watchTriangles(); // 세모 화살표 크게(화면을 그리기 전에 지켜보기 시작)
-    watchFileDrag(); // 파일 끌어 놓기: 점선 칸 밖에 놓은 파일은 열지 않음
+    watchFileDrag(); // 불러오기 상자: 버튼을 누르면 상자, 상자 밖에 놓은 파일은 열지 않음
     try { await initInner(); } finally { appReady(); }
   }
   async function initInner() {

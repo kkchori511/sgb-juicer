@@ -2276,11 +2276,22 @@ button.tag-pick, .tag-pick { border-radius: var(--radius-pill); }
 /* 눌리는 태그 칩(기록 카드의 '● 태그 ▾', 메뉴·버튼 안의 칩)은 알약 그대로 */
 .tag.tag-face, summary span.tag, button span.tag, span.tag[role=button] { border-radius: var(--radius-pill); }
 
-/* ===== 파일 끌어 놓기 칸(사용자 지정 2026-11-24): 불러오기 버튼 = 점선 칸, 눌러도 되고 끌어 놓아도 됨 ===== */
-button.drop-zone { border-style: dashed !important; border-width: 2px !important; border-color: var(--border-strong) !important; }
-button.drop-zone .drop-hint { display: block; font-size: 11px; font-weight: 400; opacity: .75; line-height: 1.2; margin-top: 1px; }
-body.file-dragging button.drop-zone:not(:disabled) { border-color: #2563eb !important; box-shadow: 0 0 0 3px rgba(37, 99, 235, .18); }
-button.drop-zone.drag-on { background: #e8f0fe !important; border-color: #2563eb !important; }
+/* ===== 파일 불러오기 상자(사용자 지정 2026-11-24): 버튼을 누르면 뜨는 상자, 끌어 오면 흐려지며 📥 ===== */
+.drop-modal { z-index: 108; } /* 시트(입력 창) 위, 확인·오류 창(110) 아래 */
+.drop-box { position: relative; width: min(640px, 92vw); min-height: 360px; padding: 32px 36px 24px; text-align: center; display: flex; flex-direction: column; justify-content: center; }
+.drop-box .modal-actions { justify-content: center; margin-top: 22px; }
+.drop-box .drop-title { margin: 0 0 12px; font-size: 18px; }
+.drop-box .drop-guide { margin: 0 0 22px; color: var(--text); line-height: 1.5; font-size: 15px; }
+.drop-box .drop-center { display: flex; justify-content: center; margin: 0 0 18px; }
+.drop-box .drop-pick { min-height: 44px; padding: 0 28px; font-size: 16px; }
+.drop-box .drop-types { align-self: center; margin: 0; padding: 6px 16px; font-size: 15px; font-weight: 700; color: var(--text); background: var(--accent-soft); border: 1px solid var(--border); border-radius: 8px; }
+.drop-box .drop-ov { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  border-radius: inherit; background: rgba(240, 245, 255, .82); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  outline: 3px dashed #2563eb; outline-offset: -10px; pointer-events: none; }
+.drop-box.drag-on .drop-ov { display: flex; }
+.drop-box.drag-on > :not(.drop-ov) { filter: blur(1.5px); opacity: .5; }
+.drop-box .drop-ov-icon { font-size: 72px; line-height: 1; }
+.drop-box .drop-ov-text { font-weight: 700; color: #1d4ed8; }
 
 /* ===== 그림 확대·이동(사용자 지정 2026-11-24): 휠 확대·끌어 이동·[처음 크기] ===== */
 .zoombox { position: relative; overflow: hidden; touch-action: none; cursor: grab; user-select: none; }
