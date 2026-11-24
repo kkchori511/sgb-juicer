@@ -2325,3 +2325,14 @@ button.tag-pick, .tag-pick { border-radius: var(--radius-pill); }
 .merge-box .merge-head b { font-size: 15px; }
 .merge-box .merge-model-name { font-size: 12px; color: var(--ai); }
 .merge-box .merge-body { max-height: 50vh; white-space: pre-wrap; background: var(--input); border: 1px solid var(--ai-soft-pressed); border-radius: 8px; padding: 8px; }
+
+/* 차이 검토 창(사용자 지정 2026-11-24): 왼쪽 = 원본 + 이 쪽 최종 글(검정 상자), 왼쪽만 따로 스크롤 */
+.ocr-review-split { align-items: start; }
+.ocr-review-left { position: sticky; top: 0; max-height: calc(min(860px, 94vh) - 130px); overflow: auto; padding-right: 4px; }
+.ocr-final-box { margin-top: 12px; border: 2px solid var(--text); border-radius: 10px; padding: 10px 12px 12px; background: #fff; }
+.ocr-final-box h3 { margin: 0 0 2px; font-size: 15px; }
+.ocr-final-box .muted { font-size: 12px; margin-bottom: 6px; }
+.ocr-final-text { white-space: pre-wrap; background: var(--input); border: 1px solid var(--border); border-radius: 8px; padding: 8px; line-height: 1.6; }
+/* 통째로 검토: CLOVA(초록)·Qwen(남보라) 각각 상자 */
+.ocr-big-col .ocr-big-text { max-height: 50vh; overflow: auto; white-space: pre-wrap; line-height: 1.6; }
+@media (max-width: 900px) { .ocr-review-left { position: static; max-height: none; } }

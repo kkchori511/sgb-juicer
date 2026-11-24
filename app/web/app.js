@@ -8229,7 +8229,9 @@
         const img = el('img', { alt: `${r.page + 1}쪽`, style: 'width:100%;border:1px solid var(--border);border-radius:8px;background:#fff' });
         api.inbox_page_image(bid, r.page).then((x) => { if (x && x.ok) img.src = x.src; });
         const right = el('div', {});
-        bodyEl.appendChild(el('div', { class: 'split2 ocr-review-split' }, [el('div', {}, [el('div', { class: 'col-label', text: '원본(이 PC 안에서만) — 휠로 확대, 끌어서 이동' }), zoomBox(img)]), right]));
+        // 왼쪽: 원본 아래에 이 쪽 최종 글(검정 테두리 상자) — 왼쪽만 따로 스크롤해 오른쪽 검토와 나란히 비교(사용자 지정 2026-11-24)
+        const finalSlot = el('div', {});
+        bodyEl.appendChild(el('div', { class: 'split2 ocr-review-split' }, [el('div', { class: 'ocr-review-left' }, [el('div', { class: 'col-label', text: '원본(이 PC 안에서만) — 누르면 크게, 휠로 확대, 끌어서 이동' }), zoomBox(img), finalSlot]), right]));
         // 전체 페이지 수정: 이 쪽 전체에 한 번에 적용하는 버튼(맨 위, 검정 테두리 상자)
         if (r.cmp || r.ai_error || r.clova != null || r.ai != null) {
           const texts = r.cmp ? r.cmp.diffs.filter((d) => d.kind === 'text') : [];
@@ -8263,8 +8265,9 @@
             el('label', { class: 'inline', style: 'display:block;margin-top:6px' }, [el('input', { type: 'checkbox', checked: r.figs, onchange: (e) => decide({ figs: e.target.checked }) }), ' 본문에 그림 설명 넣기']),
             el('p', { class: 'hint', text: '그림이 없는데 설명이 있거나 틀렸으면 끄세요. 끄면 CLOVA가 읽은 그림 속 글자가 그대로 남습니다.' })]));
         }
-        right.appendChild(el('div', { class: 'col-label', style: 'margin-top:12px', text: '이 쪽 최종 글(학번·이름 줄은 다음 단계에서 빠짐)' }));
-        right.appendChild(el('div', { class: 'rcard-body', style: 'max-height:none;white-space:pre-wrap;background:var(--input);border:1px solid var(--border);border-radius:8px;padding:8px', text: r.final || '(글자 없음)' }));
+        finalSlot.appendChild(el('div', { class: 'ocr-final-box' }, [
+          el('h3', { text: '이 쪽 최종 글' }), el('div', { class: 'muted', text: '학번·이름 줄은 다음 단계에서 빠집니다' }),
+          el('div', { class: 'ocr-final-text', text: r.final || '(글자 없음)' })]));
         bodyEl.scrollTop = keep;
         const first = bodyEl.querySelector('.ocr-diff:not(.done)');
         if (first && !keep) first.focus();
@@ -8335,10 +8338,11 @@
       }
       function bigPage(r) {
         const pick = r.review && r.review.page;
-        const col = (label, text) => el('div', {}, [el('div', { class: 'col-label', text: label }), el('div', { class: 'rcard-body', style: 'max-height:50vh;white-space:pre-wrap;background:var(--input);border:1px solid var(--border);border-radius:8px;padding:8px', text: text || '(글자 없음)' })]);
+        const col = (label, text) => el('div', { class: `ocr-eng ocr-eng-${label === 'CLOVA' ? 'clova' : 'qwen'} ocr-big-col` }, [
+          el('div', { class: 'ocr-eng-label', text: label }), el('div', { class: 'ocr-big-text', text: text || '(글자 없음)' })]);
         return el('div', {}, [
           el('div', { class: 'warn', text: `두 결과가 크게 다릅니다(비슷한 정도 ${Math.round(r.cmp.ratio * 100)}%). 표·두 단·그림 속 글자가 많은 쪽에서 자주 생깁니다. 원본을 보고 한쪽을 통째로 고르거나 직접 고치세요.` }),
-          el('div', { class: 'split2', style: 'margin-top:8px' }, [col('CLOVA', r.clova), col('Qwen', r.ai)]),
+          el('div', { class: 'ocr-eng-pair' }, [col('CLOVA', r.clova), col('Qwen', r.ai)]),
           mergeBox(r),
           pick ? el('span', { class: 'tag', style: 'margin-top:6px', text: pick === 'edit' && r.review.src === 'merge' ? '✓ AI 조합 글 선택됨' : { clova: '✓ CLOVA 인식 선택됨', ai: '✓ Qwen 인식 선택됨', edit: '직접 고침' }[pick] }) : el('p', { class: 'hint', text: '위 [CLOVA 선택]·[Qwen 선택]으로 한쪽을 통째로 고르거나, [두 결과 조합하기]로 두 글을 합친 글을 받아 쓰거나, [직접 입력]하세요. 고르지 않으면 CLOVA 글을 씁니다.' }),
         ]);
