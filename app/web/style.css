@@ -2318,3 +2318,10 @@ button.tag-pick, .tag-pick { border-radius: var(--radius-pill); }
 .merge-ctl select.merge-model { max-width: 220px; }
 .merge-model-row label { display: flex; align-items: center; gap: 8px; font-weight: 700; }
 .merge-model-row select.merge-model { flex: 1; max-width: none; }
+
+/* AI 조합 글: AI 색(보라) 테두리 상자 안에 제목줄·글·경고·버튼을 묶음 */
+.merge-box { margin-top: 12px; border: 2px solid var(--ai); border-radius: 10px; background: var(--ai-soft); padding: 10px 12px 12px; }
+.merge-box .merge-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; color: var(--ai-pressed); }
+.merge-box .merge-head b { font-size: 15px; }
+.merge-box .merge-model-name { font-size: 12px; color: var(--ai); }
+.merge-box .merge-body { max-height: 50vh; white-space: pre-wrap; background: var(--input); border: 1px solid var(--ai-soft-pressed); border-radius: 8px; padding: 8px; }

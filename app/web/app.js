@@ -8392,7 +8392,7 @@
       function mergeBox(r) {
         const m = r.review && r.review.m;
         if (!m) return null;
-        const body = el('div', { class: 'rcard-body merge-body', style: 'max-height:50vh;white-space:pre-wrap;background:var(--input);border:1px solid var(--border);border-radius:8px;padding:8px' });
+        const body = el('div', { class: 'rcard-body merge-body' });
         const nw = (m.new || []).filter((w) => w);
         if (nw.length) {
           const re = new RegExp(nw.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((a, b) => b.length - a.length).join('|'), 'g');
@@ -8402,12 +8402,13 @@
           body.replaceChildren(...parts);
         } else body.textContent = m.text || '(글자 없음)';
         const using = r.review.page === 'edit' && r.review.src === 'merge';
-        return el('div', { class: 'merge-box', style: 'margin-top:10px' }, [
-          el('div', { class: 'col-label', text: `AI 조합 글 (${modelLabel(m.model || '')})` }), body,
+        // AI가 만든 글이므로 AI 색(보라) 상자로 제목줄부터 버튼까지 묶음(사용자 지정 2026-11-24)
+        return el('div', { class: 'merge-box' }, [
+          el('div', { class: 'merge-head' }, [el('b', { text: 'AI 조합 글' }), el('span', { class: 'merge-model-name', text: modelLabel(m.model || '') })]), body,
           nw.length ? el('div', { class: 'warn', style: 'margin-top:6px', text: `⚠ 두 OCR 글 어디에도 없는 낱말 ${nw.length}개: ${nw.join(' / ')} — 원본을 보고 확인하세요.` }) : null,
           m.left ? el('div', { class: 'warn', style: 'margin-top:6px', text: `⚠ 이름·학번 자리(○) ${m.left}자를 원래 글자로 되돌리지 못했습니다. 조합 글로 쓴 뒤 [직접 입력]으로 고쳐 주세요.` }) : null,
           el('div', { class: 'map-row', style: 'gap:6px;margin-top:6px' }, [
-            el('button', { type: 'button', class: using ? 'primary picked' : 'primary', text: using ? '✓ 조합 글로 쓰는 중' : '조합 글로 쓰기', disabled: using, onclick: () => decide({ page: 'merge' }) }),
+            el('button', { type: 'button', class: using ? 'primary ai-btn picked' : 'primary ai-btn', text: using ? '✓ 조합 글로 쓰는 중' : '조합 글로 쓰기', disabled: using, onclick: () => decide({ page: 'merge' }) }),
             using ? el('span', { class: 'hint', text: '고치려면 위 [직접 입력]' }) : null])]);
       }
       function editWhole(r) {
