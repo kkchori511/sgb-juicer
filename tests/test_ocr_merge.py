@@ -71,7 +71,13 @@ def test_api():
         return ('{"text": "학번: ○○○○○ 이름: ○○○\\n탐구 주제 광합성\\n빛의 세기를 바꾸어 기포 수를 셈\\n결과 표를 그림\\n선생님 확인 도장"}', 0.0012)
 
     openrouter.chat = fake_call
+    # 한꺼번에 조합하기용 표시: 통째로 검토 쪽에 글자 수, 조합 전에는 merged 없음
+    sc = ib._scan(bid)[1]
+    cnt = ib.scan_review_counts(sc)
+    assert cnt[0]["big"] and cnt[0]["left"] and not cnt[0]["merged"] and cnt[0]["chars"][0] > 0, cnt[0]
+    assert "merged" not in cnt[1]
     r = ok(api.inbox_scan_merge(bid, 0, "fix"))
+    assert ib.scan_review_counts(ib._scan(bid)[1])[0]["merged"]  # 조합 글 있음 → 목록 표시가 바뀜
     model, system, user = sent[-1]
     assert model == "fixm" and system.startswith(oc.MERGE_SYSTEM[:20])
     assert "10301" not in user and "김가나" not in user and "○" in user  # 신원 지우고 보냄

@@ -202,10 +202,13 @@ def _demo_scan(api, hr, year):
     big_clova = "학번: 10399 이름: 가나다\n탐구 주제 | 빛의 세기와 광합성\n가설 | 빛이 셀수록 기포가 많다\n결과 | 1단계 3개 2단계 7개 3단계 12개\n결론 | 빛이 셀수록 광합성이 활발함"
     big_qwen = "탐구 주제 빛 세기 광합성\n결과 표\n단계 기포\n1 3\n2 7\n3 12\n느낀 점 실험이 재미있었다"
     lines = lambda t: {"lines": [{"text": x, "box": None} for x in t.split("\n")]}
-    ib.scan_store(b3, "clova", pages=[lines(big_clova), ocr.image_lines(clova["images"][1])])
-    ib.scan_store(b3, "ai", ai_page=(0, {"lines": [{"text": x, "unreadable": False} for x in big_qwen.split("\n")], "figures": [], "cost": 0.0015, "provider": "(시험용)", "model": "qwen/qwen3-vl-235b-a22b-instruct"}))
-    q = json.load(open(os.path.join(_FX, "qwen_p2.json"), encoding="utf-8"))["result"]
-    ib.scan_store(b3, "ai", ai_page=(1, {"lines": q["lines"], "figures": q["figures"], "cost": 0.0015, "provider": "(시험용)", "model": "qwen/qwen3-vl-235b-a22b-instruct"}))
+    # 두 쪽 모두 통째로 검토: [통째로 검토 쪽 한꺼번에 조합하기 (2쪽)]를 볼 수 있게
+    big_clova2 = "실험 과정 | 수조에 수초를 넣고 전등 거리를 바꿈\n측정 | 1분 동안 기포 수\n자료 해석 | 거리가 가까울수록 기포 증가\n더 알고 싶은 점 | 빛의 색에 따른 차이"
+    big_qwen2 = "실험 과정 수초 전등\n거리 기포\n10cm 12\n20cm 7\n30cm 3\n궁금한 점 빛 색깔"
+    qline = lambda t: {"lines": [{"text": x, "unreadable": False} for x in t.split("\n")], "figures": [], "cost": 0.0015, "provider": "(시험용)", "model": "qwen/qwen3-vl-235b-a22b-instruct"}
+    ib.scan_store(b3, "clova", pages=[lines(big_clova), lines(big_clova2)])
+    ib.scan_store(b3, "ai", ai_page=(0, qline(big_qwen)))
+    ib.scan_store(b3, "ai", ai_page=(1, qline(big_qwen2)))
     # 아직 읽지 않은 스캔 PDF 묶음: 파일 창 없이 '읽는 방식' 화면과 [OCR 시작](가짜 응답)을 볼 수 있게
     b2 = ok(api.inbox_create("스캔 PDF(읽기 전 예시)", hr, "career"), "Inbox")["id"]
     ib.scan_set(b2, os.path.join(_FX, "dummy.pdf"), "스캔_더미학습지_2쪽.pdf")

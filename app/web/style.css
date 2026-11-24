@@ -118,6 +118,7 @@ code { background: var(--surface-2); border: 1px solid var(--border); padding: 1
 .app-ver { font-size: 13px; font-weight: 800; color: var(--text-2); }
 .about-face { width: 96px; height: 96px; border-radius: 50%; display: block; margin: 0 auto 8px; }
 .about-maker { font-weight: 800; margin-top: 4px; }
+.about-credit { font-size: 12px; margin-top: 6px; }
 .year-select { width: auto; height: 34px; padding: 4px 10px; font-weight: 700; }
 .archived-badge { background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 999px; padding: 2px 10px; font-size: 13px; font-weight: 700; }
 /* 저장 상태: 상단 가운데 */
@@ -324,6 +325,8 @@ button.small { padding: 3px 9px; font-size: 13px; }
 .sched-add { margin-bottom: 10px; }
 .notice-page { max-width: 980px; }
 .notice-page li { margin-bottom: 6px; }
+.notice-copy { margin: 10px 0 18px; padding: 4px 18px 10px; border-radius: var(--radius); background: var(--warn-bg); border: 1px solid var(--warn-border); }
+.notice-copy h3 { margin-top: 12px; }
 
 /* ---------- 마법사 ---------- */
 .wizard { position: fixed; inset: 0; z-index: 90; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 20px; }
@@ -959,6 +962,8 @@ button.ai-btn::before { content: '✧'; font-size: 1.25em; line-height: 1; flex:
 .direct-tbl tr.row-bad td { background: var(--danger-soft); }
 
 .sel-insert { position: fixed; z-index: 3000; padding: 4px 10px; font-size: 13px; font-weight: 700; border-radius: 8px; background: var(--sel, var(--text-2)); color: var(--input); border: none; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
+button.sel-insert:hover:not(:disabled) { background: color-mix(in srgb, var(--sel, var(--text-2)) 75%, black); color: var(--input); }
+button.sel-insert:active:not(:disabled) { background: color-mix(in srgb, var(--sel, var(--text-2)) 60%, black); color: var(--input); }
 .wiz-dir { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13.5px; word-break: break-all; }
 /* 태그 AI 변환 */
 .tw-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 8px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }

@@ -825,7 +825,10 @@ class Inbox:
             rv = (sc.get("review") or {}).get(str(p)) or {}
             if cp and ap and not ap.get("error") and not cp.get("fail"):
                 cmp = ocr_compare.compare(cp, ap, sc["ai"].get("mask") or 0)
-                out.append({"left": ocr_compare.unreviewed(cmp, rv), "total": sum(1 for d in cmp["diffs"] if d["kind"] == "text"), "big": cmp["big"]})
+                one = {"left": ocr_compare.unreviewed(cmp, rv), "total": sum(1 for d in cmp["diffs"] if d["kind"] == "text"), "big": cmp["big"]}
+                if cmp["big"]:  # 한꺼번에 조합하기: 조합 글이 있는지, 예상 비용용 글자 수
+                    one.update(merged=bool(rv.get("m")), chars=[len(cmp.get("a") or ""), len(cmp.get("b") or "")])
+                out.append(one)
             else:
                 out.append({"left": 0, "total": 0, "big": False, "ai_error": bool(ap and ap.get("error"))})
         return out
