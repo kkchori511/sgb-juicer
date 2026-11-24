@@ -120,6 +120,7 @@
     const e = document.createElement(tag);
     Object.entries(attrs || {}).forEach(([k, v]) => {
       if (k === 'class') e.className = v;
+      else if (k === 'drop' || k === 'dropCompact') { /* 아래에서 끌어 놓기 칸으로 */ }
       else if (k === 'text') e.textContent = v;
       else if (k === 'stepText') numberedLabel(e, v);
       else if (k === 'html') e.innerHTML = v;
@@ -131,6 +132,7 @@
     (children || []).forEach((c) => c !== null && c !== undefined && c !== false && e.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c));
     // 안내 문장 안의 원문자는 원래 글자를 보존하고 크기만 키운다(기록 본문·폼 값 제외).
     if (tag === 'p' || (tag === 'span' && e.classList.contains('muted'))) bigCircled(e);
+    if (attrs && attrs.drop) dropZone(e, attrs.drop, { compact: !!attrs.dropCompact });
     if (attrs && typeof attrs.text === 'string' && (e.classList.contains('rcard-body') || e.classList.contains('cand-body')) && !e.classList.contains('rcard-empty')) banMark(e, attrs.text);
     return e;
   }
@@ -251,6 +253,53 @@
       if (m.type === 'characterData') wrapTriText(m.target);
       else m.addedNodes.forEach(bigTriangles);
     })).observe(document.body, { childList: true, subtree: true, characterData: true });
+  }
+  // ---------- 파일 끌어 놓기(사용자 지정 2026-11-24) ----------
+  // 불러오기 버튼을 점선 칸으로: 눌러도(파일 창) 되고 끌어 놓아도 된다. 놓으면 파이썬이 맡아 둔 경로 표(token)를 받아
+  // 그 버튼을 누른 것처럼 실행하고, 버튼의 불러오기 호출이 dropArg()로 그 표를 넘긴다.
+  let DROP = null;
+  const dropArg = () => { const d = DROP; DROP = null; return d; };
+  function dropZone(btn, exts, opts) {
+    if (!btn || btn.dataset.drop) return btn;
+    const o = opts || {};
+    btn.dataset.drop = exts;
+    btn.classList.add('drop-zone');
+    if (!o.compact) btn.appendChild(el('small', { class: 'drop-hint', text: '또는 여기에 끌어 놓기' }));
+    btn.title = `${btn.title ? btn.title + '\n' : ''}${exts} 파일을 여기에 끌어 놓거나, 눌러서 고르세요.`;
+    btn.addEventListener('click', (e) => { if (e.isTrusted) DROP = null; }, true); // 직접 누르면 남은 표는 버림(파일 창)
+    btn.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = btn.disabled ? 'none' : 'copy'; btn.classList.add('drag-on'); });
+    btn.addEventListener('dragleave', () => btn.classList.remove('drag-on'));
+    btn.addEventListener('drop', async (e) => {
+      e.preventDefault(); // 문서 쪽 처리기(파이썬이 경로를 맡는 곳)까지는 올라가게 stopPropagation은 하지 않음
+      btn.classList.remove('drag-on');
+      document.body.classList.remove('file-dragging');
+      if (btn.disabled) return;
+      const since = Date.now() / 1000;
+      let r = null;
+      for (let i = 0; i < 20 && !(r && r.token); i++) { r = await api.drop_take(since); if (!(r && r.token)) await new Promise((ok) => setTimeout(ok, 100)); }
+      if (!r || !r.token) { toast('끌어 놓은 파일을 받지 못했습니다. 버튼을 눌러 골라 주세요.', 5000); return; }
+      DROP = r.token;
+      btn.click();
+      setTimeout(() => { if (DROP === r.token) DROP = null; }, 30000);
+    });
+    return btn;
+  }
+  // 점선 칸 밖에 놓으면 창이 파일을 열어 버리지 않게 막고, 끌고 있는 동안 놓을 수 있는 칸을 강조
+  function watchFileDrag() {
+    const isFile = (e) => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+    let t = null;
+    document.addEventListener('dragover', (e) => {
+      if (!isFile(e)) return;
+      document.body.classList.add('file-dragging');
+      clearTimeout(t); t = setTimeout(() => document.body.classList.remove('file-dragging'), 300);
+      if (!e.target.closest || !e.target.closest('.drop-zone')) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; }
+    });
+    document.addEventListener('drop', (e) => {
+      if (!isFile(e) || (e.target.closest && e.target.closest('.drop-zone'))) return;
+      e.preventDefault();
+      document.body.classList.remove('file-dragging');
+      toast('파일은 점선으로 된 불러오기 칸에 놓아 주세요.', 4000);
+    });
   }
   // 표시용 단계 번호만 원형 숫자 배지로 그린다. 원본 상수·입력값·기록 본문은 바꾸지 않는다.
   function numberedLabel(node, value) {
@@ -1229,7 +1278,7 @@
         directBox(),
         el('div', { class: 'toolbar' }, [
           el('button', { type: 'button', class: 'primary', text: '📋 클립보드에서 추가', onclick: addClip }),
-          el('button', { type: 'button', text: '📂 파일 추가(여러 개)', onclick: addFiles }),
+          dropZone(el('button', { type: 'button', text: '📂 파일 추가(여러 개)', onclick: addFiles }), 'xlsx·csv'),
           el('button', { type: 'button', text: '👥 다른 담당 명렬 가져오기', onclick: addCopy }),
           el('button', { type: 'button', text: '+ 한 줄 추가', onclick: () => addLine() }),
           undoBtn, el('span', { class: 'spacer' }), logBox]),
@@ -1341,7 +1390,7 @@
       if (r) await addParsed([{ ...r, file: label }], label, true);
     }
     async function addFiles() {
-      const r = await call('roster_from_xlsx');
+      const r = await call('roster_from_xlsx', null, null, dropArg());
       if (!r) return;
       const files = [...r.files];
       const errors = [...(r.errors || [])];
@@ -1658,7 +1707,7 @@
     });
   }
   async function shareImportSheet() {
-    const r = await call('share_open');
+    const r = await call('share_open', null, dropArg());
     if (!r || !r.preview) return;
     const pv = r.preview;
     const pick = {};
@@ -3454,7 +3503,7 @@
   }
   const tdAfter = async (msg) => { TD = null; await renderTraitDictSettings(); if (msg) toast(msg); if (R.sno && R.slot && R.slot.item === 'behavior' && document.querySelector('[data-panel-content=records]:not([hidden])')) { await traitDict(); renderRecords(); } };
   async function tdImport() {
-    const r = await call('trait_dict_import_check');
+    const r = await call('trait_dict_import_check', null, dropArg());
     if (!r || !r.diff) return;
     const f = (x) => `추가 ${x.add} / 바뀜 ${x.change} / 빠짐 ${x.gone}`;
     const html = `<div class="ai-conf"><b>${escHtml(r.name)}</b>로 사전을 바꿀까요?<table>`
@@ -3560,7 +3609,7 @@
   async function traitImport() {
     if (!R.slot || R.slot.item !== 'behavior') return;
     if (R.sno && !(await runPending(traitSaveKey()))) return;
-    const r = await call('trait_import_check', R.slot.group_id);
+    const r = await call('trait_import_check', R.slot.group_id, null, dropArg());
     if (!r || !r.rows) return;
     const ok = r.rows.filter((x) => x.state !== 'error');
     openSheet((box) => {
@@ -4420,11 +4469,11 @@
         const readBtn = el('button', { type: 'button', class: 'primary', text: '열·학생 연결 확인 →' });
         readBtn.addEventListener('click', async () => { lastText = ta.value; const r = await call('existing_parse', gid, item, ta.value, false); if (r) preview(r); });
         foot.append(el('span', { class: 'spacer' }), el('button', { type: 'button', text: '취소', onclick: closeSheet }),
-          el('button', { type: 'button', class: 'file-xlsx', text: 'xlsx 불러오기', onclick: async () => {
-            let r = await call('existing_parse', gid, item, null, true);
+          dropZone(el('button', { type: 'button', class: 'file-xlsx', text: 'xlsx·csv 불러오기', onclick: async () => {
+            let r = await call('existing_parse', gid, item, null, true, null, null, dropArg());
             if (r && r.sheets) { const sh = await pickSheets(r, false); r = sh ? await call('existing_parse', gid, item, null, true, r.token, sh[0]) : null; }
             if (r) { lastText = ''; preview(r); }
-          } }), readBtn);
+          } }), 'xlsx·csv'), readBtn);
         setTimeout(() => ta.focus(), 50);
       };
       const preview = async (pz) => {
@@ -7172,13 +7221,13 @@
         el('p', { text: '자료를 가져오세요. 엑셀에서 학생 칸과 내용 칸을 드래그해 복사하면 셀마다 기록 한 건으로 나눕니다.' }),
         el('div', { class: 'src-btns' }, [
           el('button', { type: 'button', class: 'file-xlsx no-ficon primary', text: '📋 엑셀 붙여넣기(클립보드)', onclick: async () => { const c = await api.read_clipboard(); const t = c && c.ok ? c.text : ''; if (!t.trim()) { toast('클립보드가 비어 있습니다. 아래 칸에 직접 붙여넣어도 됩니다.'); ta.focus(); return; } loadSource(() => call('inbox_source_text', b.id, t)); } }),
-          el('button', { type: 'button', class: 'file-xlsx', text: 'xlsx 불러오기', onclick: () => loadSource(async () => {
-            const r = await call('inbox_source_xlsx', b.id);
+          el('button', { type: 'button', class: 'file-xlsx', drop: 'xlsx·csv', text: 'xlsx·csv 불러오기', onclick: () => loadSource(async () => {
+            const r = await call('inbox_source_xlsx', b.id, null, null, dropArg());
             if (!r || !r.sheets) return r;
             const sh = await pickSheets(r, false);
             return sh ? call('inbox_source_xlsx', b.id, r.token, sh[0]) : null;
           }) }),
-          el('button', { type: 'button', class: 'file-pdf', text: '스캔 PDF (CLOVA OCR)', onclick: () => startScanPick(b) }),
+          dropZone(el('button', { type: 'button', class: 'file-pdf', text: '스캔 PDF (CLOVA OCR)', onclick: () => startScanPick(b) }), 'pdf'),
           el('button', { type: 'button', title: '학번 없는 모둠·개인 보고서처럼 한 문서를 고른 학생 모두에게 같은 원문으로 넣습니다', text: '📄 한 문서 → 여러 학생', onclick: () => { IB.shared = sharedState(b, b.meta.shared); renderBatch(); } }),
         ]),
         ta,
@@ -7387,8 +7436,8 @@
         el('div', { class: 'sh-doc' }, [
           el('div', { class: 'tw-row' }, [el('div', { class: 'col-label', text: '문서 내용' }), count, el('span', { class: 'spacer' }),
             el('button', { type: 'button', class: 'small', text: '📋 붙여넣기', onclick: async () => { const c = await api.read_clipboard(); put(c && c.ok ? c.text : ''); } }),
-            el('button', { type: 'button', class: 'file-pdf small', text: 'PDF', title: '글자가 있는 PDF', onclick: async () => { const r2 = await call('standards_read_file', 'pdf'); if (r2) put(r2.text); } }),
-            el('button', { type: 'button', class: 'file-hwpx small', text: '한글(hwpx)', onclick: async () => { const r2 = await call('standards_read_file', 'hwpx'); if (r2) put(r2.text); } })]),
+            el('button', { type: 'button', class: 'file-pdf small', drop: 'pdf', dropCompact: true, text: 'PDF', title: '글자가 있는 PDF', onclick: async () => { const r2 = await call('standards_read_file', 'pdf', dropArg()); if (r2) put(r2.text); } }),
+            el('button', { type: 'button', class: 'file-hwpx small', drop: 'hwpx', dropCompact: true, text: '한글(hwpx)', onclick: async () => { const r2 = await call('standards_read_file', 'hwpx', dropArg()); if (r2) put(r2.text); } })]),
           ta,
           el('div', { class: 'tw-row' }, [el('label', { class: 'inline', style: 'margin:0' }, ['활동명', label]), el('label', { class: 'inline', style: 'margin:0' }, ['날짜', date])]),
           el('div', { class: 'tw-row' }, [el('label', { class: 'inline', style: 'margin:0' }, ['태그', tagSel]), newTag,
@@ -7779,7 +7828,7 @@
       if (go) { showPanel('settings'); showSettingsTab('conn'); $('clovaGuide').open = true; $('clovaGuide').scrollIntoView(); }
       return;
     }
-    const r = await call('inbox_scan_pick', b.id);
+    const r = await call('inbox_scan_pick', b.id, dropArg());
     if (!r) return;
     SC.starts = null;
     SC.mode = null; SC.mask = null; SC.startBid = null; // 새 PDF는 CLOVA만·설정의 가림 비율로 다시(Codex v1 F2)
@@ -7898,7 +7947,7 @@
         el('div', { class: 'wsection ocr-file', style: 'margin-top:0' }, [el('div', { class: 'map-row' }, [el('b', { class: 'ocr-file-name', text: `🖨 ${sc.filename} / ${sc.pages}쪽` }),
           el('label', { title: '백지가 섞여 있어도 다음 단계에서 페이지를 빼거나 경계를 옮길 수 있습니다.' }, ['학생 1명당 페이지 수 (단면 1 / 양면 2)', per]), est])]),
         resume || '', modeBox, opts, warn, // DOM append는 null을 'null' 글자로 붙인다(W10) — 빈 값은 ''로
-        el('div', { class: 'sheet-foot' }, [el('button', { type: 'button', class: 'file-pdf', text: '다른 PDF 고르기', onclick: () => startScanPick(b) }), el('span', { class: 'spacer' }), startBtn]),
+        el('div', { class: 'sheet-foot' }, [dropZone(el('button', { type: 'button', class: 'file-pdf', text: '다른 PDF 고르기', onclick: () => startScanPick(b) }), 'pdf', { compact: true }), el('span', { class: 'spacer' }), startBtn]),
       );
       let unmasked = false; // Qwen만: 가리지 않고 보내기
       function drawOpts() {
@@ -8489,8 +8538,8 @@
         el('button', { type: 'button', class: 'link', text: '단계·학생 수준 바꾸기', onclick: () => { rosterSel = SD.gid; showPanel('roster'); } })]),
       el('div', { class: 'toolbar edit-only' }, [
         el('button', { type: 'button', text: '📋 붙여넣기(클립보드)', onclick: async () => { const c = await api.read_clipboard(); const t = c && c.ok ? (c.text || '').trim() : ''; if (!t) { toast('클립보드가 비어 있습니다. 칸에 직접 붙여넣어도 됩니다.'); return; } put(t, '붙여넣기'); } }),
-        el('button', { type: 'button', class: 'file-pdf', text: 'PDF 불러오기', title: '글자가 있는 교육과정 PDF', onclick: async () => { const r2 = await call('standards_read_file', 'pdf'); if (r2) put(r2.text, r2.file); } }),
-        el('button', { type: 'button', class: 'file-hwpx', text: '한글(hwpx) 불러오기', onclick: async () => { const r2 = await call('standards_read_file', 'hwpx'); if (r2) put(r2.text, r2.file); } }),
+        el('button', { type: 'button', class: 'file-pdf', drop: 'pdf', text: 'PDF 불러오기', title: '글자가 있는 교육과정 PDF', onclick: async () => { const r2 = await call('standards_read_file', 'pdf', dropArg()); if (r2) put(r2.text, r2.file); } }),
+        el('button', { type: 'button', class: 'file-hwpx', drop: 'hwpx', text: '한글(hwpx) 불러오기', onclick: async () => { const r2 = await call('standards_read_file', 'hwpx', dropArg()); if (r2) put(r2.text, r2.file); } }),
         el('button', { type: 'button', class: 'primary', title: '단원·성취기준·수준(A~E)별로 줄을 맞춰 보기 좋게 정리합니다. 원문 글자는 바꾸지 않습니다.', text: '✨ 보기 좋게 정리', onclick: formatStd }),
         el('button', { type: 'button', class: 'ai-btn', title: '복사할 때 수식이 빠져 비어 보이는 곳만 AI로 채우거나 앞뒤를 잇습니다. 원문 글자는 그대로 둡니다.', text: '빈 곳 AI로 채우기', onclick: fillGaps }),
         el('label', { class: 'inline', style: 'margin:0', title: '규칙으로 판단 못 한 줄이 있을 때·빈 곳 채우기에 쓰는 모델' }, ['정리 모델', fmtModel]),
@@ -8704,8 +8753,8 @@
         ta.value = text;
         tools.append(
           el('button', { type: 'button', text: '📋 붙여넣기(클립보드)', onclick: async () => { const c = await api.read_clipboard(); const t = c && c.ok ? (c.text || '').trim() : ''; if (!t) { toast('클립보드가 비어 있습니다. 칸에 직접 붙여넣어도 됩니다.'); return; } put(t, '붙여넣기'); } }),
-          el('button', { type: 'button', class: 'file-pdf', text: 'PDF 불러오기', onclick: async () => { const r2 = await call('standards_read_file', 'pdf'); if (r2) put(r2.text, r2.file); } }),
-          el('button', { type: 'button', class: 'file-hwpx', text: '한글(hwpx) 불러오기', onclick: async () => { const r2 = await call('standards_read_file', 'hwpx'); if (r2) put(r2.text, r2.file); } }));
+          el('button', { type: 'button', class: 'file-pdf', drop: 'pdf', text: 'PDF 불러오기', onclick: async () => { const r2 = await call('standards_read_file', 'pdf', dropArg()); if (r2) put(r2.text, r2.file); } }),
+          el('button', { type: 'button', class: 'file-hwpx', drop: 'hwpx', text: '한글(hwpx) 불러오기', onclick: async () => { const r2 = await call('standards_read_file', 'hwpx', dropArg()); if (r2) put(r2.text, r2.file); } }));
         body.append(ta);
       }
       tools.append(el('button', { type: 'button', class: 'ai-btn', title: '한 줄에 활동 하나로 나누고 맞춤법만 고칩니다. 없는 내용은 더하지 않습니다.', text: 'AI로 다듬기', onclick: tidy }),
@@ -9198,9 +9247,10 @@
     };
     $('xlsxBackupBtn').addEventListener('click', (e) => xlsxSave(false, e.currentTarget));
     $('xlsxFinalBtn').addEventListener('click', (e) => xlsxSave(true, e.currentTarget));
+    dropZone($('xlsxRestoreBtn'), 'xlsx');
     $('xlsxRestoreBtn').addEventListener('click', async () => {
       if (!(await leaveOk())) return;
-      const info = await rawCall('xlsx_restore_check');
+      const info = await rawCall('xlsx_restore_check', dropArg());
       if (!info || info.cancelled) return;
       if (!info.ok) { alertBox(info.error || '엑셀 파일을 확인하지 못했습니다.'); return; }
       const cnt = Object.entries(info.counts).map(([k, v]) => `${k} ${v}`).join(' / ');
@@ -9270,18 +9320,22 @@
     $('recBulkFinal').addEventListener('click', openFinalBulk);
     $('recTraitBulk').addEventListener('click', () => openTraitBulk());
     $('recTraitTpl').addEventListener('click', traitTemplate);
+    dropZone($('recTraitImp'), 'xlsx·csv', { compact: true });
     $('recTraitImp').addEventListener('click', traitImport);
     $('tdEditBtn').addEventListener('click', openTraitDictEditor);
     $('tdExportBtn').addEventListener('click', async () => { const r = await call('trait_dict_export'); if (r && r.path) toast(`사전 엑셀을 저장했습니다: ${r.path}`, 6000); });
+    dropZone($('tdImportBtn'), 'xlsx·csv');
     $('tdImportBtn').addEventListener('click', tdImport);
     $('vcSaveBtn').addEventListener('click', () => vocabSave('세특 어휘를 저장했습니다.'));
     $('vcOn').addEventListener('change', () => vocabSave($('vcOn').checked ? '세특 AI 변환에 어휘 목록을 붙입니다.' : '세특 어휘 목록을 붙이지 않습니다.'));
     ['vcVerbs', 'vcEvals'].forEach((id) => $(id).addEventListener('input', () => { $(id === 'vcVerbs' ? 'vcVerbsN' : 'vcEvalsN').textContent = `${vcWords($(id).value).length}개 (저장 전)`; }));
     $('shareExportBtn').addEventListener('click', shareExportSheet);
+    dropZone($('shareImportBtn'), 'sgbset');
     $('shareImportBtn').addEventListener('click', shareImportSheet);
+    dropZone($('vcImportBtn'), 'xlsx·csv');
     $('vcImportBtn').addEventListener('click', async () => {
       const prev = await call('vocab_get');
-      const r = await mutate('vocab_import');
+      const r = await mutate('vocab_import', null, dropArg());
       if (!r || r.cancelled) return;
       vcShow(r.vocab, false);
       actionToast(`'${r.name}'에서 활동 동사 ${r.vocab.verbs.length}개, 평가 / 정도 표현 ${r.vocab.evals.length}개를 읽어 바꿨습니다.`, '되돌리기', async () => { const u = await mutate('vocab_save', prev.vocab); if (u) { vcShow(u.vocab, prev.is_default); toast('앞 목록으로 되돌렸습니다.'); } }, 20000);
@@ -9289,7 +9343,8 @@
     $('bnQ').addEventListener('input', () => { BN.q = $('bnQ').value.trim(); bnDraw(); });
     $('bnAddBtn').addEventListener('click', () => { BN.rows.unshift({ terms: '', repl: '', except: '' }); BN.q = ''; $('bnQ').value = ''; bnMarkDirty(); bnDraw(); const f = $('bnTable').querySelector('tr:nth-child(2) input'); if (f) f.focus(); });
     $('bnSaveBtn').addEventListener('click', async () => { const prev = await call('banned_get'); const r = await mutate('banned_save', bnLib()); if (r) bnAfter(r.lib, `기재 유의어 ${r.lib.length}개를 저장했습니다.`, prev && prev.lib); });
-    $('bnImportBtn').addEventListener('click', async () => { const prev = await call('banned_get'); const r = await mutate('banned_import'); if (r && !r.cancelled) bnAfter(r.lib, `'${r.name}'에서 기재 유의어 ${r.lib.length}개를 읽어 바꿨습니다.`, prev && prev.lib); });
+    dropZone($('bnImportBtn'), 'xlsx·csv');
+    $('bnImportBtn').addEventListener('click', async () => { const prev = await call('banned_get'); const r = await mutate('banned_import', null, dropArg()); if (r && !r.cancelled) bnAfter(r.lib, `'${r.name}'에서 기재 유의어 ${r.lib.length}개를 읽어 바꿨습니다.`, prev && prev.lib); });
     $('bnExportBtn').addEventListener('click', async () => { const r = await call('banned_export'); if (r && r.path) toast(`저장했습니다: ${r.path}`, 5000); });
     $('bnResetBtn').addEventListener('click', async () => {
       if (!(await confirmBox('기재 유의어를 기본 목록으로 되돌립니다. 지금 목록은 지워집니다(먼저 엑셀로 내려받아 둘 수 있습니다).', '되돌리기'))) return;
@@ -9488,6 +9543,7 @@
   const appReady = () => { try { if (api && api.app_ready) api.app_ready(); } catch (e) { /* 인트로가 없으면 그만 */ } };
   async function init() {
     watchTriangles(); // 세모 화살표 크게(화면을 그리기 전에 지켜보기 시작)
+    watchFileDrag(); // 파일 끌어 놓기: 점선 칸 밖에 놓은 파일은 열지 않음
     try { await initInner(); } finally { appReady(); }
   }
   async function initInner() {

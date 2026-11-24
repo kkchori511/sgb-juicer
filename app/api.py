@@ -123,6 +123,67 @@ class Api:
 
     def attach(self, window):
         self._window = window
+        self._drops, self._drop_lock, self._drop_hooked = {}, threading.Lock(), False
+        try:
+            window.events.loaded += self._hook_drop
+        except Exception:
+            pass
+
+    # ---------- 파일 끌어 놓기(사용자 지정 2026-11-24) ----------
+    # 창 도구(pywebview)는 문서에 drop 처리기를 단 경우에만 놓은 파일의 실제 경로를 알려 준다.
+    # 놓으면 경로를 잠깐 맡아 두고(_on_drop), 화면은 drop_take로 받은 표(token)를 각 불러오기 함수의 drop 인자로 넘긴다.
+    DROP_KEEP = 60  # 맡아 둔 경로를 몇 초 동안 쓸 수 있나
+
+    def _hook_drop(self):
+        if self._drop_hooked:
+            return
+        try:
+            from webview.dom import DOMEventHandler
+            self._window.dom.document.events.drop += DOMEventHandler(self._on_drop, True, False)
+            self._drop_hooked = True
+        except Exception as e:
+            updater.log(f"끌어 놓기 연결 실패: {type(e).__name__}")
+
+    def _on_drop(self, e):
+        files = ((e or {}).get("dataTransfer") or {}).get("files") or []
+        paths = [f["pywebviewFullPath"] for f in files if isinstance(f, dict) and f.get("pywebviewFullPath")]
+        with self._drop_lock:
+            self._drops["last"] = (time.time(), paths)
+
+    def drop_take(self, since=0):
+        """화면이 방금 놓은 파일을 가져간다 → {token, names}. 아직 없으면 token 없음(화면이 잠깐 뒤 다시 부름).
+        since: 화면에서 놓은 때(초) — 그보다 앞서 맡아 둔 것(다른 곳에 놓았던 것)은 쓰지 않는다."""
+        import uuid
+        with self._drop_lock:
+            now = time.time()
+            t, paths = self._drops.get("last", (0, []))
+            if not paths or t < (since or 0) - 2:
+                return {"ok": True, "token": None}
+            del self._drops["last"]
+            for k in [k for k, v in self._drops.items() if now - v[0] > self.DROP_KEEP]:
+                del self._drops[k]
+            tok = uuid.uuid4().hex[:12]
+            self._drops[tok] = (now, paths)
+        return {"ok": True, "token": tok, "names": [os.path.basename(x) for x in paths]}
+
+    def _open_dialog(self, types, drop=None, multiple=False):
+        """파일 창을 열거나, drop(끌어 놓은 파일 표)이 있으면 그 파일을 쓴다 → 경로 목록 또는 None(취소)."""
+        if not drop:
+            res = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=multiple, file_types=types)
+            return (list(res) if isinstance(res, (list, tuple)) else [res]) if res else None
+        with self._drop_lock:
+            t, paths = self._drops.pop(drop, (0, []))
+        if not paths:
+            raise db.DbError("끌어 놓은 파일을 다시 찾지 못했습니다. 한 번 더 끌어 놓아 주세요.")
+        exts = {x.lower() for ty in types for x in re.findall(r"\*(\.[A-Za-z0-9]+)", ty)}
+        bad = [os.path.basename(x) for x in paths if exts and os.path.splitext(x)[1].lower() not in exts]
+        if bad:
+            raise db.DbError(f"{', '.join(sorted(exts))} 파일만 놓을 수 있습니다: {', '.join(bad)}")
+        if any(not os.path.isfile(x) for x in paths):
+            raise db.DbError("폴더가 아니라 파일을 놓아 주세요.")
+        if not multiple and len(paths) > 1:
+            raise db.DbError("파일 하나만 놓아 주세요.")
+        return paths
 
     # ---------- 실행 인트로 ----------
     INTRO_MIN = 4.8  # 오렌지를 세 번 짜는 동작(1.6초 × 3)을 다 보여 준 뒤 본 창을 연다
@@ -510,7 +571,7 @@ class Api:
         return path
 
     @safe
-    def roster_from_xlsx(self, token=None, sheets=None):
+    def roster_from_xlsx(self, token=None, sheets=None, drop=None):
         """명렬 파일을 여러 개 한꺼번에 고를 수 있다(xlsx·csv). 파일마다 읽은 결과와 오류를 돌려준다.
         시트가 여러 개인 xlsx는 ask로 돌려주고, 화면에서 고른 시트(여러 개 가능)를 token·sheets로 다시 부른다."""
         if token:
@@ -530,8 +591,7 @@ class Api:
             if not files:
                 raise db.DbError("읽은 명렬이 없습니다.\n" + "\n".join(errors or ["시트를 하나 이상 골라 주세요."]))
             return {"files": files, "errors": errors, "ask": []}
-        result = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True,
-                                                 file_types=("명렬 파일 (*.xlsx;*.csv)", "Excel 파일 (*.xlsx)", "CSV 파일 (*.csv)"))
+        result = self._open_dialog(("명렬 파일 (*.xlsx;*.csv)", "Excel 파일 (*.xlsx)", "CSV 파일 (*.csv)"), drop, multiple=True)
         if not result:
             return {"ok": False, "cancelled": True}
         paths = list(result) if isinstance(result, (list, tuple)) else [result]
@@ -1297,10 +1357,10 @@ class Api:
         return {"lib": banned.reset()}
 
     @safe
-    def banned_import(self, path=None):
+    def banned_import(self, path=None, drop=None):
         from . import banned
         if path is None:
-            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=TABLE_TYPES)
+            res = self._open_dialog(TABLE_TYPES, drop)
             if not res:
                 return {"ok": False, "cancelled": True}
             path = res[0] if isinstance(res, (list, tuple)) else res
@@ -1338,11 +1398,11 @@ class Api:
         return {"vocab": vocab.reset()}
 
     @safe
-    def vocab_import(self, path=None):
+    def vocab_import(self, path=None, drop=None):
         """엑셀을 읽어 바로 바꾼다(앞 목록은 화면의 되돌리기로)."""
         from . import vocab
         if path is None:
-            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=TABLE_TYPES)
+            res = self._open_dialog(TABLE_TYPES, drop)
             if not res:
                 return {"ok": False, "cancelled": True}
             path = res[0] if isinstance(res, (list, tuple)) else res
@@ -1403,11 +1463,11 @@ class Api:
         return {"path": path, "counts": {k: (len(v) if isinstance(v, list) else 1) for k, v in pkg["items"].items()}}
 
     @safe
-    def share_open(self, path=None):
+    def share_open(self, path=None, drop=None):
         """꾸러미 파일을 읽어 미리보기(가져오기는 share_import로)."""
         from . import share
         if path is None:
-            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("설정 꾸러미 (*.sgbset)", "모든 파일 (*.*)"))
+            res = self._open_dialog(("설정 꾸러미 (*.sgbset)", "모든 파일 (*.*)"), drop)
             if not res:
                 return {"ok": False, "cancelled": True}
             path = res[0] if isinstance(res, (list, tuple)) else res
@@ -1495,11 +1555,11 @@ class Api:
         return {"path": path}
 
     @safe
-    def trait_dict_import_check(self, path=None):
+    def trait_dict_import_check(self, path=None, drop=None):
         """사전 엑셀 고르기 → 바뀌는 수(아직 바꾸지 않음). 바꾸기는 trait_dict_import_apply."""
         from . import trait_dict
         if path is None:
-            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=TABLE_TYPES)
+            res = self._open_dialog(TABLE_TYPES, drop)
             if not res:
                 return {"ok": False, "cancelled": True}
             path = res[0] if isinstance(res, (list, tuple)) else res
@@ -1571,14 +1631,14 @@ class Api:
         return {"path": path}
 
     @safe
-    def trait_import_check(self, gid, path=None):
+    def trait_import_check(self, gid, path=None, drop=None):
         """설계 엑셀 고르기 → 학생 찾기 결과(아직 넣지 않음). 넣기는 trait_import_apply."""
         from . import trait
         d = self._db()
         rec = Records(d)
         rec.slot(gid, "behavior")
         if path is None:
-            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=TABLE_TYPES)
+            res = self._open_dialog(TABLE_TYPES, drop)
             if not res:
                 return {"ok": False, "cancelled": True}
             path = res[0] if isinstance(res, (list, tuple)) else res
@@ -2303,10 +2363,10 @@ class Api:
         return {}
 
     @safe
-    def standards_read_file(self, kind):
+    def standards_read_file(self, kind, drop=None):
         """PDF(글자 있는 문서) 또는 hwpx에서 글자를 읽어 돌려준다. 저장은 화면에서 확인 뒤."""
         types = ("PDF 파일 (*.pdf)",) if kind == "pdf" else ("한글 문서 (*.hwpx)",)
-        res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=types)
+        res = self._open_dialog(types, drop)
         if not res:
             return {"ok": False, "cancelled": True}
         path = res[0] if isinstance(res, (list, tuple)) else res
@@ -2742,13 +2802,13 @@ class Api:
 
     # ---------- 이미 쓴 생기부 일괄 넣기 ----------
     @safe
-    def existing_parse(self, gid, item, text=None, from_xlsx=False, token=None, sheet=None):
+    def existing_parse(self, gid, item, text=None, from_xlsx=False, token=None, sheet=None, drop=None):
         """이미 쓴 생기부: 붙여넣은 글 또는 xlsx를 읽고 열을 알아본다(NEIS 업로드 형식 포함).
         시트가 여러 개면 {sheets, token}을 돌려주고, 고른 시트를 token·sheet로 다시 부른다."""
         d = self._db()
         Records(d).slot(gid, item)
         if from_xlsx:
-            raw, pick = self._read_xlsx(token, sheet)
+            raw, pick = self._read_xlsx(token, sheet, drop)
             if pick or raw is None:
                 return pick or {"ok": False, "cancelled": True}
         else:
@@ -2884,9 +2944,9 @@ class Api:
         return {"opts": self._ib().set_source(bid, raw, "paste"), "raw": raw}
 
     @safe
-    def inbox_source_xlsx(self, bid, token=None, sheet=None):
+    def inbox_source_xlsx(self, bid, token=None, sheet=None, drop=None):
         self._editable()
-        raw, pick = self._read_xlsx(token, sheet)
+        raw, pick = self._read_xlsx(token, sheet, drop)
         if pick or raw is None:
             return pick or {"ok": False, "cancelled": True}
         if not raw:
@@ -2905,12 +2965,12 @@ class Api:
             return {"opts": self._ib().set_source(bid, table, "xlsx", label, preset), "raw": table}
         return {"opts": self._ib().set_source(bid, raw, "xlsx", label), "raw": raw}
 
-    def _read_xlsx(self, token, sheet):
+    def _read_xlsx(self, token, sheet, drop=None):
         """파일 하나 고르기 → (rows, None) / 시트가 여럿이면 (None, 고르기 정보) / 취소면 (None, None)."""
         if token:
             path = self._xlsx_path(token)
         else:
-            res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=TABLE_TYPES)
+            res = self._open_dialog(TABLE_TYPES, drop)
             if not res:
                 return None, None
             path = res[0] if isinstance(res, (list, tuple)) else res
@@ -2939,9 +2999,9 @@ class Api:
                 "mask": cfg["ocr_mask"], "consent": cfg["ocr_ai_consent"]}
 
     @safe
-    def inbox_scan_pick(self, bid):
+    def inbox_scan_pick(self, bid, drop=None):
         self._editable()
-        res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("PDF 파일 (*.pdf)",))
+        res = self._open_dialog(("PDF 파일 (*.pdf)",), drop)
         if not res:
             return {"ok": False, "cancelled": True}
         path = res[0] if isinstance(res, (list, tuple)) else res
@@ -3365,10 +3425,10 @@ class Api:
         return {"path": path, "year": year}
 
     @safe
-    def xlsx_restore_check(self):
+    def xlsx_restore_check(self, drop=None):
         """복구할 엑셀 고르기 → 파일 정보(학년도·만든 때·버전·자료 수). 실제 복구는 xlsx_restore_run."""
         from . import xlsx_backup
-        res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel 파일 (*.xlsx)",))
+        res = self._open_dialog(("Excel 파일 (*.xlsx)",), drop)
         if not res:
             return {"ok": False, "cancelled": True}
         path = res[0] if isinstance(res, (list, tuple)) else res

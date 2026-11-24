@@ -2275,3 +2275,9 @@ button.tag-pick, .tag-pick { border-radius: var(--radius-pill); }
 .st-chip, .tv-slot-head .tv-src, .tv-src { border-radius: var(--radius-sm); }
 /* 눌리는 태그 칩(기록 카드의 '● 태그 ▾', 메뉴·버튼 안의 칩)은 알약 그대로 */
 .tag.tag-face, summary span.tag, button span.tag, span.tag[role=button] { border-radius: var(--radius-pill); }
+
+/* ===== 파일 끌어 놓기 칸(사용자 지정 2026-11-24): 불러오기 버튼 = 점선 칸, 눌러도 되고 끌어 놓아도 됨 ===== */
+button.drop-zone { border-style: dashed !important; border-width: 2px !important; border-color: var(--border-strong) !important; }
+button.drop-zone .drop-hint { display: block; font-size: 11px; font-weight: 400; opacity: .75; line-height: 1.2; margin-top: 1px; }
+body.file-dragging button.drop-zone:not(:disabled) { border-color: #2563eb !important; box-shadow: 0 0 0 3px rgba(37, 99, 235, .18); }
+button.drop-zone.drag-on { background: #e8f0fe !important; border-color: #2563eb !important; }
