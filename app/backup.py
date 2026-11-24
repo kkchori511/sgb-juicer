@@ -9,7 +9,9 @@
 import datetime as dt
 import shutil
 import sqlite3
+import threading
 import time
+from contextlib import contextmanager
 
 from . import db
 from .paths import backup_dir, data_dir
@@ -24,6 +26,27 @@ DONE = "완료"
 STAGE = ".복원준비"
 PREV = ".복원이전"
 JOURNAL = ".복원중"
+PUBLISHING = ".게시중"  # 복사로 게시하는 중 표시: 남아 있으면(도중에 꺼짐) 목록에 안 보이고 prune이 지운다
+
+# 백업을 만드는 중인지(창 닫기가 기다리게). 여러 스레드에서 겹칠 수 있어 수를 센다
+_busy = 0
+_busy_lock = threading.Lock()
+
+
+@contextmanager
+def _working():
+    global _busy
+    with _busy_lock:
+        _busy += 1
+    try:
+        yield
+    finally:
+        with _busy_lock:
+            _busy -= 1
+
+
+def busy() -> bool:
+    return _busy > 0
 
 
 def _new_name(reason=""):
@@ -47,8 +70,12 @@ def _publish(tmp, dest, tries=20, wait=0.5):
             if i + 1 < tries:
                 time.sleep(wait)
     try:
-        shutil.copytree(tmp, dest, ignore=shutil.ignore_patterns(DONE))
+        # 게시 중 표시를 먼저 두고 복사 → 완료 표시 → 게시 중 표시 지우기. 도중에 꺼지면 표시가 남아 목록에 안 보임
+        dest.mkdir(parents=True)
+        (dest / PUBLISHING).write_text("ok", encoding="utf-8")
+        shutil.copytree(tmp, dest, ignore=shutil.ignore_patterns(DONE, PUBLISHING), dirs_exist_ok=True)
         (dest / DONE).write_text("ok", encoding="utf-8")
+        (dest / PUBLISHING).unlink()
     except BaseException:
         shutil.rmtree(dest, ignore_errors=True)
         raise
@@ -57,6 +84,11 @@ def _publish(tmp, dest, tries=20, wait=0.5):
 
 def make(reason="", protect=()) -> str:
     """임시 폴더에 다 만든 뒤 이름을 바꿔 게시한다. 도중에 실패하면 목록에 남지 않는다."""
+    with _working():
+        return _make(reason, protect)
+
+
+def _make(reason, protect):
     years = db.list_years()
     if not years:
         return ""
@@ -80,8 +112,8 @@ def make(reason="", protect=()) -> str:
 
 
 def _dirs():
-    """게시된 백업 폴더(점으로 시작하는 작성 중 폴더 제외)."""
-    return [p for p in backup_dir().iterdir() if p.is_dir() and not p.name.startswith(".")]
+    """게시된 백업 폴더(점으로 시작하는 작성 중 폴더, 복사로 게시하다 멈춘 폴더 제외)."""
+    return [p for p in backup_dir().iterdir() if p.is_dir() and not p.name.startswith(".") and not (p / PUBLISHING).exists()]
 
 
 def prune(keep=KEEP, protect=()):
@@ -89,6 +121,12 @@ def prune(keep=KEEP, protect=()):
         if p.is_dir() and p.name.startswith(".작성중_") and p.name[len(".작성중_"):] not in protect:
             try:
                 if dt.datetime.now().timestamp() - p.stat().st_mtime > 3600:
+                    shutil.rmtree(p, ignore_errors=True)
+            except OSError:
+                pass
+        elif p.is_dir() and (p / PUBLISHING).exists() and p.name not in protect:  # 복사로 게시하다 멈춘 폴더
+            try:
+                if dt.datetime.now().timestamp() - (p / PUBLISHING).stat().st_mtime > 3600:
                     shutil.rmtree(p, ignore_errors=True)
             except OSError:
                 pass

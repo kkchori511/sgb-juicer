@@ -9315,6 +9315,9 @@
   // ---------- 파이썬 → 화면 이벤트 ----------
   window.onAppEvent = function (ev) {
     switch (ev.type) {
+      case 'notice': // 파이썬이 알릴 한 줄(예: 백업 중이라 닫기를 기다림)
+        toast(ev.text, 6000);
+        break;
       case 'update_available':
         showUpdate(ev);
         break;

@@ -3586,6 +3586,12 @@ class Api:
         self.save_window()
         if self._close_ok or not self._window:
             return True
+        if backup.busy():  # 백업 중이면 끝날 때까지 기다렸다가 평소처럼 닫는다(사용자 지정 2026-11-24)
+            self._emit({"type": "notice", "text": "자료를 백업하는 중입니다. 백업이 끝나면 창이 닫힙니다."})
+            if not getattr(self, "_close_wait", False):
+                self._close_wait = True
+                threading.Thread(target=self._close_after_backup, daemon=True).start()
+            return False
         now = time.time()
         if now - self._close_asked < 8:
             return True
@@ -3597,6 +3603,20 @@ class Api:
 
     def update_state(self):
         return {"ok": True, "ready": getattr(self, "_update_ready", "")}
+
+    def _close_after_backup(self, limit=300):
+        import time
+        t0 = time.time()
+        while backup.busy() and time.time() - t0 < limit:  # 너무 오래 걸리면(5분) 그대로 닫기로
+            time.sleep(0.2)
+        self._close_wait = False
+        self._close_asked = 0.0
+        w = self._window
+        if w:
+            try:
+                w.evaluate_js("setTimeout(function(){ if (window.__beforeClose) window.__beforeClose(); else window.pywebview.api.close_app(); }, 0); 0")
+            except Exception:
+                self.close_app()
 
     def close_app(self):
         self._close_ok = True
