@@ -254,6 +254,51 @@
       else m.addedNodes.forEach(bigTriangles);
     })).observe(document.body, { childList: true, subtree: true, characterData: true });
   }
+  // ---------- 그림 확대·이동(사용자 지정 2026-11-24) ----------
+  // box 안의 img를 휠(마우스 자리 중심)·[＋][－]로 확대, 끌어서 이동, 두 번 누르거나 [처음 크기]로 되돌림. 그림은 칸 밖으로 빠지지 않게
+  function zoomBox(img, box) {
+    box = box || el('div', {});
+    if (img.parentNode !== box) box.appendChild(img);
+    box.classList.add('zoombox');
+    img.draggable = false;
+    let z = 1, x = 0, y = 0;
+    const W = () => box.clientWidth, H = () => box.clientHeight;
+    const clamp = () => {
+      const iw = img.offsetWidth * z, ih = img.offsetHeight * z;
+      x = iw <= W() ? 0 : Math.min(0, Math.max(W() - iw, x));
+      y = ih <= H() ? 0 : Math.min(0, Math.max(H() - ih, y));
+    };
+    const apply = () => { clamp(); img.style.transform = `translate(${x}px, ${y}px) scale(${z})`; box.classList.toggle('zoomed', z > 1); pct.textContent = `${Math.round(z * 100)}%`; };
+    const zoomAt = (nz, mx, my) => { nz = Math.min(8, Math.max(1, nz)); x = mx - (mx - x) * (nz / z); y = my - (my - y) * (nz / z); z = nz; apply(); };
+    const reset = () => { z = 1; x = 0; y = 0; apply(); };
+    const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+    const pct = el('span', { class: 'zb-pct', text: '100%' });
+    const bar = el('div', { class: 'zb-bar' }, [
+      el('button', { type: 'button', class: 'zb-btn', text: '＋', title: '크게', onclick: (e) => { stop(e); zoomAt(z * 1.5, W() / 2, H() / 2); } }),
+      el('button', { type: 'button', class: 'zb-btn', text: '－', title: '작게', onclick: (e) => { stop(e); zoomAt(z / 1.5, W() / 2, H() / 2); } }),
+      pct,
+      el('button', { type: 'button', class: 'zb-btn zb-reset', text: '처음 크기', title: '처음 크기로(그림을 두 번 눌러도 됨)', onclick: (e) => { stop(e); reset(); } })]);
+    box.appendChild(bar);
+    box.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const r = box.getBoundingClientRect();
+      zoomAt(z * (e.deltaY < 0 ? 1.2 : 1 / 1.2), e.clientX - r.left, e.clientY - r.top);
+    }, { passive: false });
+    let drag = null;
+    box.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || e.target.closest('.zb-bar')) return;
+      drag = { px: e.clientX, py: e.clientY, x, y };
+      box.setPointerCapture(e.pointerId);
+      box.classList.add('dragging');
+    });
+    box.addEventListener('pointermove', (e) => { if (!drag) return; x = drag.x + e.clientX - drag.px; y = drag.y + e.clientY - drag.py; apply(); });
+    const end = () => { drag = null; box.classList.remove('dragging'); };
+    box.addEventListener('pointerup', end);
+    box.addEventListener('pointercancel', end);
+    box.addEventListener('dblclick', (e) => { if (!e.target.closest('.zb-bar')) reset(); });
+    img.addEventListener('load', reset);
+    return box;
+  }
   // ---------- 파일 끌어 놓기(사용자 지정 2026-11-24) ----------
   // 불러오기 버튼을 점선 칸으로: 눌러도(파일 창) 되고 끌어 놓아도 된다. 놓으면 파이썬이 맡아 둔 경로 표(token)를 받아
   // 그 버튼을 누른 것처럼 실행하고, 버튼의 불러오기 호출이 dropArg()로 그 표를 넘긴다.
@@ -7968,14 +8013,16 @@
           // 첫 쪽 위 40%가 통째로 보이게 줄여 보여 주고, [크게 보기]로 첫 쪽 전체(Codex v1 F3)
           const bigBtn = el('button', { type: 'button', class: 'small', text: '크게 보기', onclick: () => {
             if (!img.src) return;
-            modal(`<p class="hint">Qwen에 보낼 첫 쪽 그림입니다(흰 부분이 가린 곳, 가림 ${Math.round(effMask() * 100)}%). 다른 쪽은 배치가 다를 수 있습니다.</p><img src="${img.src}" alt="첫 쪽 전체" style="width:100%;max-width:760px;display:block;margin:0 auto;border:1px solid var(--border)">`, false, true);
+            modal(`<p class="hint">Qwen에 보낼 첫 쪽 그림입니다(흰 부분이 가린 곳, 가림 ${Math.round(effMask() * 100)}%). 다른 쪽은 배치가 다를 수 있습니다.</p><div class="zb-modal"><img src="${img.src}" alt="첫 쪽 전체" style="width:100%;display:block"></div>`, false, true);
+            const m = $('modalMsg').querySelector('.zb-modal');
+            if (m) zoomBox(m.querySelector('img'), m);
           } });
           const secL = el('div', { class: 'ocr-mask-left' }, [
             el('div', { class: 'map-row' }, [el('b', { text: 'Qwen에 보낼 때 머리글(학번·이름) 가리기' }), range, pct, bigBtn]),
             el('p', { class: 'hint', text: '오른쪽 첫 쪽 미리보기에서 학번·이름 칸이 흰색으로 덮이게 맞추세요(이 PC 안에서 처리).' }),
             lockedMask != null ? el('p', { class: 'hint', style: 'color:var(--warn-text);font-weight:700', text: `이미 Qwen에 보낸 쪽이 있어 처음 가림 비율(${Math.round(lockedMask * 100)}%)로 이어 읽습니다. 비율을 바꾸려면 OCR을 처음부터 다시 해야 합니다.` }) : '']);
           if (lockedMask != null) range.disabled = true;
-          const sec = el('div', { class: 'wsection ocr-mask' }, [secL, el('div', { class: 'ocr-mask-prev', title: '첫 쪽 위 40% — 전체는 [크게 보기]' }, [img])]);
+          const sec = el('div', { class: 'wsection ocr-mask' }, [secL, zoomBox(img, el('div', { class: 'ocr-mask-prev', title: '첫 쪽 위 40% — 끌어서 아래도 보고, 휠로 확대. 전체는 [크게 보기]' }))]);
           if (SC.mode === 'ai') {
             secL.appendChild(el('label', { class: 'inline', style: 'display:block;margin-top:6px' }, [
               el('input', { type: 'checkbox', checked: unmasked, onchange: async (e) => {
@@ -8129,7 +8176,7 @@
         const img = el('img', { alt: `${r.page + 1}쪽`, style: 'width:100%;border:1px solid var(--border);border-radius:8px;background:#fff' });
         api.inbox_page_image(bid, r.page).then((x) => { if (x && x.ok) img.src = x.src; });
         const right = el('div', {});
-        bodyEl.appendChild(el('div', { class: 'split2 ocr-review-split' }, [el('div', {}, [el('div', { class: 'col-label', text: '원본(이 PC 안에서만)' }), img]), right]));
+        bodyEl.appendChild(el('div', { class: 'split2 ocr-review-split' }, [el('div', {}, [el('div', { class: 'col-label', text: '원본(이 PC 안에서만) — 휠로 확대, 끌어서 이동' }), zoomBox(img)]), right]));
         // 전체 페이지 수정: 이 쪽 전체에 한 번에 적용하는 버튼(맨 위, 검정 테두리 상자)
         if (r.cmp || r.ai_error || r.clova != null || r.ai != null) {
           const texts = r.cmp ? r.cmp.diffs.filter((d) => d.kind === 'text') : [];
@@ -8178,7 +8225,8 @@
         texts.forEach((d, i) => {
           const c = dec[d.id];
           const pick = c ? c.pick : null;
-          const crop = el('img', { alt: '원본 줄', style: 'width:100%;max-height:120px;object-fit:contain;object-position:left;background:#fff;border:1px solid var(--border);border-radius:6px' });
+          const crop = el('img', { alt: '원본 줄', style: 'display:block;max-width:100%;max-height:120px' });
+          const cropBox = zoomBox(crop, el('div', { class: 'zb-crop' }));
           if (d.box) api.inbox_scan_crop(bid, r.page, d.box, r.w, r.h, d.clip || null).then((x) => { if (x && x.ok) crop.src = x.src; });
           // 엔진별 결과 칸(CLOVA 초록·Qwen 보라)과 그 아래 같은 폭 고르기 버튼
           const engBox = (eng, mid) => el('div', { class: `ocr-eng ocr-eng-${eng}` }, [
@@ -8196,7 +8244,7 @@
             !pick ? el('button', { type: 'button', class: 'small', style: 'margin-left:6px', text: '이 제안 고르기', onclick: () => decide({ d: { [d.id]: sg.pick === 'merge' ? { pick: 'edit', text: sg.text } : { pick: sg.pick } } }) }) : null]) : null;
           const row = el('div', { class: 'ref-card ocr-diff' + (pick ? ' done' : ''), tabindex: 0 }, [
             el('div', { class: 'rcard-head' }, [el('b', { text: `차이 ${i + 1}` }), pick ? el('span', { class: 'tag', text: { clova: '✓ CLOVA 인식 선택됨', ai: '✓ Qwen 인식 선택됨', edit: '직접 고침' }[pick] }) : null]),
-            d.box ? crop : el('div', { class: 'muted', text: '(이 곳의 원본 위치를 알 수 없어 왼쪽 원본에서 찾아 주세요)' }),
+            d.box ? cropBox : el('div', { class: 'muted', text: '(이 곳의 원본 위치를 알 수 없어 왼쪽 원본에서 찾아 주세요)' }),
             el('div', { class: 'ocr-eng-pair' }, [engBox('clova', d.clova), engBox('qwen', d.ai)]),
             sgLine,
             el('div', { class: 'map-row', style: 'flex-wrap:wrap;gap:6px;margin-top:8px' }, [
@@ -8308,7 +8356,7 @@
       for (const p of pages) {
         const img = el('img', { alt: `${+p + 1}쪽`, style: 'width:100%;border:1px solid var(--border);border-radius:8px;background:#fff' });
         const right = el('div', {});
-        const block = el('div', { class: 'split2', style: 'margin-bottom:14px' }, [el('div', {}, [el('div', { class: 'col-label', text: `${+p + 1}쪽 스캔` }), img]), right]);
+        const block = el('div', { class: 'split2', style: 'margin-bottom:14px' }, [el('div', {}, [el('div', { class: 'col-label', text: `${+p + 1}쪽 스캔 — 휠로 확대, 끌어서 이동` }), zoomBox(img)]), right]);
         body.appendChild(block);
         api.inbox_page_image(bid, p).then((r) => { if (r && r.ok) img.src = r.src; else img.alt = (r && r.error) || '그림을 불러오지 못했습니다'; });
         if (!opts.grouping) {

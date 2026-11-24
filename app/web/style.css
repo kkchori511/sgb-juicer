@@ -2281,3 +2281,15 @@ button.drop-zone { border-style: dashed !important; border-width: 2px !important
 button.drop-zone .drop-hint { display: block; font-size: 11px; font-weight: 400; opacity: .75; line-height: 1.2; margin-top: 1px; }
 body.file-dragging button.drop-zone:not(:disabled) { border-color: #2563eb !important; box-shadow: 0 0 0 3px rgba(37, 99, 235, .18); }
 button.drop-zone.drag-on { background: #e8f0fe !important; border-color: #2563eb !important; }
+
+/* ===== 그림 확대·이동(사용자 지정 2026-11-24): 휠 확대·끌어 이동·[처음 크기] ===== */
+.zoombox { position: relative; overflow: hidden; touch-action: none; cursor: grab; user-select: none; }
+.zoombox.dragging { cursor: grabbing; }
+.zoombox > img { transform-origin: 0 0; will-change: transform; }
+.zoombox .zb-bar { position: absolute; right: 6px; top: 6px; display: flex; gap: 4px; align-items: center; padding: 3px; border-radius: 999px; background: rgba(255, 255, 255, .92); box-shadow: 0 1px 4px rgba(0, 0, 0, .18); opacity: .55; transition: opacity .15s; z-index: 2; }
+.zoombox:hover .zb-bar, .zoombox.zoomed .zb-bar { opacity: 1; }
+.zoombox .zb-btn { min-height: 24px; padding: 0 9px; font-size: 13px; line-height: 1; border-radius: 999px; cursor: pointer; }
+.zoombox .zb-pct { font-size: 11px; color: var(--muted); min-width: 34px; text-align: center; }
+.zb-crop { background: #fff; border: 1px solid var(--border); border-radius: 6px; }
+.zb-crop .zb-bar { top: 3px; right: 3px; transform: scale(.85); transform-origin: right top; }
+.zb-modal { max-width: 760px; margin: 0 auto; border: 1px solid var(--border); }
