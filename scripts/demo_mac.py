@@ -33,6 +33,11 @@ def _fake_chat(key, model, system, user, privacy_block=False, history=None):
                 "- 요청: 원문의 발표 내용도 넣어 | 분류: 일반화 | 규칙: 원문에 발표·토론 활동이 있으면 빠뜨리지 않고 넣는다\n"
                 "- 요청: 세 번째 문장 빼 | 분류: 제외 | 규칙: 이 학생 글의 특정 문장을 가리켜 다른 학생에게 옮길 수 없음\n</요청 분석>\n"
                 "<프롬프트>\n# 역할\n(시험용 스킬화 프롬프트) 학생 활동 자료를 관찰자 시점으로 3문장 안팎 한 문단에 씁니다.\n</프롬프트>"), 0.0003
+    if "OCR 결과를 합치는 도우미" in system:  # [AI로 조합하기]: CLOVA 글에 Qwen 쪽 끝 줄을 더하고 없는 낱말 하나를 섞음(⚠ 표시 확인용)
+        import re as _re
+        a = _re.search(r"\[CLOVA\]\n(.*?)\n\n\[Qwen\]", user, _re.S)
+        text = (a.group(1) if a else "") + "\n(시험용) 선생님 확인 도장"
+        return json.dumps({"text": text}, ensure_ascii=False), 0.0009
     if "그림을 볼 수 없습니다" in system:  # OCR 보정 제안: 차이마다 번갈아 CLOVA/AI 쪽
         import re as _re
         ids = _re.findall(r"^\[(d\d+)\]", user, _re.M)
@@ -190,6 +195,17 @@ def _demo_scan(api, hr, year):
     for i in (0, 1):
         q = json.load(open(os.path.join(_FX, f"qwen_p{i + 1}.json"), encoding="utf-8"))["result"]
         ib.scan_store(bid, "ai", ai_page=(i, {"lines": q["lines"], "figures": q["figures"], "cost": 0.0015, "provider": "(시험용)", "model": "qwen/qwen3-vl-235b-a22b-instruct"}))
+    # 두 결과가 크게 다른 쪽(통째로 검토 → [AI로 조합하기])을 볼 수 있는 묶음
+    b3 = ok(api.inbox_create("표가 많은 활동지(통째로 검토 예시)", hr, "career"), "Inbox")["id"]
+    ib.scan_set(b3, os.path.join(_FX, "dummy.pdf"), "표많은학습지.pdf")
+    ib.scan_set_mode(b3, "hybrid", 1, 0.14, "qwen/qwen3-vl-235b-a22b-instruct")
+    big_clova = "학번: 10399 이름: 가나다\n탐구 주제 | 빛의 세기와 광합성\n가설 | 빛이 셀수록 기포가 많다\n결과 | 1단계 3개 2단계 7개 3단계 12개\n결론 | 빛이 셀수록 광합성이 활발함"
+    big_qwen = "탐구 주제 빛 세기 광합성\n결과 표\n단계 기포\n1 3\n2 7\n3 12\n느낀 점 실험이 재미있었다"
+    lines = lambda t: {"lines": [{"text": x, "box": None} for x in t.split("\n")]}
+    ib.scan_store(b3, "clova", pages=[lines(big_clova), ocr.image_lines(clova["images"][1])])
+    ib.scan_store(b3, "ai", ai_page=(0, {"lines": [{"text": x, "unreadable": False} for x in big_qwen.split("\n")], "figures": [], "cost": 0.0015, "provider": "(시험용)", "model": "qwen/qwen3-vl-235b-a22b-instruct"}))
+    q = json.load(open(os.path.join(_FX, "qwen_p2.json"), encoding="utf-8"))["result"]
+    ib.scan_store(b3, "ai", ai_page=(1, {"lines": q["lines"], "figures": q["figures"], "cost": 0.0015, "provider": "(시험용)", "model": "qwen/qwen3-vl-235b-a22b-instruct"}))
     # 아직 읽지 않은 스캔 PDF 묶음: 파일 창 없이 '읽는 방식' 화면과 [OCR 시작](가짜 응답)을 볼 수 있게
     b2 = ok(api.inbox_create("스캔 PDF(읽기 전 예시)", hr, "career"), "Inbox")["id"]
     ib.scan_set(b2, os.path.join(_FX, "dummy.pdf"), "스캔_더미학습지_2쪽.pdf")
