@@ -762,8 +762,8 @@
     });
   }
   function showAbout() {
-    modal(`<div class="about-box"><img src="face.png" alt="" class="about-face"><div class="about-title">생기부 착즙기</div><div class="muted">v${info.version}</div>` +
-      `<div class="about-tag">"${info.tagline}"</div><div class="about-maker">${info.maker}</div><div class="about-credit muted">기본 프롬프트 출처: 강원도교육청 호똑쌤</div></div>`, false, true);
+    modal(`<div class="about-box"><img src="face.png" alt="" class="about-face"><div class="about-title">생기부 착즙기 <span class="about-en">(SGB-juicer)</span></div><div class="muted">v${info.version}</div>` +
+      `<div class="about-tag">"${info.tagline}"</div><div class="about-maker">${info.maker}</div></div>`, false, true);
   }
   function renderYearSelect() {
     const s = $('yearSelect');
