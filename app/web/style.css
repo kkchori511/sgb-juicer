@@ -2339,3 +2339,8 @@ button.tag-pick, .tag-pick { border-radius: var(--radius-pill); }
 /* 통째로 검토: CLOVA(초록)·Qwen(남보라) 각각 상자 */
 .ocr-big-col .ocr-big-text { max-height: 50vh; overflow: auto; white-space: pre-wrap; line-height: 1.6; }
 @media (max-width: 900px) { .ocr-review-left { position: static; max-height: none; } }
+/* 왼쪽 최종 글: 누르면 그 자리에서 고치기 */
+.ocr-final-text { cursor: text; }
+.ocr-final-text:hover { border-color: var(--text); }
+.ocr-final-box.editing { box-shadow: 0 0 0 3px rgba(31, 41, 55, .15); }
+textarea.ocr-final-edit { width: 100%; box-sizing: border-box; min-height: 260px; line-height: 1.6; border: 2px solid var(--text); border-radius: 8px; padding: 8px; }

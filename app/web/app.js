@@ -8177,7 +8177,6 @@
   function showDiffReview(bid, page) {
     const total = ((IB.view && IB.view.batch.meta.scan) || {}).pages || 1;
     let cur = +page;
-    let editSlot = null;
     // 닫을 때 확정 전 학생 경계·뺀 쪽(SC.starts·SC.skipped)은 그대로 둔다(M7)
     // 아직 보내지 않은 고르기 저장을 다 끝낸 뒤 닫는다(닫자마자 확정해도 빠지지 않게, Codex 재검토 R4)
     const close = async () => {
@@ -8251,7 +8250,6 @@
           const sideBtn = (eng, side, label) => el('button', { type: 'button', class: `ocr-eng-btn ocr-eng-${eng}` + (allOf(side) ? ' picked' : ''),
             text: allOf(side) ? `✓ ${label}` : label, disabled: !r.cmp,
             onclick: () => decide(side === 'ai' ? { all_ai: true } : { all_clova: true }) });
-          editSlot = el('div', {});
           right.appendChild(el('div', { class: 'ocr-page-box' }, [
             el('h3', { text: '전체 페이지 수정' }),
             el('div', { class: 'ocr-page-btns' }, [
@@ -8261,9 +8259,9 @@
                 : r.cmp && r.cmp.big ? mergeCtl(r)
                 : el('button', { type: 'button', class: 'wiz-btn', text: 'AI 제안', disabled: !(r.cmp && !r.cmp.big && texts.length), title: '차이 난 글자와 앞뒤 문맥만 글 AI에 보내 어느 쪽이 맞을지 제안을 받습니다', onclick: () => suggest(r) }),
               el('button', { type: 'button', class: pg === 'edit' ? 'primary' : '', text: pg === 'edit' ? '✓ 직접 입력함' : '직접 입력', onclick: () => editWhole(r) })]),
-            pg === 'edit' ? el('div', { class: 'warn', style: 'margin-top:8px' }, [r.review.src === 'merge' ? '이 쪽은 AI 조합 글을 씁니다([직접 입력]으로 더 고칠 수 있음). ' : '이 쪽은 통째로 직접 고친 글을 씁니다(아래 차이 고르기는 쓰이지 않음). ',
+            pg === 'edit' ? el('div', { class: 'warn', style: 'margin-top:8px' }, [r.review.src === 'merge' ? '이 쪽은 AI 조합 글을 씁니다(왼쪽 최종 글에서 더 고칠 수 있음). ' : '이 쪽은 통째로 직접 고친 글을 씁니다(아래 차이 고르기는 쓰이지 않음). ',
               el('button', { type: 'button', class: 'small', text: '직접 입력 취소', onclick: () => decide({ page: null }) })]) : null,
-            editSlot]));
+          ]));
         }
         if (r.ai_error) right.appendChild(el('div', { class: 'warn', text: `Qwen이 이 쪽을 읽지 못했습니다: ${r.ai_error} — CLOVA 글을 씁니다. [실패한 쪽만 다시 읽기]로 이 쪽만 다시 보낼 수 있습니다.` }));
         else if (!r.cmp) right.appendChild(el('p', { class: 'hint', text: '이 쪽은 비교할 두 결과가 없습니다.' }));
@@ -8275,8 +8273,9 @@
             el('label', { class: 'inline', style: 'display:block;margin-top:6px' }, [el('input', { type: 'checkbox', checked: r.figs, onchange: (e) => decide({ figs: e.target.checked }) }), ' 본문에 그림 설명 넣기']),
             el('p', { class: 'hint', text: '그림이 없는데 설명이 있거나 틀렸으면 끄세요. 끄면 CLOVA가 읽은 그림 속 글자가 그대로 남습니다.' })]));
         }
-        finalSlot.append(el('div', { class: 'muted ocr-fold-hint', text: '학번·이름 줄은 다음 단계에서 빠집니다' }),
-          el('div', { class: 'ocr-final-text', text: r.final || '(글자 없음)' }));
+        finalSlot.classList.add('ocr-final-slot');
+        finalSlot.append(el('div', { class: 'muted ocr-fold-hint', text: '학번·이름 줄은 다음 단계에서 빠집니다. 글을 누르면 바로 고칠 수 있습니다' }),
+          el('div', { class: 'ocr-final-text', title: '누르면 고치기', text: r.final || '(글자 없음)', onclick: () => editWhole(r) }));
         bodyEl.scrollTop = keep;
         const first = bodyEl.querySelector('.ocr-diff:not(.done)');
         if (first && !keep) first.focus();
@@ -8377,7 +8376,7 @@
         const html = '<div class="ocr-sugg-note"><div class="ocr-sugg-title">두 결과를 조합하기 전에 확인하세요</div><ol>'
           + `<li><div class="pt">두 OCR 글 전체를 보냅니다</div><div class="ex">이 쪽의 CLOVA 글(${(r.clova || '').length}자)과 Qwen 글(${(r.ai || '').length}자)을 글 AI에 보냅니다.<br>그림은 보내지 않습니다.</div></li>`
           + '<li><div class="pt">이름·학번은 ○로 지웁니다</div><div class="ex">명렬의 이름·학번과 학번·이름 칸의 값을 지우고 보내며,<br>돌아온 글의 ○는 이 PC에서 원래 글자로 되돌립니다.<br>본문에 쓴 다른 이름까지 다 찾지는 못합니다.</div></li>'
-          + '<li><div class="pt">확정은 직접 하세요</div><div class="ex">AI는 그림을 못 보고 두 글로만 짐작합니다.<br>두 글에 없는 낱말은 ⚠로 표시합니다.<br>[조합 글로 쓰기]를 눌러야 이 쪽 글이 됩니다.</div></li></ol>'
+          + '<li><div class="pt">확정은 직접 하세요</div><div class="ex">AI는 그림을 못 보고 두 글로만 짐작합니다.<br>두 글에 없는 낱말은 ⚠로 표시합니다.<br>[AI 조합글을 최종으로 보내기]를 눌러야 이 쪽 글이 됩니다.</div></li></ol>'
           + '<div class="ocr-sugg-model merge-model-row"><label>모델 <span id="mergeModelSlot"></span></label><div class="muted" id="mergeCost">예상 비용 확인 중…</div></div></div>';
         const wait = modal(html, true, true, '조합하기');
         // 박스 아래쪽에서 모델 고르기(처음 값은 설정의 OCR 보정 모델), 바꾸면 예상 비용도 다시
@@ -8419,18 +8418,27 @@
         return el('div', { class: 'merge-box' }, [
           el('div', { class: 'merge-head' }, [el('b', { text: 'AI 조합 글' }), el('span', { class: 'merge-model-name', text: modelLabel(m.model || '') })]), body,
           nw.length ? el('div', { class: 'warn', style: 'margin-top:6px', text: `⚠ 두 OCR 글 어디에도 없는 낱말 ${nw.length}개: ${nw.join(' / ')} — 원본을 보고 확인하세요.` }) : null,
-          m.left ? el('div', { class: 'warn', style: 'margin-top:6px', text: `⚠ 이름·학번 자리(○) ${m.left}자를 원래 글자로 되돌리지 못했습니다. 조합 글로 쓴 뒤 [직접 입력]으로 고쳐 주세요.` }) : null,
+          m.left ? el('div', { class: 'warn', style: 'margin-top:6px', text: `⚠ 이름·학번 자리(○) ${m.left}자를 원래 글자로 되돌리지 못했습니다. 최종으로 보낸 뒤 왼쪽 최종 글에서 고쳐 주세요.` }) : null,
           el('div', { class: 'map-row', style: 'gap:6px;margin-top:6px' }, [
-            el('button', { type: 'button', class: using ? 'primary ai-btn picked' : 'primary ai-btn', text: using ? '✓ 조합 글로 쓰는 중' : '조합 글로 쓰기', disabled: using, onclick: () => decide({ page: 'merge' }) }),
-            using ? el('span', { class: 'hint', text: '고치려면 위 [직접 입력]' }) : null])]);
+            el('button', { type: 'button', class: using ? 'primary ai-btn picked' : 'primary ai-btn', text: using ? '✓ AI 조합글을 최종으로 보냄' : 'AI 조합글을 최종으로 보내기', disabled: using, onclick: () => decide({ page: 'merge' }) }),
+            using ? el('span', { class: 'hint', text: '고치려면 왼쪽 최종 글을 누르세요' }) : null])]);
       }
+      // 직접 입력(사용자 지정 2026-11-24): 따로 창 없이 왼쪽 '이 쪽 최종 글' 상자를 누르거나 [직접 입력]을 누르면 그 자리에서 고침
       function editWhole(r) {
-        const ta = el('textarea', { rows: 14, style: 'width:100%;margin-top:8px' });
+        const box = bodyEl.querySelector('.ocr-final-box');
+        const slot = box && box.querySelector('.ocr-final-slot');
+        if (!slot || slot.classList.contains('editing')) { if (slot) { const t = slot.querySelector('textarea'); if (t) t.focus(); } return; }
+        leftOpen.final = true; box.open = true;
+        slot.classList.add('editing'); box.classList.add('editing');
+        const ta = el('textarea', { class: 'ocr-final-edit', rows: 14 });
         ta.value = r.final || '';
-        editSlot.innerHTML = '';
-        editSlot.append(ta, el('div', { class: 'map-row', style: 'gap:6px;margin-top:6px' }, [
+        const view = slot.querySelector('.ocr-final-text');
+        if (view) view.hidden = true;
+        const bar = el('div', { class: 'map-row', style: 'gap:6px;margin-top:6px' }, [
           el('button', { type: 'button', class: 'primary small', text: '이 글로 쓰기', onclick: () => decide({ page: 'edit', text: ta.value }) }),
-          el('button', { type: 'button', class: 'small', text: '닫기(쓰지 않음)', onclick: () => { editSlot.innerHTML = ''; } })]));
+          el('button', { type: 'button', class: 'small', text: '취소', onclick: () => { ta.remove(); bar.remove(); if (view) view.hidden = false; slot.classList.remove('editing'); box.classList.remove('editing'); } })]);
+        slot.append(ta, bar);
+        box.scrollIntoView({ block: 'nearest' });
         ta.focus();
       }
       load();
