@@ -8193,6 +8193,7 @@
       box.style.width = 'min(1240px, 97vw)';
       head = el('div', { class: 'sheet-head ocr-review-head' });
       const bodyEl = el('div', { class: 'sheet-body' });
+      const leftOpen = { final: true, orig: true }; // 왼쪽 최종 글·원본 펼침 상태(쪽을 넘기거나 다시 그려도 유지)
       box.append(head, bodyEl);
       function decide(data) {
         const pg = shown;
@@ -8230,8 +8231,17 @@
         api.inbox_page_image(bid, r.page).then((x) => { if (x && x.ok) img.src = x.src; });
         const right = el('div', {});
         // 왼쪽: 원본 아래에 이 쪽 최종 글(검정 테두리 상자) — 왼쪽만 따로 스크롤해 오른쪽 검토와 나란히 비교(사용자 지정 2026-11-24)
+        // 위: 이 쪽 최종 글, 아래: 원본 — 둘 다 접을 수 있음(사용자 지정 2026-11-24)
         const finalSlot = el('div', {});
-        bodyEl.appendChild(el('div', { class: 'split2 ocr-review-split' }, [el('div', { class: 'ocr-review-left' }, [el('div', { class: 'col-label', text: '원본(이 PC 안에서만) — 누르면 크게, 휠로 확대, 끌어서 이동' }), zoomBox(img), finalSlot]), right]));
+        const fold = (key, cls, title, body) => {
+          const d = el('details', { class: `ocr-fold ${cls}` }, [el('summary', { text: title }), body]);
+          d.open = leftOpen[key];
+          d.addEventListener('toggle', () => { leftOpen[key] = d.open; });
+          return d;
+        };
+        bodyEl.appendChild(el('div', { class: 'split2 ocr-review-split' }, [el('div', { class: 'ocr-review-left' }, [
+          fold('final', 'ocr-final-box', '이 쪽 최종 글', finalSlot),
+          fold('orig', 'ocr-orig-box', '원본(이 PC 안에서만)', el('div', {}, [el('div', { class: 'muted ocr-fold-hint', text: '누르면 크게, 휠로 확대, 끌어서 이동' }), zoomBox(img)]))]), right]));
         // 전체 페이지 수정: 이 쪽 전체에 한 번에 적용하는 버튼(맨 위, 검정 테두리 상자)
         if (r.cmp || r.ai_error || r.clova != null || r.ai != null) {
           const texts = r.cmp ? r.cmp.diffs.filter((d) => d.kind === 'text') : [];
@@ -8265,9 +8275,8 @@
             el('label', { class: 'inline', style: 'display:block;margin-top:6px' }, [el('input', { type: 'checkbox', checked: r.figs, onchange: (e) => decide({ figs: e.target.checked }) }), ' 본문에 그림 설명 넣기']),
             el('p', { class: 'hint', text: '그림이 없는데 설명이 있거나 틀렸으면 끄세요. 끄면 CLOVA가 읽은 그림 속 글자가 그대로 남습니다.' })]));
         }
-        finalSlot.appendChild(el('div', { class: 'ocr-final-box' }, [
-          el('h3', { text: '이 쪽 최종 글' }), el('div', { class: 'muted', text: '학번·이름 줄은 다음 단계에서 빠집니다' }),
-          el('div', { class: 'ocr-final-text', text: r.final || '(글자 없음)' })]));
+        finalSlot.append(el('div', { class: 'muted ocr-fold-hint', text: '학번·이름 줄은 다음 단계에서 빠집니다' }),
+          el('div', { class: 'ocr-final-text', text: r.final || '(글자 없음)' }));
         bodyEl.scrollTop = keep;
         const first = bodyEl.querySelector('.ocr-diff:not(.done)');
         if (first && !keep) first.focus();
