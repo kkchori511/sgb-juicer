@@ -255,29 +255,32 @@
     })).observe(document.body, { childList: true, subtree: true, characterData: true });
   }
   // ---------- 그림 확대·이동(사용자 지정 2026-11-24) ----------
-  // box 안의 img를 휠(마우스 자리 중심)·[＋][－]로 확대, 끌어서 이동, 두 번 누르거나 [처음 크기]로 되돌림. 그림은 칸 밖으로 빠지지 않게
-  function zoomBox(img, box) {
+  // box 안의 img를 휠(마우스 자리 중심)·[＋][－]로 확대, 끌어서 이동, [처음 크기]로 되돌림. 그림은 칸 밖으로 빠지지 않게.
+  // 끌지 않고 한 번 누르면 큰 보기 창(openBigView)으로 — 큰 보기 안의 그림은 opts.noBig
+  function zoomBox(img, box, opts) {
+    const o = opts || {};
     box = box || el('div', {});
     if (img.parentNode !== box) box.appendChild(img);
     box.classList.add('zoombox');
+    if (!o.noBig) box.classList.add('zb-can-big');
     img.draggable = false;
     let z = 1, x = 0, y = 0;
     const W = () => box.clientWidth, H = () => box.clientHeight;
-    const clamp = () => {
-      const iw = img.offsetWidth * z, ih = img.offsetHeight * z;
-      x = iw <= W() ? 0 : Math.min(0, Math.max(W() - iw, x));
-      y = ih <= H() ? 0 : Math.min(0, Math.max(H() - ih, y));
+    const clamp = () => { // 그림이 칸보다 좁으면 가운데, 넓으면 칸을 벗어나지 않게(세로는 처음 크기면 제자리)
+      const iw = img.offsetWidth * z, ih = img.offsetHeight * z, ox = img.offsetLeft, oy = img.offsetTop;
+      x = iw <= W() ? (W() - iw) / 2 - ox : Math.min(-ox, Math.max(W() - iw - ox, x));
+      y = ih <= H() ? (z === 1 ? 0 : (H() - ih) / 2 - oy) : Math.min(-oy, Math.max(H() - ih - oy, y));
     };
     const apply = () => { clamp(); img.style.transform = `translate(${x}px, ${y}px) scale(${z})`; box.classList.toggle('zoomed', z > 1); pct.textContent = `${Math.round(z * 100)}%`; };
-    const zoomAt = (nz, mx, my) => { nz = Math.min(8, Math.max(1, nz)); x = mx - (mx - x) * (nz / z); y = my - (my - y) * (nz / z); z = nz; apply(); };
+    const zoomAt = (nz, mx, my) => { nz = Math.min(8, Math.max(1, nz)); mx -= img.offsetLeft; my -= img.offsetTop; x = mx - (mx - x) * (nz / z); y = my - (my - y) * (nz / z); z = nz; apply(); };
     const reset = () => { z = 1; x = 0; y = 0; apply(); };
     const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
     const pct = el('span', { class: 'zb-pct', text: '100%' });
     const bar = el('div', { class: 'zb-bar' }, [
-      el('button', { type: 'button', class: 'zb-btn', text: '＋', title: '크게', onclick: (e) => { stop(e); zoomAt(z * 1.5, W() / 2, H() / 2); } }),
-      el('button', { type: 'button', class: 'zb-btn', text: '－', title: '작게', onclick: (e) => { stop(e); zoomAt(z / 1.5, W() / 2, H() / 2); } }),
-      pct,
-      el('button', { type: 'button', class: 'zb-btn zb-reset', text: '처음 크기', title: '처음 크기로(그림을 두 번 눌러도 됨)', onclick: (e) => { stop(e); reset(); } })]);
+      el('button', { type: 'button', class: 'zb-btn zb-sym', text: '＋', title: '크게', onclick: (e) => { stop(e); zoomAt(z * 1.5, W() / 2, H() / 2); } }),
+      el('button', { type: 'button', class: 'zb-btn zb-sym', text: '－', title: '작게', onclick: (e) => { stop(e); zoomAt(z / 1.5, W() / 2, H() / 2); } }),
+      el('button', { type: 'button', class: 'zb-btn zb-reset', text: '처음 크기', title: '처음 크기로', onclick: (e) => { stop(e); reset(); } }),
+      pct]);
     box.appendChild(bar);
     box.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -287,17 +290,39 @@
     let drag = null;
     box.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 || e.target.closest('.zb-bar')) return;
-      drag = { px: e.clientX, py: e.clientY, x, y };
+      drag = { px: e.clientX, py: e.clientY, x, y, moved: false };
       box.setPointerCapture(e.pointerId);
       box.classList.add('dragging');
     });
-    box.addEventListener('pointermove', (e) => { if (!drag) return; x = drag.x + e.clientX - drag.px; y = drag.y + e.clientY - drag.py; apply(); });
-    const end = () => { drag = null; box.classList.remove('dragging'); };
-    box.addEventListener('pointerup', end);
-    box.addEventListener('pointercancel', end);
-    box.addEventListener('dblclick', (e) => { if (!e.target.closest('.zb-bar')) reset(); });
+    box.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      if (Math.abs(e.clientX - drag.px) + Math.abs(e.clientY - drag.py) > 4) drag.moved = true;
+      x = drag.x + e.clientX - drag.px; y = drag.y + e.clientY - drag.py; apply();
+    });
+    box.addEventListener('pointerup', () => {
+      const d = drag;
+      drag = null; box.classList.remove('dragging');
+      if (d && !d.moved && !o.noBig && img.src) openBigView(img.src, img.alt, o.caption); // 끌지 않고 누름 → 큰 보기
+    });
+    box.addEventListener('pointercancel', () => { drag = null; box.classList.remove('dragging'); });
     img.addEventListener('load', reset);
+    if (!o.noBig) box.title = `${box.title ? box.title + '\n' : ''}누르면 크게 보기 · 휠로 확대 · 끌어서 이동`;
     return box;
+  }
+  // 큰 보기 창: 앱 창의 약 90% 크기, 그림은 창에 맞춰 보이고 그 안에서도 확대·이동
+  function openBigView(src, alt, caption) {
+    const img = el('img', { src, alt: alt || '그림', class: 'zb-big-img' });
+    const area = el('div', { class: 'zb-big-area' }, [img]);
+    const close = () => { back.remove(); document.removeEventListener('keydown', onKey, true); };
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+    const back = el('div', { class: 'modal zb-big-modal' }, [el('div', { class: 'modal-box zb-big-box' }, [
+      el('div', { class: 'zb-big-head' }, [el('b', { text: alt || '그림' }), caption ? el('span', { class: 'muted', text: caption }) : null, el('span', { class: 'spacer' }),
+        el('button', { type: 'button', text: '닫기', onclick: close })]),
+      area])]);
+    back.addEventListener('mousedown', (e) => { if (e.target === back) close(); });
+    document.addEventListener('keydown', onKey, true);
+    document.body.appendChild(back);
+    zoomBox(img, area, { noBig: true });
   }
   // ---------- 파일 불러오기 상자(사용자 지정 2026-11-24) ----------
   // 불러오기 버튼은 모양 그대로. 누르면 상자가 떠서 [파일 불러오기](파일 창) 또는 상자에 끌어 놓기로 고른다.
@@ -8043,16 +8068,14 @@
           // 첫 쪽 위 40%가 통째로 보이게 줄여 보여 주고, [크게 보기]로 첫 쪽 전체(Codex v1 F3)
           const bigBtn = el('button', { type: 'button', class: 'small', text: '크게 보기', onclick: () => {
             if (!img.src) return;
-            modal(`<p class="hint">Qwen에 보낼 첫 쪽 그림입니다(흰 부분이 가린 곳, 가림 ${Math.round(effMask() * 100)}%). 다른 쪽은 배치가 다를 수 있습니다.</p><div class="zb-modal"><img src="${img.src}" alt="첫 쪽 전체" style="width:100%;display:block"></div>`, false, true);
-            const m = $('modalMsg').querySelector('.zb-modal');
-            if (m) zoomBox(m.querySelector('img'), m);
+            openBigView(img.src, '첫 쪽 전체', `Qwen에 보낼 첫 쪽 그림(흰 부분이 가린 곳, 가림 ${Math.round(effMask() * 100)}%). 다른 쪽은 배치가 다를 수 있습니다.`);
           } });
           const secL = el('div', { class: 'ocr-mask-left' }, [
             el('div', { class: 'map-row' }, [el('b', { text: 'Qwen에 보낼 때 머리글(학번·이름) 가리기' }), range, pct, bigBtn]),
             el('p', { class: 'hint', text: '오른쪽 첫 쪽 미리보기에서 학번·이름 칸이 흰색으로 덮이게 맞추세요(이 PC 안에서 처리).' }),
             lockedMask != null ? el('p', { class: 'hint', style: 'color:var(--warn-text);font-weight:700', text: `이미 Qwen에 보낸 쪽이 있어 처음 가림 비율(${Math.round(lockedMask * 100)}%)로 이어 읽습니다. 비율을 바꾸려면 OCR을 처음부터 다시 해야 합니다.` }) : '']);
           if (lockedMask != null) range.disabled = true;
-          const sec = el('div', { class: 'wsection ocr-mask' }, [secL, zoomBox(img, el('div', { class: 'ocr-mask-prev', title: '첫 쪽 위 40% — 끌어서 아래도 보고, 휠로 확대. 전체는 [크게 보기]' }))]);
+          const sec = el('div', { class: 'wsection ocr-mask' }, [secL, zoomBox(img, el('div', { class: 'ocr-mask-prev', title: '첫 쪽 위 40% — 끌어서 아래도 보고, 휠로 확대' }), { caption: 'Qwen에 보낼 첫 쪽 그림(흰 부분이 가린 곳)' })]);
           if (SC.mode === 'ai') {
             secL.appendChild(el('label', { class: 'inline', style: 'display:block;margin-top:6px' }, [
               el('input', { type: 'checkbox', checked: unmasked, onchange: async (e) => {
