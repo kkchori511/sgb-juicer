@@ -525,7 +525,7 @@
       $('modalCancel').hidden = !withCancel;
       $('modalOk').textContent = okText || '확인';
       $('modalOk').classList.toggle('btn-danger', /삭제|지우|초기화|비우|복원/.test(okText || ''));
-      $('modalOk').classList.toggle('btn-ai', okText === '제안 받기'); // AI 실행 버튼은 보라 계열(앱의 AI 색)
+      $('modalOk').classList.toggle('btn-ai', okText === '제안 받기' || okText === '조합하기'); // AI 실행 버튼은 보라 계열(앱의 AI 색)
       $('modalCancel').textContent = cancelText || '취소';
       $('modal').hidden = false;
       $('modal').setAttribute('aria-modal', 'true');
@@ -8193,9 +8193,10 @@
               sideBtn('clova', 'clova', 'CLOVA 선택'), sideBtn('qwen', 'ai', 'Qwen 선택'),
               r.review && r.review.s && Object.keys(r.review.s).length
                 ? el('button', { type: 'button', class: 'wiz-btn', text: '제안대로 고르기', title: 'AI 제안을 이 쪽 모든 차이에 고릅니다(차이마다 [이 제안 고르기]도 있음)', onclick: () => decide({ accept_suggest: true }) })
+                : r.cmp && r.cmp.big ? mergeCtl(r)
                 : el('button', { type: 'button', class: 'wiz-btn', text: 'AI 제안', disabled: !(r.cmp && !r.cmp.big && texts.length), title: '차이 난 글자와 앞뒤 문맥만 글 AI에 보내 어느 쪽이 맞을지 제안을 받습니다', onclick: () => suggest(r) }),
               el('button', { type: 'button', class: pg === 'edit' ? 'primary' : '', text: pg === 'edit' ? '✓ 직접 입력함' : '직접 입력', onclick: () => editWhole(r) })]),
-            pg === 'edit' ? el('div', { class: 'warn', style: 'margin-top:8px' }, ['이 쪽은 통째로 직접 고친 글을 씁니다(아래 차이 고르기는 쓰이지 않음). ',
+            pg === 'edit' ? el('div', { class: 'warn', style: 'margin-top:8px' }, [r.review.src === 'merge' ? '이 쪽은 AI 조합 글을 씁니다([직접 입력]으로 더 고칠 수 있음). ' : '이 쪽은 통째로 직접 고친 글을 씁니다(아래 차이 고르기는 쓰이지 않음). ',
               el('button', { type: 'button', class: 'small', text: '직접 입력 취소', onclick: () => decide({ page: null }) })]) : null,
             editSlot]));
         }
@@ -8285,8 +8286,67 @@
         return el('div', {}, [
           el('div', { class: 'warn', text: `두 결과가 크게 다릅니다(비슷한 정도 ${Math.round(r.cmp.ratio * 100)}%). 표·두 단·그림 속 글자가 많은 쪽에서 자주 생깁니다. 원본을 보고 한쪽을 통째로 고르거나 직접 고치세요.` }),
           el('div', { class: 'split2', style: 'margin-top:8px' }, [col('CLOVA', r.clova), col('Qwen', r.ai)]),
-          pick ? el('span', { class: 'tag', style: 'margin-top:6px', text: { clova: '✓ CLOVA 인식 선택됨', ai: '✓ Qwen 인식 선택됨', edit: '직접 고침' }[pick] }) : el('p', { class: 'hint', text: '위 [CLOVA 선택]·[Qwen 선택]으로 한쪽을 통째로 고르거나 [직접 입력]하세요. 고르지 않으면 CLOVA 글을 씁니다.' }),
+          mergeBox(r),
+          pick ? el('span', { class: 'tag', style: 'margin-top:6px', text: pick === 'edit' && r.review.src === 'merge' ? '✓ AI 조합 글 선택됨' : { clova: '✓ CLOVA 인식 선택됨', ai: '✓ Qwen 인식 선택됨', edit: '직접 고침' }[pick] }) : el('p', { class: 'hint', text: '위 [CLOVA 선택]·[Qwen 선택]으로 한쪽을 통째로 고르거나, [AI로 조합하기]로 두 글을 합친 글을 받아 쓰거나, [직접 입력]하세요. 고르지 않으면 CLOVA 글을 씁니다.' }),
         ]);
+      }
+      // ----- 통째로 검토 쪽: AI로 조합하기(사용자 지정 2026-11-24) -----
+      function mergeModels() {
+        const out = [];
+        const fix = (cfg.ocr_fix_model || '').trim();
+        if (fix) out.push({ value: 'fix', id: fix, text: `OCR 보정 모델 / ${modelLabel(fix)}` });
+        (cfg.models || []).forEach((m, i) => { if (m) out.push({ value: String(i), id: m, text: `${i + 1}번 / ${modelLabel(m)}` }); });
+        return out;
+      }
+      function mergeCtl(r) {
+        const ms = mergeModels();
+        const sel = el('select', { class: 'merge-model', title: '조합에 쓸 AI 모델(처음 값은 설정의 OCR 보정 모델)' },
+          ms.length ? ms.map((m) => el('option', { value: m.value, title: m.id, text: m.text, selected: m.value === (ms[0].value === 'fix' ? 'fix' : String(cfg.default_model || 0)) }))
+            : [el('option', { value: '', text: '모델 없음(설정에서 등록)' })]);
+        const had = !!(r.review && r.review.m);
+        return el('span', { class: 'merge-ctl' }, [
+          el('button', { type: 'button', class: 'wiz-btn', text: had ? 'AI로 다시 조합하기' : 'AI로 조합하기', disabled: !ms.length,
+            title: '두 OCR의 쪽 전체 글을 글 AI에 보내 한 편으로 합친 글을 받습니다(그림은 보내지 않음, 이름·학번은 ○로 지움)', onclick: () => merge(r, sel) }),
+          sel]);
+      }
+      async function merge(r, sel) {
+        const m = mergeModels().find((x) => x.value === sel.value);
+        if (!m) return;
+        const nIn = (r.clova || '').length + (r.ai || '').length + 700, nOut = Math.max((r.clova || '').length, (r.ai || '').length);
+        let cost = '단가를 가져오지 못했습니다(인터넷 연결 확인)';
+        try {
+          const p = await api.model_info(m.id);
+          if (p && p.ok && p.prompt_per_m != null && p.completion_per_m != null) cost = `약 $${((nIn * p.prompt_per_m + nOut * p.completion_per_m) / 1e6).toFixed(4)} (글자 수로 짐작한 값, 실제와 다를 수 있음)`;
+        } catch (e) { /* 단가를 모르면 안내만 */ }
+        const html = '<div class="ocr-sugg-note"><div class="ocr-sugg-title">AI로 조합하기 전에 확인하세요</div><ol>'
+          + `<li><div class="pt">두 OCR 글 전체를 보냅니다</div><div class="ex">이 쪽의 CLOVA 글(${(r.clova || '').length}자)과 Qwen 글(${(r.ai || '').length}자)을 보냅니다.<br>그림은 보내지 않습니다.</div></li>`
+          + '<li><div class="pt">이름·학번은 ○로 지웁니다</div><div class="ex">명렬의 이름·학번과 학번·이름 칸의 값을 지우고 보내며,<br>돌아온 글의 ○는 이 PC에서 원래 글자로 되돌립니다.<br>본문에 쓴 다른 이름까지 다 찾지는 못합니다.</div></li>'
+          + '<li><div class="pt">확정은 직접 하세요</div><div class="ex">AI는 그림을 못 보고 두 글로만 짐작합니다.<br>두 글에 없는 낱말은 ⚠로 표시합니다.<br>[조합 글로 쓰기]를 눌러야 이 쪽 글이 됩니다.</div></li></ol>'
+          + `<div class="ocr-sugg-model">모델: <b>${escHtml(m.text)}</b><div class="muted">예상 비용: ${escHtml(cost)}</div></div></div>`;
+        if (!(await modal(html, true, true, '조합하기'))) return;
+        const res = await mutate('inbox_scan_merge', bid, r.page, m.value);
+        if (res) { if (res.page === cur) draw(res); toast(`${res.page + 1}쪽 조합 글을 받았습니다. 비용 $${(+res.merge_cost || 0).toFixed(4)}`); }
+      }
+      function mergeBox(r) {
+        const m = r.review && r.review.m;
+        if (!m) return null;
+        const body = el('div', { class: 'rcard-body merge-body', style: 'max-height:50vh;white-space:pre-wrap;background:var(--input);border:1px solid var(--border);border-radius:8px;padding:8px' });
+        const nw = (m.new || []).filter((w) => w);
+        if (nw.length) {
+          const re = new RegExp(nw.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((a, b) => b.length - a.length).join('|'), 'g');
+          let i = 0; const parts = [];
+          for (const x of m.text.matchAll(re)) { if (x.index > i) parts.push(m.text.slice(i, x.index)); parts.push(el('mark', { class: 'ban', title: '두 OCR 글 어디에도 없는 낱말 — 원본과 비교해 확인하세요', text: x[0] })); i = x.index + x[0].length; }
+          if (i < m.text.length) parts.push(m.text.slice(i));
+          body.replaceChildren(...parts);
+        } else body.textContent = m.text || '(글자 없음)';
+        const using = r.review.page === 'edit' && r.review.src === 'merge';
+        return el('div', { class: 'merge-box', style: 'margin-top:10px' }, [
+          el('div', { class: 'col-label', text: `AI 조합 글 (${modelLabel(m.model || '')})` }), body,
+          nw.length ? el('div', { class: 'warn', style: 'margin-top:6px', text: `⚠ 두 OCR 글 어디에도 없는 낱말 ${nw.length}개: ${nw.join(' / ')} — 원본을 보고 확인하세요.` }) : null,
+          m.left ? el('div', { class: 'warn', style: 'margin-top:6px', text: `⚠ 이름·학번 자리(○) ${m.left}자를 원래 글자로 되돌리지 못했습니다. 조합 글로 쓴 뒤 [직접 입력]으로 고쳐 주세요.` }) : null,
+          el('div', { class: 'map-row', style: 'gap:6px;margin-top:6px' }, [
+            el('button', { type: 'button', class: using ? 'primary picked' : 'primary', text: using ? '✓ 조합 글로 쓰는 중' : '조합 글로 쓰기', disabled: using, onclick: () => decide({ page: 'merge' }) }),
+            using ? el('span', { class: 'hint', text: '고치려면 위 [직접 입력]' }) : null])]);
       }
       function editWhole(r) {
         const ta = el('textarea', { rows: 14, style: 'width:100%;margin-top:8px' });

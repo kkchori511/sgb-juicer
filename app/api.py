@@ -3199,6 +3199,39 @@ class Api:
         return out
 
     @safe
+    def inbox_scan_merge(self, bid, page, model=None):
+        """[AI로 조합하기](통째로 검토 쪽): 두 OCR의 쪽 전체 글을 글 AI에 보내 한 편으로 합친다(그림 없음, 이름·학번은 ○○).
+        model: "fix"(설정의 OCR 보정 모델) 또는 모델 칸 번호(0~3). 돌아온 글의 ○는 원문 이름·학번으로 되돌리고,
+        두 글에 없는 낱말은 new로 알린다. 조합 글은 저장만 하고, 그 쪽 글로 쓰는 것은 사람이 고른다."""
+        self._editable()
+        cfg = config.load()
+        if model in (None, "", "fix") and cfg["ocr_fix_model"]:
+            if not cfg["openrouter_key"].strip():
+                raise db.DbError("OpenRouter API 키가 없습니다. 설정에서 넣어 주세요.")
+            mid = cfg["ocr_fix_model"]
+        else:
+            cfg, mid = self._model(None if model in (None, "", "fix") else model)
+        ib = self._ib()
+        ib._scan_review_editable(bid)  # 매칭으로 넘어간 묶음이면 AI에 보내기 전에 멈춤
+        r = ib.scan_compare(bid, page)
+        if not r.get("cmp") or not r["cmp"]["big"]:
+            raise db.DbError("AI로 조합하기는 두 결과가 크게 다른 쪽(통째로 검토)에서만 씁니다.")
+        from . import ocr_compare
+        full = ib.scan_page_compare(bid, page)
+        scrub = ib.scan_scrubber(bid, full)
+        a_s, b_s = scrub(full["a"]), scrub(full["b"])
+        user = ocr_compare.merge_user(a_s, b_s)
+        text, cost = self._call_ai(cfg["openrouter_key"].strip(), mid, ocr_compare.MERGE_SYSTEM, user, cfg["privacy_block"], extra=False)
+        merged = ocr_compare.nfc(str((openrouter.parse_json_object(text) or {}).get("text") or "")).strip()[:20000]
+        if not merged:
+            raise db.DbError("AI가 조합 글을 돌려주지 않았습니다. 다시 시도하거나 다른 모델을 골라 보세요.")
+        merged, left = ocr_compare.restore_ids(merged, [(a_s, full["a"]), (b_s, full["b"])])
+        m = {"text": merged, "new": ocr_compare.new_words(merged, full["a"], full["b"]), "left": left, "model": mid, "cost": cost}
+        out = ib.scan_store_merge(bid, page, m, cost)
+        out["merge_cost"] = cost
+        return out
+
+    @safe
     def inbox_scan_crop(self, bid, page, box, w, h, clip=None):
         """차이 난 줄의 원본 확대 그림(이 PC 안에서만). box·clip은 CLOVA 좌표(w×h 기준)."""
         return {"src": scan.render_crop(self._db().year, bid, page, box, w, h, clip)}

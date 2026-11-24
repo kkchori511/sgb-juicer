@@ -377,3 +377,56 @@ def parse_fix(obj, diffs):
             it["pick"] = "clova" if text == d["clova"] else "ai"
         out[it["id"]] = {"pick": it["pick"], "text": text, "reason": str(it.get("reason") or "")[:80], "new": new, "unchecked": unchecked}
     return out
+
+
+# ---------- 통째로 검토 쪽: AI로 조합하기(사용자 지정 2026-11-24) ----------
+MERGE_SYSTEM = (
+    "당신은 학생 학습지 OCR 결과를 합치는 도우미입니다. 같은 손글씨 학습지 한 쪽을 두 OCR(CLOVA, Qwen)이 따로 읽었는데 "
+    "결과가 크게 다릅니다. 당신은 그림을 볼 수 없습니다.\n"
+    "두 결과를 맞춰 보고 학생이 실제로 썼을 글을 한 편으로 만드세요.\n"
+    "- 목표는 학생이 쓴 글자 그대로입니다. 맞춤법·띄어쓰기·문장을 고치거나 다듬지 마세요(학생이 틀리게 썼을 수 있음).\n"
+    "- 두 결과 어디에도 없는 낱말이나 내용을 만들지 마세요. 한쪽에만 있는 내용은 앞뒤 문맥에 맞으면 넣습니다.\n"
+    "- 같은 내용을 두 번 넣지 말고, 줄 순서는 학습지의 위에서 아래 순서를 따르세요.\n"
+    "- ○는 지운 이름·학번입니다. ○는 고치지 말고 개수까지 그대로 두세요.\n"
+    "- 그림 설명([그림: …])은 넣지 마세요.\n"
+    "출력은 JSON 하나만: {\"text\": \"합친 글(줄바꿈은 \\n)\"}"
+)
+
+
+def merge_user(a: str, b: str) -> str:
+    """보낼 글: 신원을 지운 두 쪽 전체 글(CLOVA·Qwen)."""
+    return f"[CLOVA]\n{a}\n\n[Qwen]\n{b}"
+
+
+def restore_ids(merged: str, sources) -> tuple[str, int]:
+    """조합 글의 ○(지운 이름·학번)를 원문 글자로 되돌린다. sources: [(지운 글, 원문)] — 글자 수가 같다(redact).
+    조합 글과 지운 글을 맞춰 보아 같은 자리로 이어진 ○ 묶음만 원문 글자로 바꾼다. → (되돌린 글, 못 되돌린 ○ 수)"""
+    import difflib
+
+    out = list(merged)
+    todo = {i for i, ch in enumerate(merged) if ch == "○"}
+    for scrubbed, orig in sources:
+        if not todo or len(scrubbed) != len(orig):
+            continue
+        sm = difflib.SequenceMatcher(None, merged, scrubbed, autojunk=False)
+        for a, b, n in sm.get_matching_blocks():
+            if n - merged[a:a + n].count("○") < 2:
+                continue  # ○만 맞은 묶음은 자리를 믿을 수 없음(앞뒤 글자도 같이 맞아야)
+            for k in range(n):
+                i, j = a + k, b + k
+                if i in todo and scrubbed[j] == "○" and orig[j] != "○":
+                    out[i] = orig[j]
+                    todo.discard(i)
+    return "".join(out), len(todo)
+
+
+def new_words(merged: str, a: str, b: str) -> list:
+    """두 OCR 글 어디에도 없는 낱말(띄어쓰기 무시) — 화면에서 ⚠로 표시."""
+    pool = re.sub(r"\s", "", (a or "") + "\n" + (b or ""))
+    out = []
+    for w in re.findall(r"[^\s.,!?'\"()\[\]:;·~/-]+", merged or ""):
+        if "○" in w or len(w) < 2 or w in out:
+            continue
+        if w not in pool:
+            out.append(w)
+    return out

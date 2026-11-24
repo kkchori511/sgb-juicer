@@ -715,7 +715,7 @@ class Inbox:
         rv = rv_all.get(str(int(page))) or {}
         data = data or {}
         if data.get("reset"):
-            rv = {"figs": rv.get("figs", True)}
+            rv = {"figs": rv.get("figs", True), **({"m": rv["m"]} if rv.get("m") else {})}  # 조합 글(비용 든 AI 결과)은 남김
         if data.get("accept_suggest"):
             dd = rv.get("d") or {}
             for k, v in (rv.get("s") or {}).items():
@@ -724,9 +724,15 @@ class Inbox:
         if "figs" in data:
             rv["figs"] = bool(data["figs"])
         if "page" in data:
-            rv["page"] = data["page"] if data["page"] in ("clova", "ai", "edit") else None
-            if data["page"] == "edit":
-                rv["text"] = str(data.get("text") or "")[:20000]
+            rv.pop("src", None)
+            if data["page"] == "merge":  # [조합 글로 쓰기]: 직접 고친 글과 같은 자리에 넣어 이어서 고칠 수 있게
+                if not (rv.get("m") or {}).get("text"):
+                    raise DbError("조합 글이 없습니다. 먼저 [AI로 조합하기]를 눌러 주세요.")
+                rv["page"], rv["text"], rv["src"] = "edit", rv["m"]["text"], "merge"
+            else:
+                rv["page"] = data["page"] if data["page"] in ("clova", "ai", "edit") else None
+                if data["page"] == "edit":
+                    rv["text"] = str(data.get("text") or "")[:20000]
         for flag, side in (("all_ai", "ai"), ("all_clova", "clova")):
             if data.get(flag):  # [Qwen 선택]/[CLOVA 선택]: 이 쪽 모든 차이를 그쪽으로(검토 끝). 크게 다른 쪽은 통째로
                 cmpd = self.scan_compare(bid, page).get("cmp") or {}
@@ -745,6 +751,23 @@ class Inbox:
         rv_all[str(int(page))] = rv
         sc["review"] = rv_all
         self._scan_refresh(sc)
+        meta["scan"] = sc
+        with self.d.tx() as c:
+            self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
+        return self.scan_compare(bid, page)
+
+    @_scan_locked
+    def scan_store_merge(self, bid, page, m, cost):
+        """AI 조합 글을 저장(그 쪽 글로 쓰는 것은 [조합 글로 쓰기]를 눌러야)."""
+        b = self._scan_review_editable(bid)
+        meta = b["meta"]
+        sc = meta.get("scan") or {}
+        rv_all = sc.get("review") or {}
+        rv = rv_all.get(str(int(page))) or {}
+        rv["m"] = m
+        rv_all[str(int(page))] = rv
+        sc["review"] = rv_all
+        sc["fix_cost"] = round(float(sc.get("fix_cost") or 0) + float(cost or 0), 6)
         meta["scan"] = sc
         with self.d.tx() as c:
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
