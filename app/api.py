@@ -3200,7 +3200,7 @@ class Api:
 
     @safe
     def inbox_scan_merge(self, bid, page, model=None):
-        """[AI로 조합하기](통째로 검토 쪽): 두 OCR의 쪽 전체 글을 글 AI에 보내 한 편으로 합친다(그림 없음, 이름·학번은 ○○).
+        """[두 결과 조합하기](통째로 검토 쪽): 두 OCR의 쪽 전체 글을 글 AI에 보내 한 편으로 합친다(그림 없음, 이름·학번은 ○○).
         model: "fix"(설정의 OCR 보정 모델) 또는 모델 칸 번호(0~3). 돌아온 글의 ○는 원문 이름·학번으로 되돌리고,
         두 글에 없는 낱말은 new로 알린다. 조합 글은 저장만 하고, 그 쪽 글로 쓰는 것은 사람이 고른다."""
         self._editable()
@@ -3215,7 +3215,7 @@ class Api:
         ib._scan_review_editable(bid)  # 매칭으로 넘어간 묶음이면 AI에 보내기 전에 멈춤
         r = ib.scan_compare(bid, page)
         if not r.get("cmp") or not r["cmp"]["big"]:
-            raise db.DbError("AI로 조합하기는 두 결과가 크게 다른 쪽(통째로 검토)에서만 씁니다.")
+            raise db.DbError("두 결과 조합하기는 두 결과가 크게 다른 쪽(통째로 검토)에서만 씁니다.")
         from . import ocr_compare
         full = ib.scan_page_compare(bid, page)
         scrub = ib.scan_scrubber(bid, full)

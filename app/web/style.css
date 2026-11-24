@@ -2305,6 +2305,8 @@ button.tag-pick, .tag-pick { border-radius: var(--radius-pill); }
 .zb-crop .zb-bar { top: 3px; right: 3px; transform: scale(.85); transform-origin: right top; }
 .zb-modal { max-width: 760px; margin: 0 auto; border: 1px solid var(--border); }
 
-/* 통째로 검토 쪽 [AI로 조합하기] + 모델 목록 */
+/* 통째로 검토 쪽 [두 결과 조합하기] + 모델 목록 */
 .merge-ctl { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .merge-ctl select.merge-model { max-width: 220px; }
+.merge-model-row label { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+.merge-model-row select.merge-model { flex: 1; max-width: none; }

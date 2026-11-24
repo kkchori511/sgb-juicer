@@ -8317,10 +8317,10 @@
           el('div', { class: 'warn', text: `두 결과가 크게 다릅니다(비슷한 정도 ${Math.round(r.cmp.ratio * 100)}%). 표·두 단·그림 속 글자가 많은 쪽에서 자주 생깁니다. 원본을 보고 한쪽을 통째로 고르거나 직접 고치세요.` }),
           el('div', { class: 'split2', style: 'margin-top:8px' }, [col('CLOVA', r.clova), col('Qwen', r.ai)]),
           mergeBox(r),
-          pick ? el('span', { class: 'tag', style: 'margin-top:6px', text: pick === 'edit' && r.review.src === 'merge' ? '✓ AI 조합 글 선택됨' : { clova: '✓ CLOVA 인식 선택됨', ai: '✓ Qwen 인식 선택됨', edit: '직접 고침' }[pick] }) : el('p', { class: 'hint', text: '위 [CLOVA 선택]·[Qwen 선택]으로 한쪽을 통째로 고르거나, [AI로 조합하기]로 두 글을 합친 글을 받아 쓰거나, [직접 입력]하세요. 고르지 않으면 CLOVA 글을 씁니다.' }),
+          pick ? el('span', { class: 'tag', style: 'margin-top:6px', text: pick === 'edit' && r.review.src === 'merge' ? '✓ AI 조합 글 선택됨' : { clova: '✓ CLOVA 인식 선택됨', ai: '✓ Qwen 인식 선택됨', edit: '직접 고침' }[pick] }) : el('p', { class: 'hint', text: '위 [CLOVA 선택]·[Qwen 선택]으로 한쪽을 통째로 고르거나, [두 결과 조합하기]로 두 글을 합친 글을 받아 쓰거나, [직접 입력]하세요. 고르지 않으면 CLOVA 글을 씁니다.' }),
         ]);
       }
-      // ----- 통째로 검토 쪽: AI로 조합하기(사용자 지정 2026-11-24) -----
+      // ----- 통째로 검토 쪽: 두 결과 조합하기(사용자 지정 2026-11-24) -----
       function mergeModels() {
         const out = [];
         const fix = (cfg.ocr_fix_model || '').trim();
@@ -8330,31 +8330,40 @@
       }
       function mergeCtl(r) {
         const ms = mergeModels();
-        const sel = el('select', { class: 'merge-model', title: '조합에 쓸 AI 모델(처음 값은 설정의 OCR 보정 모델)' },
-          ms.length ? ms.map((m) => el('option', { value: m.value, title: m.id, text: m.text, selected: m.value === (ms[0].value === 'fix' ? 'fix' : String(cfg.default_model || 0)) }))
-            : [el('option', { value: '', text: '모델 없음(설정에서 등록)' })]);
-        const had = !!(r.review && r.review.m);
-        return el('span', { class: 'merge-ctl' }, [
-          el('button', { type: 'button', class: 'wiz-btn', text: had ? 'AI로 다시 조합하기' : 'AI로 조합하기', disabled: !ms.length,
-            title: '두 OCR의 쪽 전체 글을 글 AI에 보내 한 편으로 합친 글을 받습니다(그림은 보내지 않음, 이름·학번은 ○로 지움)', onclick: () => merge(r, sel) }),
-          sel]);
+        return el('button', { type: 'button', class: 'wiz-btn', text: '두 결과 조합하기', disabled: !ms.length,
+          title: ms.length ? '두 OCR의 쪽 전체 글을 글 AI에 보내 한 편으로 합친 글을 받습니다(그림은 보내지 않음, 이름·학번은 ○로 지움). 모델은 다음 창에서 고릅니다' : '설정 › 연결·모델에서 AI 모델을 먼저 등록하세요',
+          onclick: () => merge(r) });
       }
-      async function merge(r, sel) {
-        const m = mergeModels().find((x) => x.value === sel.value);
-        if (!m) return;
+      async function merge(r) {
+        const ms = mergeModels();
+        if (!ms.length) return;
         const nIn = (r.clova || '').length + (r.ai || '').length + 700, nOut = Math.max((r.clova || '').length, (r.ai || '').length);
-        let cost = '단가를 가져오지 못했습니다(인터넷 연결 확인)';
-        try {
-          const p = await api.model_info(m.id);
-          if (p && p.ok && p.prompt_per_m != null && p.completion_per_m != null) cost = `약 $${((nIn * p.prompt_per_m + nOut * p.completion_per_m) / 1e6).toFixed(4)} (글자 수로 짐작한 값, 실제와 다를 수 있음)`;
-        } catch (e) { /* 단가를 모르면 안내만 */ }
-        const html = '<div class="ocr-sugg-note"><div class="ocr-sugg-title">AI로 조합하기 전에 확인하세요</div><ol>'
-          + `<li><div class="pt">두 OCR 글 전체를 보냅니다</div><div class="ex">이 쪽의 CLOVA 글(${(r.clova || '').length}자)과 Qwen 글(${(r.ai || '').length}자)을 보냅니다.<br>그림은 보내지 않습니다.</div></li>`
+        const html = '<div class="ocr-sugg-note"><div class="ocr-sugg-title">두 결과를 조합하기 전에 확인하세요</div><ol>'
+          + `<li><div class="pt">두 OCR 글 전체를 보냅니다</div><div class="ex">이 쪽의 CLOVA 글(${(r.clova || '').length}자)과 Qwen 글(${(r.ai || '').length}자)을 글 AI에 보냅니다.<br>그림은 보내지 않습니다.</div></li>`
           + '<li><div class="pt">이름·학번은 ○로 지웁니다</div><div class="ex">명렬의 이름·학번과 학번·이름 칸의 값을 지우고 보내며,<br>돌아온 글의 ○는 이 PC에서 원래 글자로 되돌립니다.<br>본문에 쓴 다른 이름까지 다 찾지는 못합니다.</div></li>'
           + '<li><div class="pt">확정은 직접 하세요</div><div class="ex">AI는 그림을 못 보고 두 글로만 짐작합니다.<br>두 글에 없는 낱말은 ⚠로 표시합니다.<br>[조합 글로 쓰기]를 눌러야 이 쪽 글이 됩니다.</div></li></ol>'
-          + `<div class="ocr-sugg-model">모델: <b>${escHtml(m.text)}</b><div class="muted">예상 비용: ${escHtml(cost)}</div></div></div>`;
-        if (!(await modal(html, true, true, '조합하기'))) return;
-        const res = await mutate('inbox_scan_merge', bid, r.page, m.value);
+          + '<div class="ocr-sugg-model merge-model-row"><label>모델 <span id="mergeModelSlot"></span></label><div class="muted" id="mergeCost">예상 비용 확인 중…</div></div></div>';
+        const wait = modal(html, true, true, '조합하기');
+        // 박스 아래쪽에서 모델 고르기(처음 값은 설정의 OCR 보정 모델), 바꾸면 예상 비용도 다시
+        const sel = el('select', { class: 'merge-model', title: '조합에 쓸 AI 모델' },
+          ms.map((m) => el('option', { value: m.value, title: m.id, text: m.text, selected: m.value === (ms[0].value === 'fix' ? 'fix' : String(cfg.default_model || 0)) })));
+        const slot = $('mergeModelSlot'), costEl = $('mergeCost');
+        if (slot) slot.appendChild(sel);
+        const showCost = async () => {
+          const m = ms.find((x) => x.value === sel.value);
+          if (!costEl || !m) return;
+          costEl.textContent = '예상 비용 확인 중…';
+          let t = '예상 비용: 단가를 가져오지 못했습니다(인터넷 연결 확인)';
+          try {
+            const p = await api.model_info(m.id);
+            if (p && p.ok && p.prompt_per_m != null && p.completion_per_m != null) t = `예상 비용: 약 $${((nIn * p.prompt_per_m + nOut * p.completion_per_m) / 1e6).toFixed(4)} (글자 수로 짐작한 값, 실제와 다를 수 있음)`;
+          } catch (e) { /* 단가를 모르면 안내만 */ }
+          if (sel.isConnected) costEl.textContent = t;
+        };
+        sel.addEventListener('change', showCost);
+        showCost();
+        if (!(await wait)) return;
+        const res = await mutate('inbox_scan_merge', bid, r.page, sel.value);
         if (res) { if (res.page === cur) draw(res); toast(`${res.page + 1}쪽 조합 글을 받았습니다. 비용 $${(+res.merge_cost || 0).toFixed(4)}`); }
       }
       function mergeBox(r) {

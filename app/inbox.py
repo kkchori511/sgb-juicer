@@ -727,7 +727,7 @@ class Inbox:
             rv.pop("src", None)
             if data["page"] == "merge":  # [조합 글로 쓰기]: 직접 고친 글과 같은 자리에 넣어 이어서 고칠 수 있게
                 if not (rv.get("m") or {}).get("text"):
-                    raise DbError("조합 글이 없습니다. 먼저 [AI로 조합하기]를 눌러 주세요.")
+                    raise DbError("조합 글이 없습니다. 먼저 [두 결과 조합하기]를 눌러 주세요.")
                 rv["page"], rv["text"], rv["src"] = "edit", rv["m"]["text"], "merge"
             else:
                 rv["page"] = data["page"] if data["page"] in ("clova", "ai", "edit") else None
