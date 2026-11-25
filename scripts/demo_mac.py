@@ -209,6 +209,14 @@ def _demo_scan(api, hr, year):
     ib.scan_store(b3, "clova", pages=[lines(big_clova), lines(big_clova2)])
     ib.scan_store(b3, "ai", ai_page=(0, qline(big_qwen)))
     ib.scan_store(b3, "ai", ai_page=(1, qline(big_qwen2)))
+    # Qwen이 1쪽을 못 읽은 묶음: 원본 보기·차이 검토의 실패 안내와 [이 쪽 다시 시도](가짜 응답 3초)
+    b4 = ok(api.inbox_create("Qwen 실패 예시(이 쪽 다시 시도)", hr, "career"), "Inbox")["id"]
+    ib.scan_set(b4, os.path.join(_FX, "dummy.pdf"), "Qwen실패.pdf")
+    ib.scan_set_mode(b4, "hybrid", 1, 0.14, "qwen/qwen3-vl-235b-a22b-instruct")
+    ib.scan_store(b4, "clova", pages=[ocr.image_lines(clova["images"][0]), ocr.image_lines(clova["images"][1])])
+    ib.scan_store(b4, "ai", ai_page=(0, {"error": "OpenRouter가 응답하지 않습니다(HTTP 502). 잠시 뒤 다시 시도해 주세요.", "sent": True}))
+    q = json.load(open(os.path.join(_FX, "qwen_p2.json"), encoding="utf-8"))["result"]
+    ib.scan_store(b4, "ai", ai_page=(1, {"lines": q["lines"], "figures": q["figures"], "cost": 0.0015, "provider": "(시험용)", "model": "qwen/qwen3-vl-235b-a22b-instruct"}))
     # 아직 읽지 않은 스캔 PDF 묶음: 파일 창 없이 '읽는 방식' 화면과 [OCR 시작](가짜 응답)을 볼 수 있게
     b2 = ok(api.inbox_create("스캔 PDF(읽기 전 예시)", hr, "career"), "Inbox")["id"]
     ib.scan_set(b2, os.path.join(_FX, "dummy.pdf"), "스캔_더미학습지_2쪽.pdf")

@@ -3232,6 +3232,55 @@ class Api:
         return out
 
     @safe
+    def inbox_scan_retry_ai(self, bid, page):
+        """[이 쪽 다시 시도]: Qwen이 못 읽은(또는 결과가 없는) 한 쪽만 Qwen에 다시 보낸다(사용자 지정 2026-11-25).
+        처음 보낸 가림 비율·모델을 그대로 쓰고, 다른 쪽은 보내지 않는다. [바로 중지] 뒤에 온 답은 저장하지 않는다."""
+        self._editable()
+        cfg = config.load()
+        key = cfg["openrouter_key"].strip()
+        if not key:
+            raise db.DbError("OpenRouter API 키가 없습니다. 설정 › 연결·모델에서 넣어 주세요.")
+        ib = self._ib()
+        ib._scan_review_editable(bid)
+        _b, sc = ib._scan(bid)
+        if (sc.get("mode") or "clova") not in ("ai", "hybrid"):
+            raise db.DbError("Qwen으로 읽는 방식(하이브리드·Qwen만)에서만 다시 시도할 수 있습니다.")
+        p = int(page)
+        if not 0 <= p < int(sc.get("pages") or 0):
+            raise db.DbError("없는 쪽입니다.")
+        ai = sc.get("ai") or {}
+        cur = (ai.get("pages") or [None] * (p + 1))[p] if ai.get("pages") else None
+        if cur and not cur.get("error"):
+            raise db.DbError("이 쪽은 Qwen이 이미 읽었습니다.")
+        model = ai.get("model") or cfg["ocr_ai_model"]
+        amask = float(ai.get("mask") or 0)
+        if amask <= 0 and not cfg["ocr_ai_consent"]:
+            raise db.DbError("머리글을 가리지 않은 그림(이름·학번 포함)을 Qwen에 보내려면 먼저 전송에 동의해 주세요.")
+        with self._ai_lock:
+            self._check_running()
+            if not self._busy.acquire(blocking=False):
+                raise db.DbError("다른 작업(OCR 등)이 진행 중입니다. 끝난 뒤 다시 해 주세요.")
+        try:
+            year = config.load()["current_year"]
+            png = ocr_vision.render_png(str(scan.pdf_path(year, bid)), p, amask)
+            try:
+                res = ocr_vision.read_page(key, model, png)
+                res = {k: res[k] for k in ("lines", "figures", "cost", "provider", "model")}
+            except ocr_vision.VisionError as e:
+                if openrouter.cancelled():
+                    raise db.DbError("중지했습니다.")
+                ib.scan_store(bid, "ai", ai_page=(p, {"error": str(e), "sent": True}))
+                raise db.DbError(f"Qwen이 이 쪽을 다시 읽지 못했습니다: {e}")
+            if openrouter.cancelled():  # [바로 중지] 뒤에 도착한 답은 저장하지 않는다
+                raise db.DbError("중지했습니다. 이 쪽 결과는 저장하지 않았습니다.")
+            ib.scan_store(bid, "ai", ai_page=(p, res))
+        finally:
+            self._busy.release()
+        out = ib.scan_compare(bid, p)
+        out["retry_cost"] = res.get("cost") or 0
+        return out
+
+    @safe
     def inbox_scan_crop(self, bid, page, box, w, h, clip=None):
         """차이 난 줄의 원본 확대 그림(이 PC 안에서만). box·clip은 CLOVA 좌표(w×h 기준)."""
         return {"src": scan.render_crop(self._db().year, bid, page, box, w, h, clip)}

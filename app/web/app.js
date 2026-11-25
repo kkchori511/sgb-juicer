@@ -163,6 +163,37 @@
     hits.forEach((h) => { if (h.a >= end) { out.push(h); end = h.b; } });
     return out;
   }
+  // 보기 칸에서 누른 자리 → 글자 위치(보기 글 = 입력 글일 때). 못 구하면 -1 (사용자 지정 2026-11-25: 누른 곳에 커서)
+  function caretOffsetAt(view, ev) {
+    if (!ev || ev.clientX == null) return -1;
+    let node = null, off = 0;
+    if (document.caretRangeFromPoint) { const rg = document.caretRangeFromPoint(ev.clientX, ev.clientY); if (rg) { node = rg.startContainer; off = rg.startOffset; } }
+    else if (document.caretPositionFromPoint) { const cp = document.caretPositionFromPoint(ev.clientX, ev.clientY); if (cp) { node = cp.offsetNode; off = cp.offset; } }
+    if (!node || !view.contains(node)) return -1;
+    const rg = document.createRange();
+    rg.setStart(view, 0); rg.setEnd(node, off);
+    return rg.toString().length;
+  }
+  // 입력 칸에 커서를 off에 두고, 그 줄이 화면 높이 clientY(누른 높이)에 오도록 칸 안 스크롤을 맞춘다. 바깥 화면은 움직이지 않음
+  function placeCaret(ta, off, clientY) {
+    off = Math.max(0, Math.min(off, ta.value.length));
+    ta.focus({ preventScroll: true });
+    ta.setSelectionRange(off, off);
+    const cs = getComputedStyle(ta);
+    const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5 || 20;
+    const m = document.createElement('div'); // 거울 칸: 커서 줄의 높이 재기
+    ['boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+      'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'wordSpacing', 'tabSize'].forEach((k) => { m.style[k] = cs[k]; });
+    Object.assign(m.style, { position: 'absolute', visibility: 'hidden', top: '0', left: '-9999px', whiteSpace: 'pre-wrap', overflowWrap: 'break-word', borderStyle: 'solid' });
+    m.textContent = ta.value.slice(0, off);
+    const mk = document.createElement('span'); mk.textContent = '​'; m.appendChild(mk);
+    document.body.appendChild(m);
+    const top = mk.offsetTop;
+    m.remove();
+    let want = clientY != null ? clientY - ta.getBoundingClientRect().top - lh / 2 : 0;
+    want = Math.max(0, Math.min(want, ta.clientHeight - lh * 1.5));
+    ta.scrollTop = Math.max(0, top - want);
+  }
   function banNodes(text, hits) {
     const out = []; let i = 0;
     hits.forEach((h) => { if (h.a > i) out.push(text.slice(i, h.a)); out.push(el('mark', { class: 'ban', title: `기재 유의: ${h.word} → ${h.repl || '일반적인 말로'}`, text: text.slice(h.a, h.b) })); i = h.b; });
@@ -204,10 +235,11 @@
         view.hidden = false; ta.style.display = 'none';
       } else { view.hidden = true; ta.style.display = ''; }
     };
-    view.addEventListener('click', () => {
+    view.addEventListener('click', (e) => {
       if (window.getSelection && String(window.getSelection())) return; // 글을 끌어 고르는 중이면 그대로(복사용)
+      const off = caretOffsetAt(view, e); // 보기 칸을 숨기기 전에 누른 자리 계산
       view.hidden = true; ta.style.display = '';
-      if (!ta.disabled && !ta.readOnly) ta.focus(); else setTimeout(refresh, 1500);
+      if (!ta.disabled && !ta.readOnly) placeCaret(ta, off < 0 ? ta.value.length : off, off < 0 ? null : e.clientY); else setTimeout(refresh, 1500);
     });
     ta.addEventListener('blur', refresh);
     ta.addEventListener('input', () => { const hits = banFind(ta.value || ''); warn.hidden = !hits.length; warn.textContent = hits.length ? `⚠ 기재 유의어 ${banSummary(hits).length}개: ${banSummary(hits).join(' / ')}` : ''; });
@@ -2553,26 +2585,30 @@
     return out;
   }
   // onStop: [다음 건부터 중지](여러 건일 때), onCancel: [바로 중지](언제나)
-  function aiProgress(title, total, onStop, onCancel) {
+  // o: { stopText, stopTitle, stopDone, wait, first } — OCR처럼 다른 문구가 필요할 때
+  function aiProgress(title, total, onStop, onCancel, o) {
+    o = o || {};
     let box = $('aiProg');
     if (!box) { box = el('div', { id: 'aiProg', class: 'ai-prog', hidden: true }); document.body.appendChild(box); }
     box.innerHTML = '';
     const t0 = Date.now();
-    const count = el('div', { class: 'ai-prog-count', text: 'AI에 보내는 중…' });
+    const count = el('div', { class: 'ai-prog-count', text: o.first || 'AI에 보내는 중…' });
     const time = el('b', { text: '0:00' });
     // 막대: 끝난 건(파랑)·실패(빨강)·지금 처리 중(빗금이 흐름). 위에 '처리 중 n건 / 전체 N'
     const segDone = el('span', { class: 'seg-done' }), segFail = el('span', { class: 'seg-fail' }), segCur = el('span', { class: 'seg-cur' });
     const bar = el('div', { class: 'ai-bar2' }, [segDone, segFail, segCur]);
     const barLabel = el('div', { class: 'ai-bar-label', text: `지금 처리 중 1 / 전체 ${total}` });
-    const stopBtn = onStop ? el('button', { type: 'button', title: '지금 처리 중인 건은 끝까지 처리되고(결과·비용 유지), 남은 건은 실행하지 않습니다', text: '다음 건부터 중지',
-      onclick: () => { stopBtn.disabled = true; stopBtn.textContent = '중지 예약됨 — 처리 중인 건이 끝나면 멈춥니다'; onStop(); } }) : null;
+    const stopBtn = onStop ? el('button', { type: 'button', title: o.stopTitle || '지금 처리 중인 건은 끝까지 처리되고(결과·비용 유지), 남은 건은 실행하지 않습니다', text: o.stopText || '다음 건부터 중지',
+      onclick: () => { stopBtn.disabled = true; stopBtn.textContent = o.stopDone || '중지 예약됨 — 처리 중인 건이 끝나면 멈춥니다'; onStop(); } }) : null;
     const cancelBtn = onCancel ? el('button', { type: 'button', class: 'btn-danger', title: '처리 중인 건도 바로 끊고 결과를 버립니다(저장하지 않음). 이미 나간 비용은 돌아오지 않습니다', text: '⏹ 바로 중지',
       onclick: () => { cancelBtn.disabled = true; if (stopBtn) stopBtn.disabled = true; cancelBtn.textContent = '중지하는 중…'; onCancel(); } }) : null;
     const result = el('div', { class: 'ai-prog-result' });
     const foot = el('div', { class: 'sheet-foot' }, [el('span', { class: 'spacer' }), stopBtn, cancelBtn].filter(Boolean));
     const spin = el('div', { class: 'ai-spin' });
-    const wait = el('div', { class: 'muted' }, ['경과 ', time, ' / 멈춘 것이 아니니 기다려 주세요. AI 응답은 보통 수십 초, 느리면 몇 분 걸릴 수 있습니다.']);
-    box.appendChild(el('div', { class: 'ai-prog-card', role: 'dialog', 'aria-live': 'polite' }, [el('h2', { text: title }), spin, count, barLabel, bar, wait, result, foot]));
+    // 도는 원 옆에 걸린 시간, 아래 안내는 노란 상자(사용자 지정 2026-11-25)
+    const spinRow = el('div', { class: 'ai-spin-row' }, [spin, el('span', { class: 'ai-spin-time' }, ['걸린 시간 ', time])]);
+    const wait = el('div', { class: 'ai-prog-wait' }, [o.wait || '멈춘 것이 아니니 기다려 주세요. AI 응답은 보통 수십 초, 느리면 몇 분 걸릴 수 있습니다.']);
+    box.appendChild(el('div', { class: 'ai-prog-card', role: 'dialog', 'aria-live': 'polite' }, [el('h2', { text: title }), spinRow, count, barLabel, bar, wait, result, foot]));
     box.hidden = false;
     box.setAttribute('aria-modal', 'true');
     $('app').inert = true; $('sheet').inert = true; $('modal').inert = true; // 진행 중 배경 조작·단축키 막기
@@ -2582,9 +2618,10 @@
     const tick = () => { const x = Math.floor((Date.now() - t0) / 1000); time.textContent = `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}`; };
     const timer = setInterval(tick, 500);
     return {
+      setTotal(n) { total = Math.max(1, n); },
       set(done, fail, label, running) {
         const run = running === undefined ? (done + fail < total ? 1 : 0) : running;
-        count.textContent = total > 1 ? `완료 ${done}${fail ? ` / 실패 ${fail}` : ''}${label ? `\n지금: ${label}` : ''}` : `AI에 보내는 중…${label ? ` (${label})` : ''}`;
+        count.textContent = total > 1 ? `완료 ${done}${fail ? ` / 실패 ${fail}` : ''}${label ? `\n지금: ${label}` : ''}` : `${o.first || 'AI에 보내는 중…'}${label ? ` (${label})` : ''}`;
         barLabel.textContent = total > 1 && run > 1 ? `동시에 ${run}건 처리 중 / 끝난 건 ${done + fail} / 전체 ${total}` : `지금 처리 중 ${Math.min(done + fail + 1, total)} / 전체 ${total}`;
         segDone.style.width = `${(done / total) * 100}%`;
         segFail.style.width = `${(fail / total) * 100}%`;
@@ -8117,6 +8154,25 @@
     })();
   }
   // 하이브리드·Qwen OCR 상태 줄: 방식, Qwen 비용, 실패한 쪽 다시 읽기, OCR 다시 하기
+  // Qwen이 못 읽은(또는 결과가 없는) 쪽: 실패 안내 + [이 쪽 다시 시도](그 쪽만 다시 보냄, 사용자 지정 2026-11-25)
+  function qwenNeedsRetry(r) { return !!r && (r.mode === 'hybrid' || r.mode === 'ai') && (!!r.ai_error || r.ai == null); }
+  function qwenFailBox(bid, r, onDone) {
+    const why = r.ai_error && !/^(null|none|undefined)$/i.test(String(r.ai_error).trim()) ? String(r.ai_error) : '';
+    const btn = el('button', { type: 'button', class: 'small', text: '이 쪽 다시 시도', title: '이 쪽만 Qwen에 다시 보냅니다(다른 쪽은 보내지 않음, 한 쪽만큼 비용)',
+      onclick: async () => {
+        const out = await aiRunJobs({ title: `Qwen으로 ${r.page + 1}쪽 다시 읽기`, jobs: [{ label: `${r.page + 1}쪽`, run: () => api.inbox_scan_retry_ai(bid, r.page) }] });
+        const res = out && out.results[0];
+        if (!res) return;
+        markSaved();
+        toast(`${r.page + 1}쪽을 Qwen으로 다시 읽었습니다.${res.retry_cost ? ` 비용 $${(+res.retry_cost).toFixed(4)}` : ''}`);
+        if (onDone) onDone(res);
+      } });
+    return el('div', { class: 'ocr-qwen-fail' }, [
+      el('b', { text: r.ai_error ? 'Qwen OCR이 이 쪽을 읽지 못했습니다.' : 'Qwen OCR 결과가 이 쪽에 없습니다.' }),
+      why ? el('div', { class: 'ocr-qwen-why', text: `이유: ${why}` }) : '',
+      el('div', { text: r.mode === 'ai' ? '지금 이 쪽은 글이 비어 있습니다.' : '지금은 CLOVA 글을 씁니다.' }),
+      el('div', { style: 'margin-top:6px' }, [btn])]);
+  }
   // ----- 두 결과 조합하기(통째로 검토 쪽): 모델 목록·확인 창 — 한 쪽·한꺼번에 함께 씀 -----
   function mergeModels() {
     const out = [];
@@ -8177,7 +8233,7 @@
     const left = rev.reduce((s, x) => s + (x.left || 0), 0);
     // '읽은 방식' 표시: 옆 버튼과 같은 크기(버튼 모양을 빌려 씀, 누를 수 없음), 노란 바탕·진한 글씨
     const bar = el('div', { class: 'map-row', style: 'flex-wrap:wrap;gap:8px' }, [el('button', { type: 'button', class: 'small ocr-read-chip', tabindex: '-1', 'aria-disabled': 'true', text: `읽은 방식: ${label}` })]);
-    if (mode !== 'clova') bar.appendChild(el('span', { class: 'muted', text: `Qwen OCR 비용 $${(+r.ai_cost || 0).toFixed(4)}` }));
+    // Qwen OCR 비용은 따로 보이지 않음(위 '이번 사용량'에 나옴, 사용자 지정 2026-11-25)
     if (mode === 'hybrid') {
       bar.appendChild(left ? el('span', { class: 'tag warn-tag', text: `미검토 차이 ${left}곳 — 고르지 않은 곳은 CLOVA 글을 씁니다` }) : el('span', { class: 'tag', text: '✓ 차이 검토 끝' }));
       const firstLeft = rev.findIndex((x) => x.left);
@@ -8226,6 +8282,14 @@
       if (!(await modal(stepsHtml('OCR 결과를 지우고 처음부터 다시 읽습니다', [['지워지는 것', '저장한 OCR 결과와 차이 검토에서 고른 것·직접 고친 글이 모두 지워지고, 읽는 방식 고르기로 돌아갑니다.'], ['비용', '<b>CLOVA를 다시 부르면 무료 사용량을 넘어 과금될 수 있고</b>, Qwen도 쪽마다 다시 비용이 듭니다.'], ['보통은 필요 없음', '몇 쪽만 틀렸으면 그 쪽의 [원본 보기] › [✏️ 이 쪽 글 고치기]로, 못 읽은 쪽은 [실패한 쪽만 다시 읽기]로 해결하세요.']], '계속할까요?'), true, true, '지우고 다시 하기'))) return;
       if (await mutate('inbox_scan_reset', b.id, 'all')) { SC.starts = null; loadBatch(); }
     } }));
+    // 정돈(사용자 지정 2026-11-25): 알림은 왼쪽에 같은 크기 상자로, 누르는 버튼은 오른쪽에 모음
+    const kids = [...bar.children].filter((c) => !c.classList.contains('spacer'));
+    const notes = kids.filter((c) => c.tagName !== 'BUTTON' || c.classList.contains('ocr-read-chip'));
+    const btns = kids.filter((c) => !notes.includes(c));
+    notes.forEach((n) => n.classList.add('ocr-note'));
+    bar.style.cssText = '';
+    bar.className = 'ocr-stat-bar';
+    bar.replaceChildren(el('div', { class: 'ocr-stat-notes' }, notes), el('div', { class: 'ocr-stat-btns' }, btns));
     return bar;
   }
   // 하이브리드 차이 검토 창: 원본 줄 확대 + CLOVA/Qwen/직접 고르기. API는 부르지 않는다(저장된 결과만).
@@ -8318,7 +8382,7 @@
               el('button', { type: 'button', class: 'small', text: '직접 입력 취소', onclick: () => decide({ page: null }) })]) : null,
           ]));
         }
-        if (r.ai_error) right.appendChild(el('div', { class: 'warn', text: `Qwen이 이 쪽을 읽지 못했습니다: ${r.ai_error} — CLOVA 글을 씁니다. [실패한 쪽만 다시 읽기]로 이 쪽만 다시 보낼 수 있습니다.` }));
+        if (qwenNeedsRetry(r)) right.appendChild(qwenFailBox(bid, r, (x) => { if (x.page === cur) draw(x); }));
         else if (!r.cmp) right.appendChild(el('p', { class: 'hint', text: '이 쪽은 비교할 두 결과가 없습니다.' }));
         if (r.cmp && r.cmp.big) right.appendChild(bigPage(r));
         else if (r.cmp) right.appendChild(diffList(r));
@@ -8330,7 +8394,7 @@
         }
         finalSlot.classList.add('ocr-final-slot');
         finalSlot.append(el('div', { class: 'muted ocr-fold-hint', text: '학번·이름 줄은 다음 단계에서 빠집니다. 글을 누르면 바로 고칠 수 있습니다' }),
-          el('div', { class: 'ocr-final-text', title: '누르면 고치기', text: r.final || '(글자 없음)', onclick: () => editWhole(r) }));
+          el('div', { class: 'ocr-final-text', title: '누르면 고치기', text: r.final || '(글자 없음)', onclick: (e) => editWhole(r, e) }));
         bodyEl.scrollTop = keep;
         const first = bodyEl.querySelector('.ocr-diff:not(.done)');
         if (first && !keep) first.focus();
@@ -8449,65 +8513,70 @@
             using ? el('span', { class: 'hint', text: '고치려면 왼쪽 최종 글을 누르세요' }) : null])]);
       }
       // 직접 입력(사용자 지정 2026-11-24): 따로 창 없이 왼쪽 '이 쪽 최종 글' 상자를 누르거나 [직접 입력]을 누르면 그 자리에서 고침
-      function editWhole(r) {
+      // ev: 최종 글을 눌러 열었을 때의 클릭 → 누른 자리에 커서(사용자 지정 2026-11-25). 버튼으로 열면 맨 앞·맨 위부터
+      function editWhole(r, ev) {
         const box = bodyEl.querySelector('.ocr-final-box');
         const slot = box && box.querySelector('.ocr-final-slot');
         if (!slot || slot.classList.contains('editing')) { if (slot) { const t = slot.querySelector('textarea'); if (t) t.focus(); } return; }
+        if (ev && window.getSelection && String(window.getSelection())) return; // 글을 끌어 고르는 중이면 그대로(복사용)
         leftOpen.final = true; box.open = true;
-        slot.classList.add('editing'); box.classList.add('editing');
         const ta = el('textarea', { class: 'ocr-final-edit', rows: 14 });
         ta.value = r.final || '';
         const view = slot.querySelector('.ocr-final-text');
+        const off = view && ev ? caretOffsetAt(view, ev) : -1;
+        // 입력 칸을 보기 칸 높이에 맞춰 줄 위치가 그대로 오게(왼쪽은 따로 스크롤됨)
+        if (view && view.offsetHeight) ta.style.height = `${Math.max(260, Math.min(view.offsetHeight + 6, 4000))}px`;
+        slot.classList.add('editing'); box.classList.add('editing');
         if (view) view.hidden = true;
         const bar = el('div', { class: 'map-row', style: 'gap:6px;margin-top:6px' }, [
           el('button', { type: 'button', class: 'primary small', text: '이 글로 쓰기', onclick: () => decide({ page: 'edit', text: ta.value }) }),
           el('button', { type: 'button', class: 'small', text: '취소', onclick: () => { ta.remove(); bar.remove(); if (view) view.hidden = false; slot.classList.remove('editing'); box.classList.remove('editing'); } })]);
         slot.append(ta, bar);
-        box.scrollIntoView({ block: 'nearest' });
-        ta.focus();
+        if (off >= 0) placeCaret(ta, off, ev.clientY);
+        else { box.scrollIntoView({ block: 'nearest' }); placeCaret(ta, 0, null); }
       }
       load();
     });
   }
+  // OCR 읽기(처음 시작·실패한 쪽만 다시·다른 엔진으로도 읽기): AI 변환과 같은 진행 상자(사용자 지정 2026-11-25)
   function runOcr(b, per, mode, opts) {
     mode = mode || 'clova';
-    const msg = el('div', { class: 'modal-msg', text: mode === 'ai' ? 'Qwen에 보내는 중…' : mode === 'hybrid' ? 'CLOVA와 Qwen에 보내는 중…' : 'CLOVA OCR에 보내는 중…' });
-    const time = el('b', { text: '0:00' });
-    const stopBtn = el('button', { type: 'button', class: 'btn-danger', text: '중지', onclick: () => { stopBtn.disabled = true; stopBtn.textContent = '중지 중…'; api.inbox_ocr_stop(); } });
-    openSheet((box) => {
-      box.style.height = 'auto';
-      box.style.width = 'min(500px, 92vw)';
-      box.append(el('div', { class: 'sheet-head' }, [el('h2', { text: 'OCR 진행 중' })]), msg,
-        mode !== 'clova' ? el('p', { class: 'hint', text: '중지해도 이미 Qwen에 보낸 쪽은 결과를 받아 저장합니다(비용이 이미 들었으므로). 다시 시작하면 남은 쪽만 읽습니다.' }) : '', // append에 null 금지(W10)
-        el('div', { class: 'sheet-foot' }, [el('span', {}, ['경과 시간 ', time, ' — 멈춘 게 아니니 기다려 주세요']), el('span', { class: 'spacer' }), stopBtn]));
-    });
-    SC.start = Date.now();
+    const title = mode === 'ai' ? 'Qwen으로 스캔 읽기' : mode === 'hybrid' ? 'CLOVA와 Qwen으로 스캔 읽기' : 'CLOVA OCR로 스캔 읽기';
+    const pg = aiProgress(title, 1, () => api.inbox_ocr_stop(), null, {
+      first: mode === 'ai' ? 'Qwen에 보내는 중…' : mode === 'hybrid' ? 'CLOVA와 Qwen에 보내는 중…' : 'CLOVA OCR에 보내는 중…',
+      stopText: '중지', stopDone: '중지하는 중 — 이미 보낸 쪽을 받으면 멈춥니다',
+      stopTitle: '이미 보낸 쪽은 결과를 받아 저장하고(비용이 이미 들었으므로), 남은 쪽은 보내지 않습니다. 다시 시작하면 남은 쪽만 읽습니다.',
+      wait: '멈춘 것이 아니니 기다려 주세요. 쪽 수가 많으면 몇 분 걸릴 수 있습니다.' });
+    SC.pg = pg;
     SC.prog = {};
-    clearInterval(SC.timer);
-    SC.timer = setInterval(() => { const s = Math.floor((Date.now() - SC.start) / 1000); time.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }, 1000);
-    SC.msg = msg;
     api.inbox_scan_ocr(b.id, per, mode, opts || {}).then((r) => {
-      if (!r || !r.ok) { clearInterval(SC.timer); closeSheet(); alertBox((r && r.error) || 'OCR을 시작하지 못했습니다.'); return; }
-      const parts = [];
-      if (r.clova) parts.push('CLOVA: 보내는 중');
-      if (r.ai_pages) parts.push(`Qwen: 0 / ${r.ai_pages}쪽`);
-      if (!parts.length) parts.push('이미 읽은 결과로 정리하는 중…');
-      msg.textContent = parts.join(' / ');
+      if (!r || !r.ok) { if (SC.pg === pg) SC.pg = null; pg.finish([], ''); alertBox((r && r.error) || 'OCR을 시작하지 못했습니다.'); return; }
+      if (r.clova) SC.prog.clova = { done: 0, total: 1 };
+      if (r.ai_pages) SC.prog.ai = { done: 0, total: r.ai_pages };
+      ocrShow(r.clova || r.ai_pages ? '' : '이미 읽은 결과로 정리하는 중…');
     });
+  }
+  // 진행: CLOVA는 10쪽 구간, Qwen은 쪽 수. 막대는 두 엔진을 합친 수
+  function ocrShow(note) {
+    if (!SC.pg) return;
+    const c = SC.prog.clova, a = SC.prog.ai;
+    const total = (c ? c.total : 0) + (a ? a.total : 0);
+    const done = (c ? c.done : 0) + (a ? a.done : 0);
+    SC.pg.setTotal(total || 1);
+    SC.pg.set(Math.min(done, total || 1), 0, note || [c && `CLOVA ${c.done} / ${c.total}구간`, a && `Qwen ${a.done} / ${a.total}쪽`].filter(Boolean).join(' · '), done < total ? 1 : 0);
   }
   function ocrEvent(ev) {
     if (ev.type === 'ocr_progress') {
       SC.prog = SC.prog || {};
-      SC.prog[ev.engine || 'clova'] = ev.engine === 'ai' ? `Qwen: ${ev.done} / ${ev.total}쪽` : `CLOVA: ${ev.pages}쪽을 10쪽씩 나눠 읽는 중(${ev.done + 1} / ${ev.total} 구간)`;
-      if (SC.msg) SC.msg.textContent = Object.values(SC.prog).join(' / ');
+      SC.prog[ev.engine === 'ai' ? 'ai' : 'clova'] = { done: ev.done, total: ev.total };
+      ocrShow();
       return;
     }
-    clearInterval(SC.timer);
-    closeSheet();
+    if (SC.pg) { SC.pg.finish([], ''); SC.pg = null; }
     if (ev.type === 'ocr_done') {
-      toast(`${ev.pages}쪽을 읽었습니다.${ev.ai_cost ? ` Qwen 비용 $${(+ev.ai_cost).toFixed(4)}.` : ''} 학생별로 묶인 것을 확인하세요.`);
+      toast(`${ev.pages}쪽을 읽었습니다. 학생별로 묶인 것을 확인하세요.`);
       const fails = [ev.clova_failed ? `CLOVA ${ev.clova_failed}쪽` : '', ev.ai_failed ? `Qwen ${ev.ai_failed}쪽` : ''].filter(Boolean).join(', ');
-      if (fails) alertBox(`읽지 못한 쪽이 있습니다: ${fails}.${ev.ai_message ? ' ' + ev.ai_message : ''} 그 쪽은 다른 엔진의 글을 쓰고, 둘 다 못 읽었으면 빈 글입니다. [실패한 쪽만 다시 읽기]로 그 쪽만 다시 보낼 수 있습니다(읽은 쪽은 다시 보내지 않음).`);
+      if (fails) alertBox(`읽지 못한 쪽이 있습니다: ${fails}.${ev.ai_message ? ' ' + ev.ai_message : ''} 그 쪽은 다른 엔진의 글을 쓰고, 둘 다 못 읽었으면 빈 글입니다. [실패한 쪽만 다시 읽기]나 그 쪽 원본 보기의 [이 쪽 다시 시도]로 다시 보낼 수 있습니다(읽은 쪽은 다시 보내지 않음).`);
       SC.starts = null;
     }
     else if (ev.type === 'ocr_stopped') toast('OCR을 중지했습니다. 다시 시작하면 남은 쪽만 읽습니다.');
@@ -8558,7 +8627,8 @@
             (r.figures || []).length ? el('div', { class: 'wsection', style: 'margin:0 0 8px' }, [
               el('div', { class: 'col-label', text: '그림 설명 (Qwen이 본 것 — 확인하세요)' }),
               ...r.figures.map((f) => el('div', { class: 'snip', style: 'max-width:none', text: `[그림: ${f.desc}]` })),
-              el('label', { class: 'inline', style: 'display:block;margin-top:4px' }, [el('input', { type: 'checkbox', checked: r.figs, onchange: async (e) => { const x = await mutate('inbox_scan_decide', bid, +p, { figs: e.target.checked }); if (x) draw(x); } }), ' 본문에 그림 설명 넣기'])]) : null,
+              el('label', { class: 'inline', style: 'display:block;margin-top:4px' }, [el('input', { type: 'checkbox', checked: r.figs, onchange: async (e) => { const x = await mutate('inbox_scan_decide', bid, +p, { figs: e.target.checked }); if (x) draw(x); } }), ' 본문에 그림 설명 넣기'])]) : '', // append에 null을 넣으면 'null' 글자가 찍힘
+            qwenNeedsRetry(r) ? qwenFailBox(bid, r, draw) : '',
             el('div', { class: 'col-label', text: isSkip ? '뺀 쪽(창을 닫으면 목록에 반영, [확정하고 매칭으로] 때 저장)' : '이 쪽 글(학번·이름 줄은 다음 단계에서 빠짐)' }),
             textBox);
           markDismiss(box);
