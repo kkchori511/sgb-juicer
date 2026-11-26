@@ -8076,13 +8076,18 @@
         el('button', { type: 'button', class: 'small', text: '설정으로 가기', onclick: () => { showPanel('settings'); showSettingsTab('conn'); $('clovaGuide').open = true; $('clovaGuide').scrollIntoView(); } })]));
       else if (!ready.clova || !ready.openrouter) modeBox.appendChild(el('p', { class: 'hint', text: '키는 설정 › 연결·모델에서 넣습니다.' }));
       if (SC.colsBid !== b.id) { SC.colsBid = b.id; SC.cols = sc.cols || 'auto'; SC.side = sc.side || 'both'; }
-      const colsRow = el('div', { class: 'ocr-cols-row' }, [el('b', { text: '단 나누기' }),
-        ...OCR_COLS.map(([k, t, d]) => el('label', { class: 'inline', title: d }, [el('input', { type: 'radio', name: 'ocrCols', value: k, checked: SC.cols === k, onchange: () => { SC.cols = k; } }), ` ${t}`])),
-        el('span', { class: 'hint', text: '좌우 2단 학습지(가로로 두 쪽이 나란한 것 포함)를 왼쪽 단 → 오른쪽 단 순서로 읽습니다. 기울어진 스캔은 자동으로 바로잡습니다(CLOVA 결과 기준).' })]);
-      modeBox.appendChild(colsRow);
-      modeBox.appendChild(el('div', { class: 'ocr-cols-row' }, [el('b', { text: '읽을 단' }),
-        ...OCR_SIDES.map(([k, t, d]) => el('label', { class: 'inline', title: d }, [el('input', { type: 'radio', name: 'ocrSide', value: k, checked: SC.side === k, onchange: () => { SC.side = k; } }), ` ${t}`])),
-        el('span', { class: 'hint', text: '한쪽 단이 지문(읽기 자료)이면 그 단을 빼고 읽으세요. AI가 지문 내용을 학생이 한 활동처럼 쓰는 것을 막습니다. Qwen에도 고른 단만 잘라 보냅니다(하이브리드는 CLOVA를 먼저 읽고 경계를 찾은 뒤 보냄).' })]));
+      // 단 나누기·읽을 단: 한 상자에 두 묶음, 읽는 방식처럼 상자 버튼으로 고름(사용자 지정 2026-11-26)
+      const SHORT_COLS = { auto: '여백이 있는 쪽만 2단으로', two: '모든 쪽을 가운데 기준으로', off: '예전처럼 나누지 않음' };
+      const SHORT_SIDES = { both: '두 단 모두 읽음', right: '왼쪽 단(지문 등) 빼기', left: '오른쪽 단 빼기' };
+      const pickGrid = (name, list, short, cur, set) => el('div', { class: 'ocr-modes ocr-modes-sm' }, list.map(([k, t, d]) => el('label', { class: 'ocr-mode ocr-mode-sm', title: d }, [
+        el('input', { type: 'radio', name, value: k, checked: cur === k, onchange: () => set(k) }),
+        el('span', { class: 'ocr-mode-text' }, [el('span', { class: 'ocr-mode-head' }, [el('b', { class: 'ocr-mode-name', text: t }), el('span', { class: 'ocr-mode-on', text: '✓' })]),
+          el('span', { class: 'ocr-mode-desc', text: short[k] })])])));
+      const layoutBox = el('div', { class: 'wsection ocr-layout-box' }, [
+        el('div', { class: 'ocr-layout-grid' }, [
+          el('div', {}, [el('h3', { text: '단 나누기' }), pickGrid('ocrCols', OCR_COLS, SHORT_COLS, SC.cols, (k) => { SC.cols = k; })]),
+          el('div', {}, [el('h3', { text: '읽을 단' }), pickGrid('ocrSide', OCR_SIDES, SHORT_SIDES, SC.side, (k) => { SC.side = k; })])]),
+        el('p', { class: 'hint', text: '좌우 2단 학습지는 왼쪽 단 → 오른쪽 단 순서로 읽고, 기울어진 스캔은 바로잡습니다. 한쪽이 지문이면 그 단을 빼세요(제목·학번·이름 줄은 남김, AI가 지문을 학생 활동으로 쓰지 않게). 마우스를 올리면 자세한 설명이 보입니다.' })]);
       const opts = el('div', {});
       const warn = el('div', { class: 'warn ocr-warn', style: 'margin-top:12px' });
       const startBtn = el('button', { type: 'button', class: 'primary', text: 'OCR 시작', disabled: noKey });
@@ -8093,7 +8098,7 @@
         // 파일 줄은 한 줄로(이름·쪽 수, 학생당 페이지 수, 예상 인원) — 한 화면에 [OCR 시작]까지 보이게
         el('div', { class: 'wsection ocr-file', style: 'margin-top:0' }, [el('div', { class: 'map-row' }, [el('b', { class: 'ocr-file-name', text: `🖨 ${sc.filename} / ${sc.pages}쪽` }),
           el('label', { title: '백지가 섞여 있어도 다음 단계에서 페이지를 빼거나 경계를 옮길 수 있습니다.' }, ['학생 1명당 페이지 수 (단면 1 / 양면 2)', per]), est])]),
-        resume || '', modeBox, opts, warn, // DOM append는 null을 'null' 글자로 붙인다(W10) — 빈 값은 ''로
+        resume || '', modeBox, layoutBox, opts, warn, // DOM append는 null을 'null' 글자로 붙인다(W10) — 빈 값은 ''로
         el('div', { class: 'sheet-foot' }, [dropZone(el('button', { type: 'button', class: 'file-pdf', text: '다른 PDF 고르기', onclick: () => startScanPick(b) }), 'pdf'), el('span', { class: 'spacer' }), startBtn]),
       );
       let unmasked = false; // Qwen만: 가리지 않고 보내기
