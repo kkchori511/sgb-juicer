@@ -580,14 +580,17 @@ class Inbox:
         meta = b["meta"]
         sc = meta.get("scan") or {}
         if engine == "clova":
+            from . import ocr_layout
+            cols, side = sc.get("cols") or "auto", sc.get("side") or "both"
+            lay = lambda pg: ocr_layout.arrange(pg, cols, side) if pg else pg  # noqa: E731 — 낱말 좌표가 없으면(예전 결과) 그대로
             if isinstance(pages, dict):  # 묶음(10쪽)마다 받은 만큼만 합친다
                 cl = list(sc.get("clova") or [None] * int(sc.get("pages") or 0))
                 for i, pg in pages.items():
                     if 0 <= int(i) < len(cl):
-                        cl[int(i)] = pg
+                        cl[int(i)] = lay(pg)
                 sc["clova"] = cl
             else:
-                sc["clova"] = pages
+                sc["clova"] = [lay(pg) for pg in (pages or [])]
         else:
             ai = sc.get("ai") or {}
             if ai_meta:
@@ -675,6 +678,60 @@ class Inbox:
             self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
         return sc
 
+    @_scan_locked
+    def scan_set_cols(self, bid, cols, side=None):
+        """단 나누기(auto/off/two)와 읽을 단(both/right/left). 이미 읽은 CLOVA 결과는 낱말 좌표로 다시 배치하고(CLOVA를 다시 부르지 않음),
+        줄이 바뀐 쪽은 차이별로 고른 것·AI 제안을 지운다(통째로 고른 것·직접 고친 글·조합 글은 남김).
+        읽을 단을 바꾸면 Qwen이 읽은 그림 범위가 달라지므로 Qwen 결과를 지운다(다시 읽어야 함, ai_reset)."""
+        from . import ocr_layout
+        if cols not in ocr_layout.MODES:
+            raise DbError("단 나누기 값이 올바르지 않습니다.")
+        if side is not None and side not in ocr_layout.SIDES:
+            raise DbError("읽을 단 값이 올바르지 않습니다.")
+        b = self._scan_review_editable(bid)
+        meta = b["meta"]
+        sc = meta.get("scan") or {}
+        sc["cols"] = cols
+        ai_reset = 0
+        if side is not None and side != (sc.get("side") or "both"):
+            sc["side"] = side
+            ai = sc.get("ai") or {}
+            ps = ai.get("pages") or []
+            ai_reset = sum(1 for x in ps if x)
+            if ai_reset:
+                ai["pages"] = [None] * len(ps)
+                sc["ai"] = ai
+                for rv in (sc.get("review") or {}).values():  # Qwen과 비교해 고른 것·제안·조합 글은 더 이상 맞지 않음
+                    for k in ("d", "s", "m"):
+                        rv.pop(k, None)
+                    if rv.get("page") in ("ai", "clova"):
+                        rv.pop("page", None)
+        side = sc.get("side") or "both"
+        changed = []
+        new = []
+        for p, pg in enumerate(sc.get("clova") or []):
+            if not pg:
+                new.append(pg)
+                continue
+            a = ocr_layout.arrange(pg, cols, side)
+            if [l["text"] for l in a["lines"]] != [l["text"] for l in pg.get("lines") or []]:
+                changed.append(p)
+            new.append(a)
+        if sc.get("clova"):
+            sc["clova"] = new
+        rv_all = sc.get("review") or {}
+        for p in changed:
+            rv = rv_all.get(str(p))
+            if rv:
+                rv.pop("d", None)
+                rv.pop("s", None)
+        sc["review"] = rv_all
+        self._scan_refresh(sc)
+        meta["scan"] = sc
+        with self.d.tx() as c:
+            self._touch(c, bid, meta=json.dumps(meta, ensure_ascii=False))
+        return {"changed": changed, "ai_reset": ai_reset, "words": any((pg or {}).get("words") for pg in sc.get("clova") or [])}
+
     def _scan_review_editable(self, bid):
         """검토·고르기는 페이지 묶기 단계에서만(확정한 뒤 늦게 도착한 저장이 매칭 내용과 어긋나지 않게, Codex 재검토 R4)."""
         b = self._editable_batch(bid)
@@ -697,7 +754,7 @@ class Inbox:
                "ai": ocr_vision.page_text(ap, False) if ap and not ap.get("error") else None,
                "figures": (ap or {}).get("figures") or [], "final": (sc.get("ocr") or [""] * (p + 1))[p] if sc.get("ocr") else "",
                "cmp": None, "w": (cp or {}).get("w") or 0, "h": (cp or {}).get("h") or 0, "unreviewed": 0,
-               "edited": rv.get("page") == "edit"}
+               "edited": rv.get("page") == "edit", "layout": (cp or {}).get("layout") or None}
         if cp and ap and not ap.get("error") and not cp.get("fail"):
             cmp = ocr_compare.compare(cp, ap, (sc.get("ai") or {}).get("mask") or 0)
             out["cmp"] = {k: cmp[k] for k in ("ratio", "big", "diffs")}
@@ -852,7 +909,9 @@ class Inbox:
             no, name = scan.extract_ids(texts[g[0]], members)
             out.append({"index": i, "pages": g, "ext_no": no, "ext_name": name,
                         "content": scan.strip_pages([texts[p] for p in g], no, name, members), "empty": not raw.strip()})
+        lays = [((pg or {}).get("layout") or {}) for pg in (sc.get("clova") or [])]
         return {"groups": out, "page_texts": [t[:300] for t in texts], "starts": starts, "skipped": skipped,
+                "cols": sc.get("cols") or "auto", "side": sc.get("side") or "both", "layouts": lays, "has_words": any((pg or {}).get("words") for pg in sc.get("clova") or []),
                 "mode": sc.get("mode") or "clova", "review": self.scan_review_counts(sc),
                 "edited": sorted(int(k) for k, v in (sc.get("review") or {}).items() if (v or {}).get("page") == "edit"),
                 "ai_cost": (sc.get("ai") or {}).get("cost") or 0}

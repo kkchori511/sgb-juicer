@@ -98,6 +98,8 @@ def image_lines(img: dict) -> dict:
         if f.get("lineBreak"):
             flush()
     flush()
+    from .ocr_layout import words_of
+    out["words"] = words_of(img)  # 2단 나누기·기울기 보정용 낱말 좌표(사용자 지정 2026-11-26)
     return out
 
 

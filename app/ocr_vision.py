@@ -21,10 +21,12 @@ DEFAULT_MODEL = MODELS[0][0]
 PROVIDER = {"data_collection": "deny", "zdr": True, "require_parameters": True}
 RENDER_WIDTH = 1400
 MAX_LINES = 400
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2  # 2: 2단 읽는 순서(2026-11-26)
 
 PROMPT = (
     "이 그림은 학생이 쓴 학습지 스캔입니다. 보이는 글자를 읽기 순서대로 줄 단위로 그대로 옮겨 쓰세요.\n"
+    "- 읽는 순서: 쪽이 왼쪽·오른쪽 두 단(또는 학습지 두 쪽이 나란히)으로 나뉘어 있으면 왼쪽 단을 위에서 아래까지 모두 쓴 뒤 오른쪽 단을 쓰세요. "
+    "왼쪽과 오른쪽 글을 한 줄에 섞지 마세요. 두 단을 가로지르는 제목·머리글은 그 자리에 한 번만 쓰세요.\n"
     "- 맞춤법 교정, 요약, 번역, 문맥으로 글자 만들기를 하지 마세요. 틀린 글자도 보이는 대로 쓰세요.\n"
     "- 알아볼 수 없는 글자는 □로 쓰고 그 줄의 unreadable을 true로 하세요.\n"
     "- 흰색으로 가려진 영역은 무시하세요.\n"
@@ -56,8 +58,9 @@ def model_label(mid):
     return dict(MODELS).get(mid, mid)
 
 
-def render_png(pdf_path, page: int, mask: float = 0.0, width: int = RENDER_WIDTH) -> bytes:
-    """페이지를 PNG로. mask(0~0.5)만큼 위쪽을 흰색으로 칠한다."""
+def render_png(pdf_path, page: int, mask: float = 0.0, width: int = RENDER_WIDTH, keep=None) -> bytes:
+    """페이지를 PNG로. mask(0~0.5)만큼 위쪽을 흰색으로 칠한다.
+    keep=("right"|"left", 비율): 그 단만 남기고 잘라 보낸다(한쪽이 지문일 때, 사용자 지정 2026-11-26)."""
     import pypdfium2 as pdfium
 
     mask = max(0.0, min(0.5, float(mask or 0)))
@@ -71,6 +74,14 @@ def render_png(pdf_path, page: int, mask: float = 0.0, width: int = RENDER_WIDTH
             p.close()
         finally:
             pdf.close()
+    if keep and keep[0] in ("right", "left"):
+        cut = int(w * max(0.2, min(0.8, float(keep[1]))))
+        x0, x1 = (cut, w) if keep[0] == "right" else (0, cut)
+        nb = bytearray()
+        for y in range(h):
+            s = y * stride
+            nb += buf[s + x0 * ch:s + x1 * ch]
+        w, stride, buf = x1 - x0, (x1 - x0) * ch, nb
     row = w * ch
     for y in range(int(h * mask)):
         s = y * stride
@@ -82,7 +93,7 @@ def payload(model: str, png: bytes) -> dict:
     return {
         "model": model,
         "temperature": 0,
-        "max_tokens": 4096,
+        "max_tokens": 8192,  # A3에 학습지 두 쪽처럼 글이 많은 쪽도 끝까지(실제 샘플 4096에서 잘림, 2026-11-26)
         "usage": {"include": True},
         "provider": dict(PROVIDER),
         "response_format": {"type": "json_schema", "json_schema": {"name": "ocr_page", "strict": True, "schema": SCHEMA}},

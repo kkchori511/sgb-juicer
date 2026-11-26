@@ -8018,6 +8018,8 @@
             rv && rv.left ? el('button', { type: 'button', class: 'small', text: '검토 및 수정', onclick: () => showDiffReview(b.id, p) })
               : el('button', { type: 'button', class: 'small', text: '원본 보기', onclick: () => showOriginal(b.id, [p], { grouping: true, hybrid: !!(rv && !rv.ai_error) }) }),
             (r.edited || []).includes(p) ? el('span', { class: 'tag', text: '직접 고침' }) : null,
+            (r.layouts || [])[p] && r.layouts[p].cols === 2 ? el('span', { class: 'tag', text: '2단으로 읽음' }) : null,
+            (r.layouts || [])[p] && r.layouts[p].warn ? el('span', { class: 'tag warn-tag', text: `기울어짐 약 ${Math.abs(Math.round(r.layouts[p].measured))}° — 다시 스캔 권장` }) : null,
             t.trim() ? null : el('span', { class: 'tag warn-tag', text: '글자 없음' }),
             el('span', { class: 'spacer' }),
             isSkip ? el('button', { type: 'button', class: 'small', text: '↩ 되살리기', onclick: toggleSkip })
@@ -8073,6 +8075,14 @@
       if (noKey) modeBox.appendChild(el('p', { class: 'warn' }, ['CLOVA OCR 키와 OpenRouter API 키가 모두 없어 읽을 수 없습니다. 키를 넣은 뒤 다시 여세요. ',
         el('button', { type: 'button', class: 'small', text: '설정으로 가기', onclick: () => { showPanel('settings'); showSettingsTab('conn'); $('clovaGuide').open = true; $('clovaGuide').scrollIntoView(); } })]));
       else if (!ready.clova || !ready.openrouter) modeBox.appendChild(el('p', { class: 'hint', text: '키는 설정 › 연결·모델에서 넣습니다.' }));
+      if (SC.colsBid !== b.id) { SC.colsBid = b.id; SC.cols = sc.cols || 'auto'; SC.side = sc.side || 'both'; }
+      const colsRow = el('div', { class: 'ocr-cols-row' }, [el('b', { text: '단 나누기' }),
+        ...OCR_COLS.map(([k, t, d]) => el('label', { class: 'inline', title: d }, [el('input', { type: 'radio', name: 'ocrCols', value: k, checked: SC.cols === k, onchange: () => { SC.cols = k; } }), ` ${t}`])),
+        el('span', { class: 'hint', text: '좌우 2단 학습지(가로로 두 쪽이 나란한 것 포함)를 왼쪽 단 → 오른쪽 단 순서로 읽습니다. 기울어진 스캔은 자동으로 바로잡습니다(CLOVA 결과 기준).' })]);
+      modeBox.appendChild(colsRow);
+      modeBox.appendChild(el('div', { class: 'ocr-cols-row' }, [el('b', { text: '읽을 단' }),
+        ...OCR_SIDES.map(([k, t, d]) => el('label', { class: 'inline', title: d }, [el('input', { type: 'radio', name: 'ocrSide', value: k, checked: SC.side === k, onchange: () => { SC.side = k; } }), ` ${t}`])),
+        el('span', { class: 'hint', text: '한쪽 단이 지문(읽기 자료)이면 그 단을 빼고 읽으세요. AI가 지문 내용을 학생이 한 활동처럼 쓰는 것을 막습니다. Qwen에도 고른 단만 잘라 보냅니다(하이브리드는 CLOVA를 먼저 읽고 경계를 찾은 뒤 보냄).' })]));
       const opts = el('div', {});
       const warn = el('div', { class: 'warn ocr-warn', style: 'margin-top:12px' });
       const startBtn = el('button', { type: 'button', class: 'primary', text: 'OCR 시작', disabled: noKey });
@@ -8149,9 +8159,70 @@
           if (!(await mutate('save_config', { ocr_ai_consent: true }))) return;
           ready.consent = true;
         }
-        runOcr(b, Math.max(1, +per.value || 1), SC.mode, { mask });
+        runOcr(b, Math.max(1, +per.value || 1), SC.mode, { mask, cols: SC.cols || 'auto', side: SC.side || 'both' });
       });
     })();
+  }
+  // 단 나누기(사용자 지정 2026-11-26): CLOVA 낱말 좌표로 2단을 찾아 왼쪽 단 → 오른쪽 단 순서로
+  const OCR_COLS = [
+    ['auto', '자동 (추천)', '단 사이 세로 여백이 있는 쪽만 2단으로 나눠 읽습니다. 단 하나인 쪽은 그대로 둡니다.'],
+    ['two', '2단으로 나누기', '모든 쪽을 가운데 여백 기준으로 왼쪽 단 → 오른쪽 단으로 읽습니다(여백이 흐릿해 자동으로 못 찾을 때).'],
+    ['off', '나누지 않음', 'CLOVA가 정한 줄 그대로 읽습니다(예전 방식).'],
+  ];
+  const colsLabel = (c) => (OCR_COLS.find((x) => x[0] === c) || OCR_COLS[0])[1].replace(' (추천)', '');
+  // 읽을 단(사용자 지정 2026-11-26): 한쪽이 지문(읽기 자료)이면 그 단을 빼고 읽는다 — AI가 지문을 학생 활동으로 쓰지 않게
+  const OCR_SIDES = [
+    ['both', '둘 다', '두 단을 모두 읽습니다.'],
+    ['right', '오른쪽 단만', '왼쪽 단(지문 등)을 빼고 오른쪽 단만 읽습니다. 두 단을 가로지르는 제목과 왼쪽 맨 위의 학번·이름 줄은 남깁니다.'],
+    ['left', '왼쪽 단만', '오른쪽 단을 빼고 왼쪽 단만 읽습니다. 두 단을 가로지르는 제목과 오른쪽 맨 위의 학번·이름 줄은 남깁니다.'],
+  ];
+  const sideLabel = (s) => (OCR_SIDES.find((x) => x[0] === s) || OCR_SIDES[0])[1];
+  // 원본 그림에 찾은 단 경계(빨간 점선)를 그려 넣는다(큰 보기에도 그대로). r: inbox_scan_compare 결과
+  function markLayout(img, r) {
+    const lay = r && r.layout;
+    if (!lay || lay.cols !== 2 || !lay.line || !r.w || img.dataset.marked) return;
+    const go = () => {
+      if (img.dataset.marked || !img.naturalWidth) return;
+      img.dataset.marked = '1';
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const g = c.getContext('2d');
+      g.drawImage(img, 0, 0);
+      const k = c.width / r.w;
+      const [ax, ay, bx, by] = lay.line;
+      if (lay.side && lay.side !== 'both' && lay.cut) { // 빼고 읽은 단은 회색으로 덮어 보여 줌
+        const [t0, t1] = lay.cut.map((v) => v * k), H = c.height;
+        g.fillStyle = 'rgba(100, 116, 139, 0.35)';
+        g.beginPath();
+        if (lay.side === 'right') { g.moveTo(0, 0); g.lineTo(t0, 0); g.lineTo(t1, H); g.lineTo(0, H); }
+        else { g.moveTo(t0, 0); g.lineTo(c.width, 0); g.lineTo(c.width, H); g.lineTo(t1, H); }
+        g.closePath(); g.fill();
+      }
+      g.strokeStyle = 'rgba(220, 38, 38, 0.85)'; g.lineWidth = Math.max(2, c.width / 350); g.setLineDash([14, 9]);
+      g.beginPath(); g.moveTo(ax * k, ay * k); g.lineTo(bx * k, by * k); g.stroke();
+      img.src = c.toDataURL('image/png');
+    };
+    if (img.complete && img.naturalWidth) go(); else img.addEventListener('load', go, { once: true });
+  }
+  function tiltNote(lay) {
+    if (!lay || !lay.warn) return '';
+    return el('div', { class: 'warn', style: 'margin:6px 0', text: `⚠ 이 쪽은 많이 기울어져 있습니다(약 ${Math.abs(Math.round(lay.measured))}°). 줄이 섞이거나 빠질 수 있으니 다시 스캔하기를 권합니다.` });
+  }
+  async function pickCols(b, cur, hasWords, curSide, aiCount) {
+    curSide = curSide || 'both';
+    const html = `<div class="ocr-sugg-note"><div class="ocr-sugg-title">단 나누기</div>${OCR_COLS.map(([k, t, d]) => `<label class="ocr-col-opt"><input type="radio" name="ocrColsPick" value="${k}" ${k === cur ? 'checked' : ''}> <b>${t}</b><div class="hint">${d}</div></label>`).join('')}`
+      + `<div class="ocr-sugg-title" style="margin-top:12px">읽을 단</div>${OCR_SIDES.map(([k, t, d]) => `<label class="ocr-col-opt"><input type="radio" name="ocrSidePick" value="${k}" ${k === curSide ? 'checked' : ''}> <b>${t}</b><div class="hint">${d}</div></label>`).join('')}`
+      + (aiCount ? `<p class="warn">읽을 단을 바꾸면 Qwen이 읽은 ${aiCount}쪽(그림 범위가 달라짐)과 그 쪽의 차이 고르기·제안·조합 글이 지워집니다. 바꾼 뒤 [남은 쪽 읽기]로 Qwen만 다시 읽어 주세요(쪽당 약 1~3원).</p>` : '')
+      + `<p class="hint">${hasWords ? 'CLOVA를 다시 부르지 않고 이미 받은 결과로 바로 다시 배치합니다. 줄이 바뀐 쪽은 차이마다 고른 것이 지워집니다(통째로 고른 것·직접 고친 글은 남음).' : '이 묶음은 예전 방식으로 읽어 낱말 위치가 없습니다. 바꾸려면 [OCR 다시 하기]로 다시 읽어야 합니다.'}</p></div>`;
+    if (!(await modal(html, true, true, '바꾸기'))) return;
+    const v = (document.querySelector('input[name="ocrColsPick"]:checked') || {}).value || cur;
+    const sd = (document.querySelector('input[name="ocrSidePick"]:checked') || {}).value || curSide;
+    if (v === cur && sd === curSide) return;
+    const res = await mutate('inbox_scan_set_cols', b.id, v, sd);
+    if (res) {
+      toast(`단 나누기 '${colsLabel(v)}', 읽을 단 '${sideLabel(sd)}'(으)로 바꿨습니다.${res.changed.length ? ` 줄이 바뀐 쪽 ${res.changed.length}개.` : ''}${res.ai_reset ? ` Qwen 결과 ${res.ai_reset}쪽을 지웠습니다 — [남은 쪽 읽기]로 다시 읽어 주세요.` : ''}`, 7000);
+      renderBatch();
+    }
   }
   // 하이브리드·Qwen OCR 상태 줄: 방식, Qwen 비용, 실패한 쪽 다시 읽기, OCR 다시 하기
   // Qwen이 못 읽은(또는 결과가 없는) 쪽: 실패 안내 + [이 쪽 다시 시도](그 쪽만 다시 보냄, 사용자 지정 2026-11-25)
@@ -8252,7 +8323,18 @@
       const msg = ((sc.clova || []).find((x) => x && x.fail) || {}).fail || '';
       bar.appendChild(el('span', { class: 'tag warn-tag', title: msg, text: `CLOVA가 읽지 못한 쪽 ${cFailed}개` }));
     }
-    if (failed || cFailed) bar.appendChild(el('button', { type: 'button', class: 'small', text: '실패한 쪽만 다시 읽기', title: '읽은 쪽은 다시 보내지 않습니다',
+    if (mode !== 'ai' && sc.clova) {
+      const lays = r.layouts || [];
+      const two = lays.filter((x) => x && x.cols === 2).length, tilt = lays.filter((x) => x && x.warn).length;
+      bar.appendChild(el('span', { class: 'tag', text: `단 나누기: ${colsLabel(r.cols)}${two ? ` (2단 ${two}쪽)` : ''}` }));
+      if (r.side && r.side !== 'both') bar.appendChild(el('span', { class: 'tag warn-tag', text: `읽을 단: ${sideLabel(r.side)} (빼는 단은 원본 보기에서 회색)` }));
+      if (tilt) bar.appendChild(el('span', { class: 'tag warn-tag', text: `많이 기울어진 쪽 ${tilt}개 — 다시 스캔 권장` }));
+      bar.appendChild(el('button', { type: 'button', class: 'small', text: '단 나누기 바꾸기', onclick: () => pickCols(b, r.cols || 'auto', r.has_words, r.side, aiPages.filter((x) => x).length) }));
+    }
+    // 읽을 단을 바꿔 Qwen 결과를 지웠거나 중간에 멈춘 쪽: Qwen이 아직 읽지 않은 쪽
+    const missing = mode !== 'clova' && aiPages.length ? aiPages.filter((x) => !x).length : 0;
+    if (missing) bar.appendChild(el('span', { class: 'tag warn-tag', text: `Qwen이 아직 읽지 않은 쪽 ${missing}개` }));
+    if (failed || cFailed || missing) bar.appendChild(el('button', { type: 'button', class: 'small', text: failed || cFailed ? '실패한 쪽만 다시 읽기' : '남은 쪽 읽기', title: '읽은 쪽은 다시 보내지 않습니다',
       onclick: () => runOcr(b, sc.per || 1, mode, { mask: (sc.ai && sc.ai.mask) || 0 }) }));
     if (mode === 'clova' && sc.clova) bar.appendChild(el('button', { type: 'button', class: 'small', text: 'Qwen으로도 읽어 비교하기', title: 'CLOVA는 다시 부르지 않고 Qwen만 읽습니다',
       onclick: async () => {
@@ -8359,7 +8441,8 @@
         };
         bodyEl.appendChild(el('div', { class: 'split2 ocr-review-split' }, [el('div', { class: 'ocr-review-left' }, [
           fold('final', 'ocr-final-box', '이 쪽 최종 글', finalSlot),
-          fold('orig', 'ocr-orig-box', '원본(이 PC 안에서만)', el('div', {}, [el('div', { class: 'muted ocr-fold-hint', text: '누르면 크게, 휠로 확대, 끌어서 이동' }), zoomBox(img)]))]), right]));
+          fold('orig', 'ocr-orig-box', '원본(이 PC 안에서만)', el('div', {}, [el('div', { class: 'muted ocr-fold-hint', text: '누르면 크게, 휠로 확대, 끌어서 이동' }), tiltNote(r.layout), zoomBox(img)]))]), right]));
+        markLayout(img, r);
         // 전체 페이지 수정: 이 쪽 전체에 한 번에 적용하는 버튼(맨 위, 검정 테두리 상자)
         if (r.cmp || r.ai_error || r.clova != null || r.ai != null) {
           const texts = r.cmp ? r.cmp.diffs.filter((d) => d.kind === 'text') : [];
@@ -8629,11 +8712,13 @@
               ...r.figures.map((f) => el('div', { class: 'snip', style: 'max-width:none', text: `[그림: ${f.desc}]` })),
               el('label', { class: 'inline', style: 'display:block;margin-top:4px' }, [el('input', { type: 'checkbox', checked: r.figs, onchange: async (e) => { const x = await mutate('inbox_scan_decide', bid, +p, { figs: e.target.checked }); if (x) draw(x); } }), ' 본문에 그림 설명 넣기'])]) : '', // append에 null을 넣으면 'null' 글자가 찍힘
             qwenNeedsRetry(r) ? qwenFailBox(bid, r, draw) : '',
+            tiltNote(r.layout),
+            r.layout && r.layout.cols === 2 ? el('div', { class: 'hint', text: r.layout.side && r.layout.side !== 'both' ? `${sideLabel(r.layout.side)} 읽었습니다(빨간 점선이 찾은 경계, 회색은 뺀 단).` : '2단으로 나눠 읽었습니다(그림의 빨간 점선이 찾은 단 경계). 왼쪽 단 → 오른쪽 단 순서입니다.' }) : '',
             el('div', { class: 'col-label', text: isSkip ? '뺀 쪽(창을 닫으면 목록에 반영, [확정하고 매칭으로] 때 저장)' : '이 쪽 글(학번·이름 줄은 다음 단계에서 빠짐)' }),
             textBox);
           markDismiss(box);
         };
-        call('inbox_scan_compare', bid, +p).then((r) => { if (r) draw(r); });
+        call('inbox_scan_compare', bid, +p).then((r) => { if (r) { draw(r); markLayout(img, r); } });
       }
     });
   }

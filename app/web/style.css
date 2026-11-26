@@ -2364,3 +2364,9 @@ textarea.ocr-final-edit { width: 100%; box-sizing: border-box; min-height: 260px
 .ocr-stat-btns { flex: 0 1 auto; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: center; max-width: 55%; }
 .ocr-stat-bar .ocr-note, .ocr-stat-bar button.small.ocr-note { box-sizing: border-box; display: inline-flex; align-items: center; height: 32px; min-height: 32px; margin: 0; padding: 0 12px; font-size: 13px; font-weight: 700; line-height: 1; border-radius: var(--radius-sm); white-space: nowrap; }
 .ocr-stat-bar .ocr-note.warn-tag { background: var(--warn-bg); border: 1px solid var(--warn-border); color: var(--text); }
+
+/* 단 나누기(읽는 방식 화면·바꾸기 창) */
+.ocr-cols-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.ocr-cols-row .hint { flex-basis: 100%; margin: 0; }
+.ocr-col-opt { display: block; margin: 8px 0; cursor: pointer; }
+.ocr-col-opt .hint { margin: 2px 0 0 22px; }

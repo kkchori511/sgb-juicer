@@ -3050,6 +3050,9 @@ class Api:
             if not self._busy.acquire(blocking=False):
                 raise db.DbError("다른 작업이 진행 중입니다.")
         try:
+            if opts.get("cols") or opts.get("side"):  # 단 나누기·읽을 단 — 읽기 전에 정해 두면 받는 대로 그 배치로
+                cur = b["meta"].get("scan") or {}
+                ib.scan_set_cols(bid, opts.get("cols") or cur.get("cols") or "auto", opts.get("side") or cur.get("side") or "both")
             sc = ib.scan_set_mode(bid, mode, per, mask if need_a else None, cfg["ocr_ai_model"] if need_a else None)
         except Exception:
             self._busy.release()
@@ -3084,6 +3087,16 @@ class Api:
             except Exception as e:
                 errs["clova"] = str(e)
 
+        def keep_of(i):
+            """읽을 단이 한쪽이면 Qwen에도 그 단만 잘라 보낸다(자를 위치는 CLOVA가 찾은 경계, 없으면 가운데)."""
+            from . import ocr_layout
+            sc_now = Inbox(db.open_year(year)).batch(bid)["meta"].get("scan") or {}
+            side = sc_now.get("side") or "both"
+            if side == "both":
+                return None
+            cl_now = sc_now.get("clova") or []
+            return (side, ocr_layout.cut_frac(cl_now[i] if i < len(cl_now) else None))
+
         def run_ai():
             from concurrent.futures import ThreadPoolExecutor
 
@@ -3097,7 +3110,7 @@ class Api:
                     store("ai", ai_page=(i, {"error": fatal["msg"], "sent": False}))
                     return
                 try:
-                    res = ocr_vision.read_page(key, model, ocr_vision.render_png(pdf, i, amask))
+                    res = ocr_vision.read_page(key, model, ocr_vision.render_png(pdf, i, amask, **({"keep": kp} if (kp := keep_of(i)) else {})))
                     res = {k: res[k] for k in ("lines", "figures", "cost", "provider", "model")}
                 except ocr_vision.VisionError as e:
                     if e.code in ("key", "balance", "provider"):
@@ -3123,10 +3136,16 @@ class Api:
                     ts.append(threading.Thread(target=run_clova, daemon=True))
                 if todo:
                     ts.append(threading.Thread(target=run_ai, daemon=True))
-                for t in ts:
-                    t.start()
-                for t in ts:
-                    t.join()
+                one_side = (sc.get("side") or "both") != "both"
+                if one_side and do_c and todo:  # 한쪽 단만: CLOVA로 경계를 찾은 뒤 Qwen(그 경계로 자름)
+                    for t in ts:
+                        t.start()
+                        t.join()
+                else:
+                    for t in ts:
+                        t.start()
+                    for t in ts:
+                        t.join()
                 sc2 = Inbox(db.open_year(year)).batch(bid)["meta"].get("scan") or {}
                 failed = sum(1 for x in ((sc2.get("ai") or {}).get("pages") or []) if x and x.get("error"))
                 c_failed = sum(1 for x in (sc2.get("clova") or []) if x and x.get("fail"))
@@ -3232,6 +3251,16 @@ class Api:
         return out
 
     @safe
+    def inbox_scan_set_cols(self, bid, cols, side=None):
+        """단 나누기·읽을 단 바꾸기: 이미 읽은 CLOVA 결과를 낱말 좌표로 다시 배치(CLOVA를 다시 부르지 않음).
+        읽을 단을 바꾸면 Qwen 결과는 지워져 [남은 쪽 읽기]로 다시 읽어야 한다."""
+        self._editable()
+        with self._ai_lock:
+            if self._busy.locked():
+                raise db.DbError("OCR이 진행 중입니다. 끝난 뒤 다시 해 주세요.")
+        return self._ib().scan_set_cols(bid, cols, side)
+
+    @safe
     def inbox_scan_retry_ai(self, bid, page):
         """[이 쪽 다시 시도]: Qwen이 못 읽은(또는 결과가 없는) 한 쪽만 Qwen에 다시 보낸다(사용자 지정 2026-11-25).
         처음 보낸 가림 비율·모델을 그대로 쓰고, 다른 쪽은 보내지 않는다. [바로 중지] 뒤에 온 답은 저장하지 않는다."""
@@ -3262,7 +3291,11 @@ class Api:
                 raise db.DbError("다른 작업(OCR 등)이 진행 중입니다. 끝난 뒤 다시 해 주세요.")
         try:
             year = config.load()["current_year"]
-            png = ocr_vision.render_png(str(scan.pdf_path(year, bid)), p, amask)
+            from . import ocr_layout
+            side = sc.get("side") or "both"
+            cl = sc.get("clova") or []
+            keep = None if side == "both" else (side, ocr_layout.cut_frac(cl[p] if p < len(cl) else None))
+            png = ocr_vision.render_png(str(scan.pdf_path(year, bid)), p, amask, **({"keep": keep} if keep else {}))
             try:
                 res = ocr_vision.read_page(key, model, png)
                 res = {k: res[k] for k in ("lines", "figures", "cost", "provider", "model")}

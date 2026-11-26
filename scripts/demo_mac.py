@@ -72,8 +72,8 @@ def _fake_ocr():
     real_render = ocr_vision.render_png
     which = {}
 
-    def render(pdf, page, mask=0.0, width=ocr_vision.RENDER_WIDTH):
-        png = real_render(pdf, page, mask, width)
+    def render(pdf, page, mask=0.0, width=ocr_vision.RENDER_WIDTH, keep=None):
+        png = real_render(pdf, page, mask, width, keep)
         which[png] = page
         return png
 
@@ -217,6 +217,19 @@ def _demo_scan(api, hr, year):
     ib.scan_store(b4, "ai", ai_page=(0, {"error": "OpenRouter가 응답하지 않습니다(HTTP 502). 잠시 뒤 다시 시도해 주세요.", "sent": True}))
     q = json.load(open(os.path.join(_FX, "qwen_p2.json"), encoding="utf-8"))["result"]
     ib.scan_store(b4, "ai", ai_page=(1, {"lines": q["lines"], "figures": q["figures"], "cost": 0.0015, "provider": "(시험용)", "model": "qwen/qwen3-vl-235b-a22b-instruct"}))
+    # 실제 2단 샘플(선택): SGB_DEMO_SAMPLES 폴더에 PDF와 그 CLOVA 원본 응답(clova_raw_<PDF 이름>.json)이 있으면 묶음으로 넣는다.
+    # 학생 자료가 든 샘플은 저장소에 넣지 않고, 이 PC의 폴더를 가리켜 데모에서만 본다(사용자 지정 2026-11-26).
+    sdir = os.environ.get("SGB_DEMO_SAMPLES")
+    if sdir and os.path.isdir(sdir):
+        for fn in sorted(os.listdir(sdir)):
+            raw = os.path.join(sdir, f"clova_raw_{fn}.json")
+            if not fn.lower().endswith(".pdf") or not os.path.exists(raw):
+                continue
+            imgs = [im for r in json.load(open(raw, encoding="utf-8")) for im in r["images"]]
+            bs = ok(api.inbox_create(f"2단 샘플: {fn}", hr, "career"), "Inbox")["id"]
+            ib.scan_set(bs, os.path.join(sdir, fn), fn)
+            ib.scan_set_mode(bs, "clova", 1)
+            ib.scan_store(bs, "clova", pages=[ocr.image_lines(im) for im in imgs])
     # 아직 읽지 않은 스캔 PDF 묶음: 파일 창 없이 '읽는 방식' 화면과 [OCR 시작](가짜 응답)을 볼 수 있게
     b2 = ok(api.inbox_create("스캔 PDF(읽기 전 예시)", hr, "career"), "Inbox")["id"]
     ib.scan_set(b2, os.path.join(_FX, "dummy.pdf"), "스캔_더미학습지_2쪽.pdf")
